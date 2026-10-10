@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# Reuse the audited Ultra CUDA/Node/Harness runtime. The release overlay and
+# all nine BenchLocal environments are installed together in one new layer.
+ARG BASE_IMAGE=vllm-sm75:v0.1.7-ultra-beta
+FROM ${BASE_IMAGE}
+ARG SOURCE_REVISION=source-archive
+ARG SOURCE_SHA256
+ARG RELEASE_VERSION=0.1.7-ultra-beta2
+RUN --mount=type=bind,source=.,target=/source,ro \
+    python3 /source/tools/install_ultra_release.py /source
+ENV SM75_BENCHLOCAL_RUNTIME=/opt/sm75-workbench/benchlocal-native \
+    SM75_EDITION=ultra SM75_SINGLE_CONTAINER=1 \
+    SM75_CONSOLE_HOST=0.0.0.0 SM75_CONSOLE_PORT=1615 \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility NCCL_P2P_LEVEL=SYS
+LABEL org.opencontainers.image.version="${RELEASE_VERSION}" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.opencontainers.image.source="https://github.com/fishensw/VLLM-SM75" \
+      org.opencontainers.image.title="VLLM-SM75 Ultra" \
+      io.sm75.benchlocal.unified="1" \
+      io.sm75.source-commit="${SOURCE_REVISION}" \
+      ai.vllm.sm75.modes="base,mtp,dflash2,dspark" \
+      io.sm75.source-sha256="${SOURCE_SHA256}"
+EXPOSE 1615 8000
+WORKDIR /opt/sm75-workbench
+ENTRYPOINT ["python3", "/opt/vllm-sm75/runtime-entrypoint.py"]
+CMD []
+
+LABEL io.sm75.console.sha256="" io.sm75.console.source-sha256="" io.sm75.ui-overlay-sha256=""

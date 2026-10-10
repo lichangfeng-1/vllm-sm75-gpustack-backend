@@ -1,0 +1,38 @@
+NOTICE —— vllm-sm75-gpustack-backend
+
+本仓是 SM75（Turing 老卡优化版 vLLM）对接 GPUStack 自定义后端的纯源码交付仓。
+推理侧能力全部来自上游项目，本仓只做适配与打包，不重新分发模型权重。
+
+一、上游归属
+
+  项目：VLLM-SM75 —— 面向 NVIDIA Turing / SM75（Tesla T4、T10 等）的 vLLM 适配
+  来源：https://github.com/fishensw/VLLM-SM75
+  标签：v0.1.7-beta2（上游自述为预发布版，prerelease = true）
+  许可：Apache License 2.0（全文见仓根 LICENSE，随上游树一并导入，未修改）
+  上游基座：vLLM 0.30.0，commit ced6857afa0ea7b2e3f0846a62e1394e90f15607，
+            CUDA 12.9 / PyTorch 2.13.0 / Node 22.23.2
+  上述字段取自上游树内 docs/releases/v0.1.7-beta2-release-manifest.json，
+  仓库地址与标签另见 docs/flash-next-tp8.md 与 docker/Dockerfile.ultra 的
+  org.opencontainers.image.source。上游作者与其第三方依赖的原始许可声明保留在
+  各文件头部，本仓不移除、不改写。
+
+二、导入方式与冻结基线
+
+  上游树按相对路径原样拷贝进本仓根，共 551 个文件（顶层 14 项，含上游自带的
+  .gitattributes、.gitignore、.dockerignore），拷贝即冻结：上游文件一个字节不改，
+  包括行尾与文件模式。
+
+  冻结面由 gpustack/gate-tree-unchanged-v1.sh 与 gpustack/SHA256SUMS-upstream.txt
+  （逐件 sha256 指纹表，供后续任务复用）守护。改动、删除或在上游作用域内新增任何
+  文件都会使护栏以退出码 7 报红并打印差集。
+
+  本地克隆与校验须关闭行尾转换：
+      git -c core.autocrlf=false clone <本仓>
+      bash gpustack/gate-tree-unchanged-v1.sh
+
+三、本仓改动清单
+
+  由任务 3-5 回填。
+
+  已确定的自研文件放置约定：本仓新增文件只放在仓根的新顶层路径或 gpustack/ 内，
+  不写入上游的 14 个顶层条目，以免与上游冻结面混淆。
