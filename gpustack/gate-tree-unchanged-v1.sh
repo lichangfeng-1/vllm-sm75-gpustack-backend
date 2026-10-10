@@ -10,21 +10,21 @@
 #   0  通过
 #   7  检测到漂移 —— 本护栏唯一的“红”码（内容篡改 / 文件缺失 / 上游作用域内新增，含行尾变化）
 #   2  用法错误
-#   4  基线表格式不合法（含末行缺换行导致行数与条目不符）
+#   4  基线表格式不合法（非法行 / 重复路径 / 末行缺换行导致行数与条目不符）
 #   5  基线表已存在且未加 --force（防止静默重定基线）
-#   6  作用域为空 / 文件不可读
+#   6  作用域为空 / 文件不可读 / 必要工具缺失
 #   10 基线表不存在
 #   19 上游作用域内存在编译产物（__pycache__ / *.pyc / *.pyo），须先清理
 #
-# 码位说明：除 7 以外，本脚本只用 2/4/5/6/10/19。全仓保留段 3、8、9、11-18、20-29
-# 分属其它护栏（见任务 9 的 gpustack/exit-code-map-v1.md），本脚本刻意不占用，
-# 以免 gate-all 把“基线表缺失”读成“探源失败”、把“编译产物脏”读成“补丁门红”。
+# 码位说明：除 7 以外，本脚本只用 2/4/5/6/10/19。其余码位的归属一律以
+# gpustack/exit-code-map-v1.md（任务 9）为权威，本注释不复制码表快照，
+# 因为滚动码表每加一个任务就会膨胀，枚举在这里必然腐化。
 #
 # 作用域定义：基线表里出现过的顶层条目（文件与目录）之并集。
 # 因此本仓自研的新顶层目录不会误红，但上游树内任何增删改都会红。
 # 自研文件请放仓根的新顶层路径（如 gpustack/、docs-gpustack/）；NOTICE 与 gpustack/ 不入基线。
 
-set -u
+set -uo pipefail
 export LC_ALL=C
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
@@ -50,6 +50,22 @@ for arg in "$@"; do
   esac
 done
 
+# 用法门：--force 单独使用会被静默降级成校验，使用者会以为基线表已被覆盖。
+if [ "$FORCE" -ne 0 ] && [ "$MODE" != record ]; then
+  echo "错误：--force 只在 --record 模式下有意义，请写成 --record --force。"
+  usage
+  exit 2
+fi
+
+# 工具哨兵：本脚本所有判据都来自这些工具的 stdout，而空串正是各道的“无问题”值。
+# 缺件时命令替换得到空串，会把“工具不可用”误报成“校验通过”，故一律先验可执行。
+for needed_tool in find awk sed sort sha256sum wc; do
+  if ! command -v "$needed_tool" >/dev/null 2>&1; then
+    echo "错误：缺少必要工具「$needed_tool」，拒绝校验。"
+    exit 6
+  fi
+done
+
 # 上游作用域内所有普通文件（相对路径，按字节序排序）。
 # 排除：.git（版本库元数据）、gpustack/ 与 NOTICE（本仓自研，任务 3-5 要回填，不能钉进上游基线）。
 list_scope_files() {
@@ -58,17 +74,19 @@ list_scope_files() {
 }
 
 if [ "$MODE" = record ]; then
+  # 拒覆盖门排在编译产物门之前：表已存在时无论树脏不脏都不该重录。
+  # 反过来的话，脏树会先报 19 并把人引向“清理完就能重录”，而下一步实被 5 拒。
+  if [ -f "$TABLE" ] && [ "$FORCE" -ne 1 ]; then
+    echo "错误：基线表已存在，拒绝覆盖（重录会抹掉上游改动证据）：$TABLE_REL"
+    echo "确实需要重录时加 --force，并在报告里写明理由。"
+    exit 5
+  fi
   junk=$(find . \( -path ./.git -o -path ./gpustack -o -path ./NOTICE \) -prune -o \
         \( -name __pycache__ -o -name '*.pyc' -o -name '*.pyo' \) -print | sed 's|^\./||')
   if [ -n "$junk" ]; then
     echo "错误：上游作用域内存在编译产物，先清理再生成基线表："
     printf '%s\n' "$junk" | sed 's|^|    |'
     exit 19
-  fi
-  if [ -f "$TABLE" ] && [ "$FORCE" -ne 1 ]; then
-    echo "错误：基线表已存在，拒绝覆盖（重录会抹掉上游改动证据）：$TABLE_REL"
-    echo "确实需要重录时加 --force，并在报告里写明理由。"
-    exit 5
   fi
   tmp="$TABLE.tmp.$$"
   trap 'rm -f "$tmp"' EXIT
@@ -127,8 +145,21 @@ if [ "$total" -le 0 ]; then
   echo "错误：基线表没有任何合法条目，无法校验。"
   exit 6
 fi
-# 末行缺换行符时 while read 会静默丢掉最后一条，这里用行数与已装载条目数对齐。
-tablelines=$(wc -l < "$TABLE" | tr -d '[:space:]')
+# 三点互检：唯一键数 ↔ 装载条目数 ↔ 表逻辑行数。
+# want 以路径为键，重复路径后写覆盖前写，唯一键数小于条目数即表内存在重复键。
+if [ "${#want[@]}" -ne "$total" ]; then
+  echo "错误：基线表存在重复路径，拒绝校验（一件上游文件只能有一条基线记录）。"
+  exit 4
+fi
+# 末行缺换行时 read 会静默丢掉最后一条。awk 的 NR 数逻辑行、含未终止的末行，
+# 与条目数失衡即可检出；wc -l 数的是换行符个数，与 read 同步少 1，等式恒成立。
+tablelines=$(awk 'END{print NR}' "$TABLE")
+case "$tablelines" in
+  ''|*[!0-9]*)
+    echo "错误：无法统计基线表行数（$TABLE_REL 不可读或 awk 异常）。"
+    exit 6
+    ;;
+esac
 if [ "$tablelines" -ne "$total" ]; then
   echo "错误：基线表行数 $tablelines 与已装载条目 $total 不符（疑末行缺换行符），拒绝校验。"
   exit 4
