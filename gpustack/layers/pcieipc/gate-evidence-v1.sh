@@ -11,6 +11,8 @@
 # 失败怎么办：
 #   - gate-check 红 → 仍写出 gate_pass=false 的证据，然后按 gate-check 自有红码退出（实测 2）。
 #   - 前置件缺失（安装期交接 env 不存在、ctx 清单缺失、探测到的树不存在）→ 退 2 并点名缺什么。
+#   - 仓上下文（自本脚本目录向上可找到 .git 或 gpustack/SHA256SUMS-upstream.txt）把 --out 指进仓内
+#     任何位置 → 退 2 且零写盘；找不到仓标记＝镜像形位，该守卫自动跳过，放行 /opt/vllm-sm75/evidence/。
 #   - 不得手工伪造证据文件绕过本步：任务 6 的指纹桥会再比一次镜像内实 sha。
 #
 # 用法：
@@ -115,15 +117,35 @@ INSTALL_CTX=$(read_env SM75_PCIEIPC_CTX)
 PY_VERSION=$(read_env SM75_PCIEIPC_PY_VERSION)
 export SM75_SITE_PACKAGES="$SP"
 
-# 证据文件要落盘，指向仓内就等于往交付面里塞测试垃圾（还会被上游护栏按新增报红）。
+# 落点守卫（修复轮 1：Critical-1＋Important-1）——证据文件要落盘，仓上下文里指向仓内就等于往交付面
+# 里塞测试垃圾（还会被上游护栏按新增报红）。判"是否仓上下文"用**仓标记锚定**而不是脚本相对锚点：
+# 从本脚本所在目录逐级向上找 .git 或 gpustack/SHA256SUMS-upstream.txt，找到即该层＝仓根（与
+# gpustack/testkit 夹具守卫同口径：封**整个仓根**，不是只封 gpustack/）。向上到 / 仍无标记＝
+# 镜像形位（本脚本住在 /opt/vllm-sm75/pcieipc 这类非仓布局），跳过守卫，放行镜像内的合法落点
+# /opt/vllm-sm75/evidence/。旧实现取"SCRIPT_DIR 上跳两级"做字符串比对，在镜像布局里把 /opt 当仓根，
+# Dockerfile 要求的证据落点必被判"仓内"→ 层 1 门 3/3 必然红、永不出绿（审查 Critical-1）。
 OUT_DIR_ABS=$(cd -- "$(dirname -- "$OUT_FILE")" 2>/dev/null && pwd)
 [ -n "$OUT_DIR_ABS" ] || bad_usage "证据输出目录不存在或不可进入：$(dirname -- "$OUT_FILE")"
 OUT_ABS="$OUT_DIR_ABS/$(basename -- "$OUT_FILE")"
-REPO_ROOT_G=$(cd -- "$SCRIPT_DIR/../.." && pwd)
-case "$OUT_ABS" in
-  "$REPO_ROOT_G"|"$REPO_ROOT_G"/*)
-    bad_usage "证据输出路径不得在仓内（$OUT_ABS 落在 $REPO_ROOT_G 之下），请指到沙箱或镜像路径。" ;;
-esac
+REPO_ROOT_G=""
+P_G=$SCRIPT_DIR
+while :; do
+  if [ -e "$P_G/.git" ] || [ -f "$P_G/gpustack/SHA256SUMS-upstream.txt" ]; then
+    REPO_ROOT_G=$P_G
+    break
+  fi
+  [ "$P_G" != "/" ] || break
+  P_G=${P_G%/*}
+  [ -n "$P_G" ] || P_G=/
+done
+if [ -n "$REPO_ROOT_G" ]; then
+  case "$OUT_ABS" in
+    "$REPO_ROOT_G"|"$REPO_ROOT_G"/*)
+      bad_usage "证据输出路径不得在仓内（$OUT_ABS 落在仓根 $REPO_ROOT_G 之下），请指到沙箱或镜像路径。" ;;
+  esac
+else
+  echo "NOTE: 未在任何上级目录找到仓标记（.git 或 gpustack/SHA256SUMS-upstream.txt），判定为镜像形位（非仓上下文），跳过仓内落点守卫：out=$OUT_ABS"
+fi
 [ -w "$OUT_DIR_ABS" ] || bad_usage "证据输出目录不可写：$OUT_DIR_ABS"
 
 echo "== 终态门禁 ＋ 证据（gate-evidence-v1）ctx=$CTX =="
