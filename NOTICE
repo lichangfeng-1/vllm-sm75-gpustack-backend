@@ -26,13 +26,62 @@ NOTICE —— vllm-sm75-gpustack-backend
   （逐件 sha256 指纹表，供后续任务复用）守护。改动、删除或在上游作用域内新增任何
   文件都会使护栏以退出码 7 报红并打印差集。
 
-  本地克隆与校验须关闭行尾转换：
-      git -c core.autocrlf=false clone <本仓>
-      bash gpustack/gate-tree-unchanged-v1.sh
+  本地克隆与校验须关闭行尾转换。下面三行可整行粘贴（尖括号占位形态粘进终端只会得到
+  语法错误，故改成先赋值再克隆；推送后的实际地址见 README 与任务 13 的推送包说明）：
+      REPO_URL="${REPO_URL:?先把本仓的克隆地址赋给它，再整段粘贴}"
+      git -c core.autocrlf=false clone "$REPO_URL"
+      cd vllm-sm75-gpustack-backend && bash gpustack/gate-tree-unchanged-v1.sh
 
 三、本仓改动清单
 
-  由任务 3-5 回填。
+  本节按层登记本仓相对上游的改动；每层落地即回填（任务 3-5 的接力义务）。上游树本身
+  保持零改动，下列改动全部落在自研作用域（gpustack/ 与仓根新文件）里。
+
+  改动 1（任务 2 · 国内源补丁与构建门）
+    新增：gpustack/mirror-patch-v1.patch、gpustack/build-gpustack-v1.sh、
+          gpustack/preflight-sources-v1.sh。
+    补丁只在构建暂存目录里的 docker/Dockerfile 副本上应用，仓内上游件一个字节不改
+    （由第二节护栏以退出码 7 守）。行号指未改动的上游 docker/Dockerfile：
+      a) :15 的 PyTorch cu129 索引参数化为 ARG PYTORCH_MIRROR，默认值
+         https://mirror.sjtu.edu.cn/pytorch-wheels/cu129；
+      b) :6-8 的 flashinfer 安装拆成两条：flashinfer-python==0.6.18 由国内 pypi 镜像解析，
+         flashinfer-cubin==0.6.18 改走本仓托管 wheel 直链（PLACEHOLDER://release/… 形态）；
+      c) :226-227 的 nvidia-pstated 二进制直链改走本仓托管直链（同一 PLACEHOLDER 口径）；
+      d) 在 :5 之后新增 ARG PIP_MIRROR 与 ENV UV_DEFAULT_INDEX，把构建期 pypi 索引整体
+         切到 https://pypi.tuna.tsinghua.edu.cn/simple。
+    b) 与 c) 只换下载地址，不换产物：版本与 sha256 仍按上游 Dockerfile 钉住，实际托管
+    地址与校验值由任务 13 的推送包登记，并由 gpustack/preflight-sources-v1.sh 探活。
+
+  改动 2（任务 3 · 镜像层 1 pcieipc＝八卡 PCIe 直连通信提速）
+    新增：gpustack/Dockerfile.v1（起头＋层 1 段；层 2/3 由任务 4/5 在本文件续写）、
+          gpustack/layers/pcieipc/（13 件物料＋lint-count-v1.sh＋gate-evidence-v1.sh）、
+          gpustack/testkit/fixture-flashinfer-mini-v1.sh（测试脚手架，不进镜像）。
+    内容：把 FlashInfer 0.7.0.post1 的 PCIe-IPC allreduce 回填进镜像内的 FlashInfer 0.6.18。
+      归属：FlashInfer 项目（https://github.com/flashinfer-ai/flashinfer），Apache License 2.0。
+      来源件：flashinfer_python-0.7.0.post1-py3-none-any.whl，
+             sha256=c7adf826568d61fc1b7d3aadd4cae387a35a138bfc08e2deca2f34ecfa280716。
+      逐字节搬入 6 件（gpustack/layers/pcieipc/newfiles/…，件件带 FlashInfer 的 Apache-2.0
+      文件头，未移除未改写；与 gpustack/layers/pcieipc/manifest.txt 的 sha256 逐件对齐，
+      装机前与装机后各对拍一次）：
+        flashinfer/comm/pcie_ipc_ar.py、pcie_ipc_policy.py、pcie_ipc_topology.py、
+        pcie_ipc_tuning.py、flashinfer/data/csrc/pcie_ipc_all_reduce.cu、
+        flashinfer/data/include/flashinfer/comm/pcie_ipc_all_reduce.cuh
+      追加型搬入 3 处（gpustack/layers/pcieipc/append/*.txt 为 0.7.0.post1 对应模块的原文
+      节选，本身不带文件头，出处由 manifest.txt 与本节登记；构建期追加到 0.6.18 目标模块尾部）：
+        jit/comm.py ← gen_pcie_ipc_comm_module、
+        trace/templates/comm.py ← pcie_ipc_all_reduce_trace、
+        comm/__init__.py ← PCIe-IPC 符号再导出
+      装机与门禁脚本 install-pcieipc.sh、gate-check-v3.py 源自本交付线的前一版部署包
+      （自有件，不属上游 vLLM/SM75 树）；install-pcieipc.sh 的改动仅其头注列出的三处
+      适配（site-packages 构建期探测、--defer-import-gate 开关与证据交接、路径分隔符归一），
+      幂等门与全部断言原样保留。
+      作用域：只写容器内 site-packages 的 flashinfer 包，vllm 树与上游 14 个顶层项零改动。
+      镜像内证据：/opt/vllm-sm75/evidence/pcieipc-gate.json（层 1 第三道 RUN 门产出；
+      件数门红 17、运行期 import 门禁红 11a、终态门禁红＝gate-check 自有码 2，门红即构建失败，
+      由 gpustack/build-gpustack-v1.sh --build 统一收进 20）。
+      无 GPU 构建机上如需延后运行期 import 门禁，必须成对传
+      --build-arg PCIEIPC_DEFER=1 --build-arg PCIEIPC_IMPORT_GATE_LABEL=deferred，
+      层 1 有 RUN 门核对两者不成对即构建失败，镜像 LABEL 上留得下证据。
 
   已确定的自研文件放置约定：本仓新增文件只放在仓根的新顶层路径或 gpustack/ 内，
   不写入上游的 14 个顶层条目，以免与上游冻结面混淆。

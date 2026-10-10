@@ -1,0 +1,82 @@
+# syntax=docker/dockerfile:1.7
+#
+# Dockerfile.v1 —— GPUStack 交付线的镜像层序列（自研层，不动上游 docker/Dockerfile）
+#
+# 层序与分工（任务 3 写"起头＋层 1"，任务 4/5 在本文件续写层 2/3）：
+#   stage0 ＝ docker/Dockerfile 经 gpustack/mirror-patch-v1.patch 后 --target final 的产物，
+#             tag ＝ vllm-sm75:v<docker/VERSION>（当前 vllm-sm75:v0.1.7-beta2），
+#             由 gpustack/build-gpustack-v1.sh --build 产出；
+#   层 1    ＝ pcieipc（本节）：FlashInfer 0.7.0.post1 的 PCIe-IPC allreduce 回填进镜像内 0.6.18；
+#   层 2    ＝ incple（任务 4 续写，FROM 层 1）；
+#   层 3    ＝ 时区（任务 5 续写，FROM 层 2）。
+#
+# 构建形态（阶段二任务 14 执行；本阶段只做静态与本地夹具验证）：
+#   docker build --file gpustack/Dockerfile.v1 --target pcieipc-layer \
+#                --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 <仓根>
+#   延后运行期 import 门禁（构建机无 GPU 且基座里 import flashinfer.comm 不可用时）：
+#   ... --build-arg PCIEIPC_DEFER=1 --build-arg PCIEIPC_IMPORT_GATE_LABEL=deferred
+#
+# 门红即构建失败：本文件每个 RUN 都是门禁，任一非零 docker 直接失败；
+#   gpustack/build-gpustack-v1.sh --build 把 docker 的非零码统一收进 20＝构建失败，
+#   层内脚本自己的码（17 件数门、11a import 门禁、2 定位/前置、gate-check 自有 2）在构建日志里逐条可见。
+#
+# 上游红线：本文件与 gpustack/layers/ 全在自研作用域，上游 docker/Dockerfile 及 14 个顶层项零改动
+#   （完工跑 bash gpustack/gate-tree-unchanged-v1.sh 须 rc=0）。
+
+ARG BASE_TAG=vllm-sm75:v0.1.7-beta2
+
+# ===================== 层 1：pcieipc（八卡 PCIe 直连通信提速） =====================
+FROM ${BASE_TAG} AS pcieipc-layer
+
+ARG BASE_TAG
+ARG PCIEIPC_DEFER=0
+ARG PCIEIPC_IMPORT_GATE_LABEL=hard
+ARG PCIEIPC_SOURCE_WHEEL=flashinfer_python-0.7.0.post1-py3-none-any.whl
+ARG PCIEIPC_SOURCE_WHEEL_SHA256=c7adf826568d61fc1b7d3aadd4cae387a35a138bfc08e2deca2f34ecfa280716
+
+# LABEL 证据行：defer 与否必须能在成品镜像上被读出来，不允许"跳了门禁而镜像里看不出来"。
+LABEL sm75.gpustack.layer="1-pcieipc" \
+      sm75.gpustack.component="flashinfer-pcie-ipc-backport" \
+      sm75.gpustack.base="${BASE_TAG}" \
+      sm75.gpustack.pcieipc-import-gate="${PCIEIPC_IMPORT_GATE_LABEL}" \
+      sm75.gpustack.pcieipc-defer-arg="${PCIEIPC_DEFER}" \
+      sm75.gpustack.source_wheel="${PCIEIPC_SOURCE_WHEEL}" \
+      sm75.gpustack.source_wheel_sha256="${PCIEIPC_SOURCE_WHEEL_SHA256}" \
+      sm75.gpustack.files_added="6" \
+      sm75.gpustack.files_appended="3" \
+      sm75.gpustack.scope="flashinfer only; vllm tree untouched" \
+      sm75.gpustack.upstream="FlashInfer (Apache-2.0) — 层 1 六件逐字来自 0.7.0.post1，见仓根 NOTICE"
+
+# PCIEIPC_DEFER 与 LABEL 必须成对：0:hard（硬跑）或 1:deferred（显式延后）。
+# 只传一半（例如 defer=1 但 LABEL 仍是 hard）直接构建失败，不给"静默放宽"留路径。
+RUN set -eu; \
+    case "${PCIEIPC_DEFER}:${PCIEIPC_IMPORT_GATE_LABEL}" in \
+      0:hard)     echo "门禁形态：运行期 import 门禁硬开（LABEL=hard）" ;; \
+      1:deferred) echo "门禁形态：运行期 import 门禁显式延后（LABEL=deferred），任务 14 在带 GPU 的容器里补跑同一句 hasattr 判据" ;; \
+      *)          echo "红：PCIEIPC_DEFER=${PCIEIPC_DEFER} 与 LABEL=${PCIEIPC_IMPORT_GATE_LABEL} 不成对；只允许 0:hard 或 1:deferred。"; exit 1 ;; \
+    esac
+
+COPY gpustack/layers/pcieipc /opt/vllm-sm75/pcieipc
+
+# 门 1/3 件数门（红 17）：物料形状先于任何写盘动作。
+RUN bash /opt/vllm-sm75/pcieipc/lint-count-v1.sh --ctx /opt/vllm-sm75/pcieipc
+
+# 门 2/3 装机（幂等门在最前；pre 门禁 → 落六件 → 三处追加 → py_compile → post 门禁 → import 门禁 11a）
+RUN set -eu; \
+    if [ "${PCIEIPC_DEFER}" = "1" ]; then \
+      sh /opt/vllm-sm75/pcieipc/install-pcieipc.sh /opt/vllm-sm75/pcieipc --defer-import-gate; \
+    else \
+      sh /opt/vllm-sm75/pcieipc/install-pcieipc.sh /opt/vllm-sm75/pcieipc; \
+    fi
+
+# 门 3/3 终态门禁＋镜像内证据：gate-check-v3 post 红则本 RUN 红（该脚本自有红码 2）。
+# 证据落在 /opt/vllm-sm75/evidence/pcieipc-gate.json，任务 6 的指纹桥与任务 14 的验收直接读它。
+RUN set -eu; \
+    bash /opt/vllm-sm75/pcieipc/gate-evidence-v1.sh \
+      --ctx /opt/vllm-sm75/pcieipc \
+      --out /opt/vllm-sm75/evidence/pcieipc-gate.json; \
+    echo "== 证据文件内容（构建日志留一份可读副本）=="; \
+    cat /opt/vllm-sm75/evidence/pcieipc-gate.json
+
+# 层 1 的物料与脚本保留在镜像内（/opt/vllm-sm75/pcieipc），供验收就地重跑 gate-check；
+# 站点目录里的终态文件才是运行期真正生效的产物，两者由证据 JSON 逐件钉住。
