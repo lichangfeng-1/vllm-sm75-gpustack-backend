@@ -15,17 +15,20 @@
 #
 # 门顺序（简报逐步，不可换）：
 #   1 复制仓内 docker/Dockerfile 到暂存目录
-#   2 patch --dry-run 预检（红 → 8）
-#   3 实应用（红 → 8）
+#   2 patch --dry-run 预检（hunk 不匹配 rc=1 → 8；patch 工具级错误 rc>=2 → 2）
+#   3 实应用（同上分流）
 #   4 特征计数门（少或多 → 8）
 #   5 对仓内原 docker/Dockerfile 跑任务 1 的上游护栏（漂移红 7 → 本脚本 9）
 #
 # 退出码（本脚本）：
-#   0 通过
-#   2 用法错误 / 前置输入不可用（补丁缺失、含 CR、表头不符、缺工具、暂存副本不存在、
-#     上游护栏因非漂移原因红）
-#   8 补丁不匹配（dry-run 失败 或 特征计数不符）
-#   9 上游文件被改（gate-tree-unchanged-v1.sh 报漂移，其自身红码 7 在此映射为 9）
+#   0  通过
+#   2  用法错误 / 前置输入不可用（补丁缺失、含 CR、表头不符、缺工具、暂存副本不存在、
+#      patch 工具级错误即返回码 >=2、上游护栏因非漂移原因红）
+#   8  补丁不匹配（patch --dry-run 返回 1＝hunk 不匹配，或特征计数不符）
+#   9  上游文件被改（gate-tree-unchanged-v1.sh 报漂移，其自身红码 7 在此映射为 9）
+#   20 构建失败（--build 段 docker build 非零）。原始 rc 写进文案，本脚本一律退 20：
+#      透传会把 docker 的 1/2/7/8/9/125 读成"用法/上游/补丁"这些保留语义。
+#      码位 20 已登记进交接约束第 4 条滚动表（任务 9 的映射表须按 21 起算套件子门）。
 
 set -uo pipefail
 export LC_ALL=C
@@ -42,11 +45,30 @@ usage() {
   awk 'NR>1{ if (/^#/) { sub(/^# ?/,""); print; next } exit }' "$0"
 }
 
+# 前置守卫类失败一律走用法码 2；补丁类红（8）、上游类红（9）、构建失败（20）在各门里
+# 显式退出，不靠这里的默认值，避免"哪道门红的"被默认码抹平。
+fail() { printf '%s\n' "$@" >&2; exit 2; }
+
+# realpath 与 awk 在参数解析阶段就要用（--patch-file 的绝对化、usage 的输出），
+# 缺件时命令替换得到空串、空串在下游正是"无问题"值，故哨兵排在 while 之前；
+# 其余外部命令的哨兵见下方"前置守卫"清单。
+for early_tool in realpath awk; do
+  command -v "$early_tool" >/dev/null 2>&1 || \
+    fail "错误：缺少必要工具「$early_tool」，拒绝执行补丁门。"
+done
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --patch-file)
       [ $# -ge 2 ] || { echo "错误：--patch-file 缺少参数值。" >&2; usage >&2; exit 2; }
-      PATCH_FILE=$2; shift 2 ;;
+      # 一律先解析成绝对形（与暂存目录同法）：门 2/3 用 patch -d "$STAGE_ABS" 跑，
+      # 而 -i 按调用者 cwd 解析相对路径——同一个"找不到补丁"会在两道门上被读成
+      # "补丁内容与上游不匹配"（假归因），路径在此统一到绝对形即可消除。
+      patch_abs=$(realpath -m -- "$2") || \
+        { echo "错误：--patch-file 路径解析失败：$2" >&2; usage >&2; exit 2; }
+      [ -n "$patch_abs" ] || \
+        { echo "错误：--patch-file 路径解析得到空串：$2" >&2; usage >&2; exit 2; }
+      PATCH_FILE=$patch_abs; shift 2 ;;
     --stage-dir)
       [ $# -ge 2 ] || { echo "错误：--stage-dir 缺少参数值。" >&2; usage >&2; exit 2; }
       STAGE_DIR=$2; shift 2 ;;
@@ -56,10 +78,6 @@ while [ $# -gt 0 ]; do
     *) echo "错误：未识别的参数「$1」。" >&2; usage >&2; exit 2 ;;
   esac
 done
-
-# 前置守卫类失败一律走用法码 2；补丁类红（8）与上游类红（9）在各门里显式退出，
-# 不靠这里的默认值，避免"哪道门红的"被默认码抹平。
-fail() { printf '%s\n' "$@" >&2; exit 2; }
 
 # grep -c 无匹配时打印 0 且 rc=1（正常），rc>=2 才是真错误；错误与"零匹配"必须分开处理，
 # 否则工具报错会被读成"特征缺失"，把环境问题误判成补丁问题。空串即"取不到"，调用方判死。
@@ -137,7 +155,14 @@ dry_out=$(patch -p1 -f --dry-run -i "$PATCH_FILE" -d "$STAGE_ABS" 2>&1)
 dry_rc=$?
 if [ "$dry_rc" -ne 0 ]; then
   printf '%s\n' "$dry_out" | sed 's|^|    |' >&2
-  # 归因分两路：先看副本里是否已有补丁特征，有＝重复应用；没有＝上下文与副本不匹配。
+  # 按 patch 的返回码分流，不合并：GNU patch 用 1 表示"hunk 不匹配"（补丁/副本内容问题），
+  # 用 >=2 表示工具级错误（补丁或目标打不开、权限、补丁格式坏）。合并成 8 会把环境问题
+  # 谎报成"补丁与上游不匹配"——本脚本对 grep 的 rc 已是同一原则（见 feat_count），门 2 不能例外。
+  if [ "$dry_rc" -ge 2 ]; then
+    printf '红：patch 工具级错误（rc=%s，>=2），属前置输入问题，按用法码 2 退出；上方为 patch 原文，未做补丁内容判定。\n' "$dry_rc" >&2
+    exit 2
+  fi
+  # rc==1：内容不匹配。归因再分两路：先看副本里是否已有补丁特征，有＝重复应用；没有＝上下文与副本不匹配。
   # 不分支就断言"已打过补丁"会把补丁/上游版本漂移误报成用户操作问题。
   already=$(feat_count 'PYTORCH_MIRROR' "$STAGED")
   echo "诊断：" >&2
@@ -148,7 +173,7 @@ if [ "$dry_rc" -ne 0 ]; then
     echo "    暂存副本不含补丁特征，说明是上下文不匹配：仓内 docker/Dockerfile 与本补丁" >&2
     echo "    制作时的上游版本不一致（补丁基于 v0.1.7-beta2）。" >&2
   fi
-  printf '红：patch --dry-run 预检失败（rc=%s），退出码 8。\n' "$dry_rc" >&2
+  printf '红：patch --dry-run 预检失败（rc=%s＝hunk 不匹配），退出码 8。\n' "$dry_rc" >&2
   exit 8
 fi
 echo "门 2/5 dry-run 预检：绿"
@@ -158,7 +183,13 @@ apply_out=$(patch -p1 -f -i "$PATCH_FILE" -d "$STAGE_ABS" 2>&1)
 apply_rc=$?
 if [ "$apply_rc" -ne 0 ]; then
   printf '%s\n' "$apply_out" | sed 's|^|    |' >&2
-  printf '红：dry-run 通过但实应用失败（rc=%s），补丁或副本状态可疑，退出码 8。\n' "$apply_rc" >&2
+  # 门 2 已按 rc 分流并通过，这里再出现 >=2 说明是应用阶段新发生的环境问题
+  # （副本被别的进程改动/移走、权限），与"补丁内容不匹配"不同类，按同一原则分道。
+  if [ "$apply_rc" -ge 2 ]; then
+    printf '红：patch 实应用出现工具级错误（rc=%s，>=2），属前置输入问题，按用法码 2 退出；上方为 patch 原文。\n' "$apply_rc" >&2
+    exit 2
+  fi
+  printf '红：dry-run 通过但实应用失败（rc=%s＝hunk 不匹配），补丁或副本状态可疑，退出码 8。\n' "$apply_rc" >&2
   exit 8
 fi
 [ -f "$STAGED" ] || {
@@ -232,13 +263,32 @@ echo "== 补丁门全绿，产物：$STAGED =="
 
 # ---------- 构建调用段（本任务不执行，--build 才执行）----------
 # 事实登记：docker/build.sh 无 Dockerfile 路径口子（docker/build.sh:44 硬编码 file=Dockerfile），
-# 它只会读仓内未打补丁的 docker/Dockerfile。所以本段直接用 docker build --file 消费暂存副本，
-# 并按 build.sh 的 standard:full 形态等价组装：EDITION/BUILD_MODE 显式给出（供直调 build.sh 的
-# 场合复用）、SOURCE_REVISION 钉成 upstream-v0.1.7-beta2、BASE_IMAGE 原样透传、
-# tag 取 vllm-sm75:v<docker/VERSION>（与 build.sh 同一算法），IMAGE 可覆盖。
-# 简报要求的 EDITION=standard BUILD_MODE=full 作为前置 env 一并给出：它们的作用就是选中
-# docker/Dockerfile 走 standard 全量构建，本段用 --file 指向打过补丁的暂存副本达到同一效果。
+# 直调它只会构建仓内未打补丁的原件（静默失败）。所以本段用 docker build --file 消费门 3 的暂存副本，
+# 其余逐项对齐 build.sh 的 standard:full 组装——即 EDITION=standard 且 BUILD_MODE=full 时
+# build.sh 实际走的那条路径（:44-58）；:7-10 的 unraid 阻断门与 :23-42 的 ultra 分支本段不适用。
+# 逐行对应关系（行号指仓内上游件 docker/build.sh，HEAD c79894c 版本）：
+#   :44  file=Dockerfile                       → --file 指向暂存副本（本段唯一实质差异，见上）
+#   :45  default_image="vllm-sm75:v${VERSION}"  → target_tag 同一算法；:58 的 IMAGE 覆盖口一致
+#   :50  --target final                        → 同
+#   :21  BASE_IMAGE 默认值（tag＋@sha256 摘要双钉）→ BASE_IMAGE_DEFAULT 逐字同值，env BASE_IMAGE 可覆盖
+#   :51  --build-arg BASE_IMAGE="$BASE_IMAGE"   → 恒传（改前只在 env 非空时传，靠 docker/Dockerfile:3 的 ARG 同值兜底）
+#   :52  --build-arg MAX_JOBS="${MAX_JOBS:-1}"  → 同
+#   :53  --build-arg INSTALL_LMCACHE="${…:-0}"  → 同
+#   :54  --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" → 同
+#   :55  --build-arg SOURCE_REVISION            → 默认值按简报钉成 upstream-v0.1.7-beta2
+#        （:22 的默认是 git rev-parse HEAD，会随提交漂移；本线要固定可追溯串，这是有意差异）
+#   :56  --build-arg BASE_IMAGE_ID="$BASE_IMAGE" → 恒传，值同 :51
+#   :57  --build-arg VLLM_SM75_RELEASE="vllm-sm75-v${VERSION}" → 同
+#   :58  --tag "${IMAGE:-$default_image}" "$ROOT" → 同，构建上下文＝$REPO_ROOT
+# 本段额外项（补丁新引入的两个 ARG，build.sh 无对应行）：PIP_MIRROR／PYTORCH_MIRROR——
+#   env 给出才传 --build-arg，不给就沿用 Dockerfile 内 ARG 的国内默认值，换源地址不必重打补丁。
+# 提醒：同一 digest 在 docker/build.sh:21 与 docker/Dockerfile:3 各写死一份，本段以 :21 为准恒传并
+#   覆盖 Dockerfile 的 ARG；两处若不一致，生效的是本段传的值（任务 14 的 G-3 一并核 digest）。
+# 简报要求的 EDITION=standard BUILD_MODE=full 作为前置 env 一并给出：它们是 build.sh 的入口开关
+# （:16-19 校验、:44-48 据此选 file），docker 本身不消费；保留只为"同一份 env 可直接喂 build.sh"
+# 的场合复用，本段用 --file 指向打过补丁的暂存副本已达到同一效果。
 VERSION_FILE="$REPO_ROOT/docker/VERSION"
+BASE_IMAGE_DEFAULT='vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688'
 if [ "$DO_BUILD" -eq 1 ]; then
   command -v docker >/dev/null 2>&1 || fail "错误：--build 需要 docker，但当前 PATH 上没有。"
   [ -f "$VERSION_FILE" ] || fail "错误：docker/VERSION 不存在，无法生成 tag。"
@@ -246,15 +296,15 @@ if [ "$DO_BUILD" -eq 1 ]; then
   [ -n "$VERSION" ] || fail "错误：docker/VERSION 为空，无法生成 tag。"
 
   SRC_REV="${SOURCE_REVISION:-upstream-v0.1.7-beta2}"
+  base_image="${BASE_IMAGE:-$BASE_IMAGE_DEFAULT}"
   build_args=( --file "$STAGED" --target final
+               --build-arg BASE_IMAGE="$base_image"
+               --build-arg BASE_IMAGE_ID="$base_image"
                --build-arg MAX_JOBS="${MAX_JOBS:-1}"
                --build-arg INSTALL_LMCACHE="${INSTALL_LMCACHE:-0}"
                --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
                --build-arg SOURCE_REVISION="$SRC_REV"
                --build-arg VLLM_SM75_RELEASE="vllm-sm75-v${VERSION}" )
-  if [ -n "${BASE_IMAGE:-}" ]; then
-    build_args+=( --build-arg BASE_IMAGE="$BASE_IMAGE" --build-arg BASE_IMAGE_ID="$BASE_IMAGE" )
-  fi
   if [ -n "${PIP_MIRROR:-}" ]; then
     build_args+=( --build-arg PIP_MIRROR="$PIP_MIRROR" )
   fi
@@ -263,15 +313,18 @@ if [ "$DO_BUILD" -eq 1 ]; then
   fi
   target_tag="${IMAGE:-vllm-sm75:v${VERSION}}"
   build_cmd=( docker build "${build_args[@]}" --tag "$target_tag" "$REPO_ROOT" )
-  echo "== 构建调用段（EDITION=standard BUILD_MODE=full）=="
-  printf '将执行（前置 env：EDITION=standard BUILD_MODE=full）：'
+  echo "== 构建调用段（EDITION=standard BUILD_MODE=full，逐项对齐 docker/build.sh:44-58）=="
+  printf '将执行（前置 env：EDITION=standard BUILD_MODE=full，docker 不消费，仅形态登记）：'
   printf ' %q' "${build_cmd[@]}"
   printf '\n'
   EDITION=standard BUILD_MODE=full "${build_cmd[@]}"
   build_rc=$?
   if [ "$build_rc" -ne 0 ]; then
-    echo "红：docker build 失败（rc=$build_rc），本脚本以同一码退出，不报构建完成。" >&2
-    exit "$build_rc"
+    # 不透传 docker 的码：docker 失败最常见是 1，也可能是 2/7/8/9/125，而 2/7/8/9 在本线各有
+    # 保留语义（用法／上游树漂移／补丁不匹配／上游被改），透传会把构建失败读成别的原因。
+    # 原始 rc 留在文案里供定位；码位 20＝构建失败，已登记进交接约束第 4 条滚动表。
+    echo "红：docker build 失败（原始 rc=$build_rc），本脚本按约定退 20＝构建失败，不报构建完成。" >&2
+    exit 20
   fi
   echo "构建完成：$target_tag"
 else
