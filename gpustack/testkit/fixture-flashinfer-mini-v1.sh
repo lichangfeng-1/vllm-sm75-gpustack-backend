@@ -48,11 +48,18 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 # realpath -m 会保留输入里的盘符形态（K:/… 与 /k/… 两种写法互不相等），
 # 所以两侧都再过一道 cygpath -u（Linux 上没有这个工具，即恒等）。
+# 修复轮 2 补一处：Windows 文件系统大小写不敏感，/TMP 与 /tmp、短名与长名是同一目录的两种写法，
+# cygpath 只归盘符不归大小写 → 有 cygpath 时统一折叠为小写；Linux 大小写敏感，绝不折叠。
+# 与 gpustack/layers/pcieipc/gate-evidence-v1.sh 的 canon() 同形同口径（复审 new-Minor-3 的处置）。
 canon() {
   local p=$1 c=""
   if command -v cygpath >/dev/null 2>&1; then
-    c=$(cygpath -u -- "$p" 2>/dev/null)
-    [ -n "$c" ] && p=$c
+    # 同 gate-evidence 的 canon()：cygpath 必须在 UTF-8 locale 下跑（LC_ALL=C 会把非 ASCII 路径按
+    # ANSI 码页折成乱码），且只在结果可用时采纳；折叠用 tr 逐字节只动 ASCII（${p,,} 会折坏 UTF-8）。
+    c=$(LC_ALL=C.UTF-8 cygpath -u -- "$p" 2>/dev/null) \
+      || c=$(LC_ALL=en_US.UTF-8 cygpath -u -- "$p" 2>/dev/null)
+    if [ -n "$c" ] && { [ ! -e "$p" ] || [ -e "$c" ]; }; then p=$c; fi
+    p=$(printf '%s' "$p" | tr 'A-Z' 'a-z')
   fi
   printf '%s' "${p%/}"
 }

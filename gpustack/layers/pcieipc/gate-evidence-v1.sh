@@ -11,8 +11,11 @@
 # 失败怎么办：
 #   - gate-check 红 → 仍写出 gate_pass=false 的证据，然后按 gate-check 自有红码退出（实测 2）。
 #   - 前置件缺失（安装期交接 env 不存在、ctx 清单缺失、探测到的树不存在）→ 退 2 并点名缺什么。
-#   - 仓上下文（自本脚本目录向上可找到 .git 或 gpustack/SHA256SUMS-upstream.txt）把 --out 指进仓内
-#     任何位置 → 退 2 且零写盘；找不到仓标记＝镜像形位，该守卫自动跳过，放行 /opt/vllm-sm75/evidence/。
+#   - 落点守卫（修复轮 2，双向判定）：对**脚本目录**与**证据落点目录**分别做仓标记向上遍历
+#     （.git 或 gpustack/SHA256SUMS-upstream.txt），路径先经 Windows 大小写/盘符归一再比对；
+#     任一侧判定为仓上下文且落点落在仓根之下 → 退 2 且零写盘（锚点取两处判定中最外层的仓根）。
+#     两侧向上遍历都找不到标记＝镜像形位，该守卫自动跳过（NOTE），放行 /opt/vllm-sm75/evidence/。
+#     守卫判定结果（mode/两侧锚点/落点/是否跳过）写进证据 JSON 的 guard 字段，事后可审计。
 #   - 不得手工伪造证据文件绕过本步：任务 6 的指纹桥会再比一次镜像内实 sha。
 #
 # 用法：
@@ -76,7 +79,7 @@ done
 [ -n "$OUT_FILE" ] || bad_usage "证据输出路径为空串。"
 [ -n "$PYBIN" ] || bad_usage "解释器名为空串。"
 command -v "$PYBIN" >/dev/null 2>&1 || bad_usage "找不到解释器「$PYBIN」（可用 --python 或 SM75_PY 指定）"
-for needed_tool in awk grep sed mktemp rm wc mkdir; do
+for needed_tool in awk grep sed mktemp rm wc mkdir tr; do
   command -v "$needed_tool" >/dev/null 2>&1 || bad_usage "缺少必要工具「$needed_tool」，拒绝出证据。"
 done
 
@@ -117,34 +120,86 @@ INSTALL_CTX=$(read_env SM75_PCIEIPC_CTX)
 PY_VERSION=$(read_env SM75_PCIEIPC_PY_VERSION)
 export SM75_SITE_PACKAGES="$SP"
 
-# 落点守卫（修复轮 1：Critical-1＋Important-1）——证据文件要落盘，仓上下文里指向仓内就等于往交付面
-# 里塞测试垃圾（还会被上游护栏按新增报红）。判"是否仓上下文"用**仓标记锚定**而不是脚本相对锚点：
-# 从本脚本所在目录逐级向上找 .git 或 gpustack/SHA256SUMS-upstream.txt，找到即该层＝仓根（与
-# gpustack/testkit 夹具守卫同口径：封**整个仓根**，不是只封 gpustack/）。向上到 / 仍无标记＝
-# 镜像形位（本脚本住在 /opt/vllm-sm75/pcieipc 这类非仓布局），跳过守卫，放行镜像内的合法落点
-# /opt/vllm-sm75/evidence/。旧实现取"SCRIPT_DIR 上跳两级"做字符串比对，在镜像布局里把 /opt 当仓根，
-# Dockerfile 要求的证据落点必被判"仓内"→ 层 1 门 3/3 必然红、永不出绿（审查 Critical-1）。
+# 落点守卫（修复轮 2：复审 new-1）——上一轮的守卫只看**脚本自身位置**的仓标记锚定，不看**输出落点**：
+# ①仓根子目录放假日标记即可把锚点抬窄、往真仓写（假 .git 抬锚）；②住在无标记目录的脚本副本（镜像里
+# /opt/vllm-sm75/pcieipc 恒如此形态，仓内做脚本副本同理）对任意落点放行＝守卫零保护；③Windows 上
+# /TMP 与 /tmp、短名与长名是同一目录的两种写法，`cd && pwd` 只归盘符不归大小写，字符串不同形即静默漏拦。
+# 修复形态：对 OUT_DIR_ABS 也跑**同一条**向上遍历＋仓标记判定，锚点取"脚本位与落点位两处判定中最外层
+# 的仓根"；任一侧判为仓上下文 ⇒ 落点在任何仓根之下即红（红码仍是 bad_usage 的 2，判死排在任何写盘之前）。
+# 两侧到 / 都无标记＝镜像形位：NOTE 跳过守卫，放行镜像内的合法落点 /opt/vllm-sm75/evidence/
+# （前置条件已含"落点侧遍历也已跑过且无标记"，不再只看脚本侧）。判定结果写进证据 JSON 的 guard 字段。
+# canon() 与 gpustack/testkit 夹具的 canon() 同形（本轮把夹具那一处也补了大小写归一，两守卫共用同一口径）。
+canon() {
+  local p=$1 c=""
+  if command -v cygpath >/dev/null 2>&1; then
+    # LC_ALL=C 下 cygpath 会按 ANSI 码页吃参数，把 UTF-8 非 ASCII 路径折成乱码（本机实测：使用→乱码，
+    # 乱码路径的 -e 测试全空＝守卫反向失效），故在 UTF-8 locale 下跑；且仅当"结果非空，且（原路径不存在
+    # 或结果路径真实存在）"才采纳，否则保持原串——宁可不归一盘符，也不吃坏字节。
+    c=$(LC_ALL=C.UTF-8 cygpath -u -- "$p" 2>/dev/null) \
+      || c=$(LC_ALL=en_US.UTF-8 cygpath -u -- "$p" 2>/dev/null)
+    if [ -n "$c" ] && { [ ! -e "$p" ] || [ -e "$c" ]; }; then p=$c; fi
+    # Windows 文件系统大小写不敏感 → 归小写，堵 /TMP 与 /tmp、短名形态的漏拦；
+    # Linux 文件系统大小写敏感，绝不可折叠（cygpath 只在 Git Bash/MSYS 上存在）。
+    # 折叠必须用 tr 逐字节只动 ASCII A-Z：本脚本 LC_ALL=C，bash 的 ${p,,} 会把 UTF-8 多字节
+    # 当 Latin-1 折叠出坏字节（实测把"使用/交付仓"折成乱码，-e 标记测试随即失效＝反向漏拦）。
+    p=$(printf '%s' "$p" | tr 'A-Z' 'a-z')
+  fi
+  p=${p%/}
+  [ -n "$p" ] || p=/
+  printf '%s' "$p"
+}
+
+# 自给定目录逐级向上找仓标记（.git 或 gpustack/SHA256SUMS-upstream.txt）：命中打印该层（最内层命中）并退 0；
+# 到 / 仍无 → 打印空并退 1。调用方用"输出非空＝该侧是仓上下文"判定。32 级内必然收敛（复审第四节已验）。
+find_repo_root() {
+  local p=$1
+  while :; do
+    if [ -e "$p/.git" ] || [ -f "$p/gpustack/SHA256SUMS-upstream.txt" ]; then
+      printf '%s' "$p"
+      return 0
+    fi
+    [ "$p" != "/" ] || break
+    p=${p%/*}
+    [ -n "$p" ] || p=/
+  done
+  return 1
+}
+
 OUT_DIR_ABS=$(cd -- "$(dirname -- "$OUT_FILE")" 2>/dev/null && pwd)
 [ -n "$OUT_DIR_ABS" ] || bad_usage "证据输出目录不存在或不可进入：$(dirname -- "$OUT_FILE")"
 OUT_ABS="$OUT_DIR_ABS/$(basename -- "$OUT_FILE")"
-REPO_ROOT_G=""
-P_G=$SCRIPT_DIR
-while :; do
-  if [ -e "$P_G/.git" ] || [ -f "$P_G/gpustack/SHA256SUMS-upstream.txt" ]; then
-    REPO_ROOT_G=$P_G
-    break
-  fi
-  [ "$P_G" != "/" ] || break
-  P_G=${P_G%/*}
-  [ -n "$P_G" ] || P_G=/
-done
-if [ -n "$REPO_ROOT_G" ]; then
-  case "$OUT_ABS" in
-    "$REPO_ROOT_G"|"$REPO_ROOT_G"/*)
-      bad_usage "证据输出路径不得在仓内（$OUT_ABS 落在仓根 $REPO_ROOT_G 之下），请指到沙箱或镜像路径。" ;;
+SC_DIR_C=$(canon "$SCRIPT_DIR")
+OUT_DIR_C=$(canon "$OUT_DIR_ABS")
+OUT_ABS_C=$(canon "$OUT_ABS")
+SCRIPT_REPO=$(find_repo_root "$SC_DIR_C")
+OUT_REPO=$(find_repo_root "$OUT_DIR_C")
+# 锚点＝两处判定中最外层的仓根（一侧为空取另一侧；两侧互不嵌套时以落点侧为准，判定本就落点优先）。
+GUARD_ANCHOR=""
+if [ -n "$SCRIPT_REPO" ] && [ -n "$OUT_REPO" ]; then
+  case "$OUT_REPO" in
+    "$SCRIPT_REPO"|"$SCRIPT_REPO"/*) GUARD_ANCHOR=$SCRIPT_REPO ;;
+    *) GUARD_ANCHOR=$OUT_REPO ;;
   esac
+elif [ -n "$SCRIPT_REPO" ]; then
+  GUARD_ANCHOR=$SCRIPT_REPO
 else
-  echo "NOTE: 未在任何上级目录找到仓标记（.git 或 gpustack/SHA256SUMS-upstream.txt），判定为镜像形位（非仓上下文），跳过仓内落点守卫：out=$OUT_ABS"
+  GUARD_ANCHOR=$OUT_REPO
+fi
+if [ -n "$OUT_REPO" ]; then
+  # 落点自身在任何仓标记链之下——无论脚本住在哪（真仓/假标记子目录/无标记副本/镜像）都判死。
+  bad_usage "证据输出路径不得在仓内（$OUT_ABS_C 落在仓根 $OUT_REPO 之下＝落点侧向上遍历命中仓标记），请指到沙箱或镜像路径。"
+fi
+if [ -n "$SCRIPT_REPO" ]; then
+  case "$OUT_ABS_C" in
+    "$SCRIPT_REPO"|"$SCRIPT_REPO"/*)
+      bad_usage "证据输出路径不得在仓内（$OUT_ABS_C 落在仓根 $SCRIPT_REPO 之下＝脚本侧向上遍历命中仓标记），请指到沙箱或镜像路径。" ;;
+  esac
+  GUARD_MODE=repo-context
+  echo "NOTE: 守卫判定=仓上下文（脚本侧仓根 $SCRIPT_REPO，落点侧向上遍历无标记），落点在仓外 → 放行：out=$OUT_ABS_C"
+else
+  # 走到这里必须落点侧也无标记（上面 OUT_REPO 非空已判死），NOTE 放行有双零前置。
+  GUARD_MODE=image-layout-exempt
+  echo "NOTE: 脚本位与落点位两处向上遍历均未在任何上级目录找到仓标记（.git 或 gpustack/SHA256SUMS-upstream.txt），判定为镜像形位（非仓上下文），跳过仓内落点守卫：out=$OUT_ABS_C"
 fi
 [ -w "$OUT_DIR_ABS" ] || bad_usage "证据输出目录不可写：$OUT_DIR_ABS"
 
@@ -158,6 +213,25 @@ log_dir=$(mktemp -d 2>/dev/null)
 [ -n "$log_dir" ] && [ -d "$log_dir" ] || bad_usage "无法创建临时目录承接 gate-check 输出。"
 trap 'rm -rf "$log_dir"' EXIT
 OUT_LOG="$log_dir/gate-check-post.log"
+
+# 守卫判定结果落盘成小文件（进证据 JSON 的 guard 字段，事后可审计）。
+# 为什么走文件不走 env：Windows/Git Bash 上 MSYS 运行时会把以 "/" 开头的 env 值按 ANSI 码页强转成
+# Windows 路径形态，中文仓根进 env 必折坏（实测 使用→乱码）；文件字节无损，python 按 UTF-8 读。
+# 镜像里（Linux）两种形态都无损，此处差异只影响本地跑样的字符串长相。
+GUARD_FILE="$log_dir/guard.json"
+GUARD_SKIPPED=false
+[ "$GUARD_MODE" = image-layout-exempt ] && GUARD_SKIPPED=true
+gstr() {
+  if [ -n "$1" ]; then printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"; else printf 'null'; fi
+}
+{ printf '{"mode":"%s","skipped":%s,"script_side_repo_root":' "$GUARD_MODE" "$GUARD_SKIPPED"
+  gstr "$SCRIPT_REPO"
+  printf ',"output_side_repo_root":'; gstr "$OUT_REPO"
+  printf ',"anchor_repo_root":'; gstr "$GUARD_ANCHOR"
+  printf ',"out_abs":'; gstr "$OUT_ABS_C"
+  printf '}\n'
+} > "$GUARD_FILE" || bad_usage "守卫判定文件写入失败：$GUARD_FILE"
+
 "$PYBIN" "$CTX/gate-check-v3.py" "$CTX" post > "$OUT_LOG" 2>&1
 GATE_RC=$?
 sed 's|^|  |' "$OUT_LOG"
@@ -179,6 +253,7 @@ SM75_EV_PY_VERSION="$PY_VERSION" \
 SM75_EV_PYBIN="$PYBIN" \
 SM75_EV_GATE_RC=$GATE_RC \
 SM75_EV_GATE_LOG="$OUT_LOG" \
+SM75_EV_GUARD_FILE="$GUARD_FILE" \
 "$PYBIN" - <<'PY'
 import hashlib, json, os, sys, datetime
 
@@ -261,6 +336,14 @@ for blk_rel, _lines, _bytes, _sha, _kind in sorted(append_rows):
 with open(log_path, encoding="utf-8", errors="replace") as fh:
     gate_log = fh.read()
 
+guard_file = os.environ.get("SM75_EV_GUARD_FILE") or ""
+if guard_file:
+    with open(guard_file, encoding="utf-8") as fh:
+        guard = json.load(fh)
+else:
+    guard = {"mode": None, "skipped": None, "script_side_repo_root": None,
+             "output_side_repo_root": None, "anchor_repo_root": None, "out_abs": None}
+
 evidence = {
     "evidence_schema": "sm75.gpustack.pcieipc-gate/v1",
     "layer": "1-pcieipc",
@@ -272,6 +355,7 @@ evidence = {
     "site_packages_source": os.environ.get("SM75_EV_SP_SRC") or None,
     "vllm_site_packages": os.environ.get("SM75_EV_VLLM_SP") or None,
     "import_gate": os.environ.get("SM75_EV_GATE_STATE"),
+    "guard": guard,
     "install_ctx": os.environ.get("SM75_EV_INSTALL_CTX") or None,
     "python": {
         "invoked_as": os.environ.get("SM75_EV_PYBIN"),
