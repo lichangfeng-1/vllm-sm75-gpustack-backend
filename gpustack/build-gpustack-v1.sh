@@ -266,7 +266,7 @@ echo "== 补丁门全绿，产物：$STAGED =="
 # 直调它只会构建仓内未打补丁的原件（静默失败）。所以本段用 docker build --file 消费门 3 的暂存副本，
 # 其余逐项对齐 build.sh 的 standard:full 组装——即 EDITION=standard 且 BUILD_MODE=full 时
 # build.sh 实际走的那条路径（:44-58）；:7-10 的 unraid 阻断门与 :23-42 的 ultra 分支本段不适用。
-# 逐行对应关系（行号指仓内上游件 docker/build.sh，HEAD c79894c 版本）：
+# 逐行对应关系（行号指仓内上游件 docker/build.sh，HEAD c79894c 版本；本轮上游件零改动，行号在本提交同样成立）：
 #   :44  file=Dockerfile                       → --file 指向暂存副本（本段唯一实质差异，见上）
 #   :45  default_image="vllm-sm75:v${VERSION}"  → target_tag 同一算法；:58 的 IMAGE 覆盖口一致
 #   :50  --target final                        → 同
