@@ -14,7 +14,7 @@
 # 退出码（只用已登记码位，本任务不新增）：
 #   0   10 件全一致——打印逐件对照表＋BRIDGE_OK 计数行
 #   2   用法/前置红——参数形状不对、docker/sha256sum 不在 PATH、site-packages 定位失败、
-#       fixture 目录不存在、清单常量自证失败（清单行数≠预期件数）
+#       fixture 目录不存在、清单常量自证失败（清单行数≠预期件数，或含重复条目＝唯一件数≠总条数）
 #   13  桥差集非空——任一件两边哈希不等（DIFF）或任一边缺件/不可读（MISSING_A/MISSING_B）；
 #       打印差集表，每件一行带类型；缺件与改字节是两类行，文案可区分（负控 c 的判据）
 #
@@ -41,7 +41,9 @@
 #   两类前缀件都从同一个目录拼——这是两模式唯一的形状差异，判据（清单、比对、差集）同源。
 #
 # 设计注记：
-#   1) 空判据前先有存在性断言：清单行数先对 BRIDGE_EXPECTED_FILES 自证；比对完成后
+#   1) 空判据前先有存在性断言：清单行数先对 BRIDGE_EXPECTED_FILES 自证，继而断言
+#      "去重后唯一件数==总条数"（重复键边界——清单含重复条目时总条数不变但实比对件数变少，
+#      只看行数的三层断言全会放行，故重复即红 2 并点名重复件）；比对完成后
 #      绿面必须断言"逐件表行数==清单件数"才报 BRIDGE_OK（防"零件比对"假绿）。
 #   2) 单件取哈希失败（文件不存在/不可读）归 MISSING 类而不是 DIFF 类：容器模式下
 #      docker exec sha256sum 非零退出的输出经管道后取到空串，空串即缺件证词；
@@ -89,10 +91,19 @@ fi
 
 command -v sha256sum >/dev/null 2>&1 || { echo "ASSERT_FAIL 宿主缺少必要工具 sha256sum"; exit 2; }
 
-# ---------- 清单常量自证（存在性断言排在一切比对之前；防清单被改行/吞行） ----------
+# ---------- 清单常量自证（存在性断言排在一切比对之前；防清单被改行/吞行/塞重复条目） ----------
 manifest_count=$(printf '%s\n' "$BRIDGE_FILES" | sed '/^$/d' | wc -l | tr -dc '0-9')
 if [ "$manifest_count" != "$BRIDGE_EXPECTED_FILES" ]; then
   echo "ASSERT_FAIL 清单常量行数自证红：实到 $manifest_count 件，期望 $BRIDGE_EXPECTED_FILES 件（清单被改行/吞行，桥拒绝开工）"
+  exit 2
+fi
+# 重复键边界自证：去重后的唯一件数必须等于总条数——清单含重复条目时总条数不变而实比对件数变少，
+# 后面三层行数断言全会放行（假绿洗白），故这里直接红 2 并点名重复件（LC_ALL=C 固定排序域，判据与 locale 无关）
+manifest_unique=$(printf '%s\n' "$BRIDGE_FILES" | sed '/^$/d' | LC_ALL=C sort -u | wc -l | tr -dc '0-9')
+if [ "$manifest_unique" != "$manifest_count" ]; then
+  echo "ASSERT_FAIL 清单重复键自证红：总条数 $manifest_count 条、唯一件只有 $manifest_unique 件（清单含重复条目，实比对会少比 $((manifest_count - manifest_unique)) 件，桥拒绝开工）"
+  echo "重复条目清单："
+  printf '%s\n' "$BRIDGE_FILES" | sed '/^$/d' | LC_ALL=C sort | uniq -d
   exit 2
 fi
 
