@@ -15,13 +15,21 @@
 #   所以这些项必须由生成器钉死并留证据，不能靠人手抄。
 #
 # 为什么用 flag=value 形态（不是 `--flag value` 两行、也不是空格分隔一行）：
-#   1) 简报断言「每行以 -- 起」，只有把值并进同一行才成立；
-#   2) GPUStack 把每行按 shlex 再切（base.py:1138 _flatten_backend_param →
-#      command.py:338 safe_split），shlex 会吃掉 JSON 里的双引号，
-#      空格形 --engram-config {"cpu_offload":true} 到引擎手里是 {cpu_offload:true}（坏 JSON）；
-#      只有 `=` 紧跟 `{`/`[` 才触发 command.py:225-233 的 JSON 掩码，把原文还原回来；
-#   3) 值本身紧凑单行（json.dumps separators=(',',':')，同上游 runtime-entrypoint.py:21 约定），
-#      紧凑后无空格，等号形与 GPUStack 的掩码/归一化（command.py:169-215、base.py:67-116）都吃得下。
+#   1) 简报断言「每行以 -- 起」，只有把值并进同一行才成立；断言 A1 同时判死行内任何位置的空白，
+#      让「生成物必过 lint 的 L5」这条不变式成立（修复轮 1 关闭审查 I-4）；
+#   2) GPUStack 把每行按 shlex 再切（gpustack/worker/backends/base.py:1138-1152
+#      _flatten_backend_param → gpustack/utils/command.py:338-351 safe_split），shlex 会吃掉
+#      JSON 里的双引号，空格形 --engram-config {"cpu_offload":true} 到引擎手里是
+#      {cpu_offload:true}（坏 JSON）；只有 `=` 紧跟 `{` 或 `[` 才触发 JSON 掩码
+#      （gpustack/utils/command.py:226-301 _mask_json_segments，触发条件在 :245），把原文还原回来；
+#   3) 值本身紧凑单行（json.dumps separators=(',',':')，同上游仓内
+#      docker/helpers/runtime-entrypoint.py:21 的约定），紧凑后无空格，等号形与 GPUStack 的
+#      掩码/归一化（gpustack/utils/command.py:170-211 format_backend_parameters、
+#      gpustack/worker/backends/base.py:67-116 _normalize_param_format）都吃得下。
+#
+# 行号口径（修复轮 1 的 M-3）：上面除 runtime-entrypoint.py 之外一律取本地
+#   `gpustack源码/v2.2.3-正式`（正式版，与注册卡同口径），目录已补全、区间改成函数真实起止；
+#   `docker/helpers/runtime-entrypoint.py:21` 取的是**仓内上游件**，不是 GPUStack 源码树。
 #
 # 用法（路径请给目标解释器认得的形态；本机是原生 Windows Python，要 K:/… 或 C:\… 形，
 #   Git Bash 的 /tmp/… 形会被解析成 C:\tmp\…）：
@@ -33,10 +41,12 @@
 #   2   用法/前置红——模板缺失或不可解析、args 形态未知、落点守卫红（--out 落进上游作用域）
 #   14  参数排除红——输出里出现了 GPUStack 尾补三条（--host / --port / --served-model-name）
 #   16  断言集红——占位符残留 ${、投机参数、关键 flag 缺失或值不符、flag 集合与源模板不符、
-#       flag 重复、行形态非法。简报只给 16 一个码覆盖这几类内容红，靠点名文案区分命中哪一道。
+#       flag 重复、行形态非法（不以 -- 起，或行内任一处含空白/制表）。简报只给 16 一个码覆盖
+#       这几类内容红，靠点名文案区分命中哪一道。
 #
 # 断言顺序（负控要各自命中自己的码，被更早的门抢走的都不算证据）：
-#   P0 输入与落点前置（含 2）→ A0 非空 → A1 行形态 → A2 ${ 残留 → A3 投机参数 → A4 尾补三条（14）
+#   P0 输入与落点前置（含 2）→ A0 非空 → A1 行形态（与 lint 的 L5 同形，禁行内空白）
+#   → A2 ${ 残留 → A3 投机参数 → A4 尾补三条（14）
 #   → A5 flag 唯一 → A6 与源模板 flag 集合差集为空 → A7 关键项在列且 --max-model-len=262144
 #   → 写盘 → 写后逐字节回读自证。
 #   A4 排在 A6 之前：塞进 --port 的负控必须先命中 14，不能被 A6 的「多余 flag」以 16 抢走。
@@ -82,7 +92,7 @@ def die(code, message):
 
 
 def compact(value):
-    """非字符串元素转成紧凑单行，与上游 runtime-entrypoint.py:21 同约定。"""
+    """非字符串元素转成紧凑单行，与上游仓内 docker/helpers/runtime-entrypoint.py:21 同约定。"""
     if isinstance(value, str):
         return value
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -166,6 +176,10 @@ def build_lines(raw_args):
     lines = []
     while cursor < len(raw_args):
         token = str(raw_args[cursor])
+        # 本分支结构上不可达（修复轮 1 的 M-4）：前导位置参数只允许首元素那一个，第二个已由上面
+        # 的循环判死；flag 之后的值元素一律被内层 while 吸进 values，游不出这里。审查探针
+        # G-i／G-j／H3 三种造法分别落在别的分支上。保留为改动 build_lines 时的回归哨兵，
+        # 台账按 NC-155 的写法登记"本档不可独立命中"，不冒充实测覆盖面。
         if not token.startswith("--"):
             die(EXIT_USAGE, "错误：参数 %r 出现在任何 --flag 之前（游离值），拒绝猜测（退出码 2）" % token)
         flag = token.split("=", 1)[0]
@@ -192,8 +206,15 @@ def assert_set(lines, source_flags):
         die(EXIT_ASSERT, "红：断言 A0 非空——生成 0 行参数（空粘贴块＝空门禁，后续所有计数判据都会裸跑）"
                          "（退出码 16）")
     for line in lines:
-        if not line.startswith("--") or line.strip() != line or not line:
-            die(EXIT_ASSERT, "红：断言 A1 行形态——存在不以 -- 起或含首尾空白的行（退出码 16）：%r" % line)
+        # A1 与 lint 的 L5（^--[^[:space:]]+$）同形：任一处空白即红，红面不落盘。
+        # 修复轮 1 的 I-4——旧实现只判首尾空白，能产出自家 lint 必红的 `--note=a b`，
+        # 于是"生成物必过 lint"这条不变式当时不成立。
+        if not line.startswith("--") or any(ch.isspace() for ch in line):
+            die(EXIT_ASSERT, "红：断言 A1 行形态——存在不以 -- 起、或行内任何位置含空白/制表的参数行"
+                             "（退出码 16）：%r。GPUStack 会把每行再按 shlex 切"
+                             "（gpustack/utils/command.py:338-351 safe_split），空格形把值拆成独立"
+                             " token、JSON 值到引擎手里即坏；lint 的 L5 同形判死，本门保证生成物必过 lint。"
+                % line)
     joined = "\n".join(lines)
     if "${" in joined:
         die(EXIT_ASSERT, "红：断言 A2 占位符残留——输出含字面 ${（GPUStack 不做模板渲染，会字面直达引擎）"
