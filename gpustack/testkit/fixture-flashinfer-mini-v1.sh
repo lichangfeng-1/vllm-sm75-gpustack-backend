@@ -50,15 +50,32 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 # 所以两侧都再过一道 cygpath -u（Linux 上没有这个工具，即恒等）。
 # 修复轮 2 补一处：Windows 文件系统大小写不敏感，/TMP 与 /tmp、短名与长名是同一目录的两种写法，
 # cygpath 只归盘符不归大小写 → 有 cygpath 时统一折叠为小写；Linux 大小写敏感，绝不折叠。
-# 与 gpustack/layers/pcieipc/gate-evidence-v1.sh 的 canon() 同形同口径（复审 new-Minor-3 的处置）。
+# 与 gpustack/layers/pcieipc/gate-evidence-v1.sh 的 canon() 同形同口径（修复轮 3 把"路径不存在"
+# 那一支也改成与 locale 无关的显式字节级归一，两守卫一起改，"同口径"这次是真的同口径）。
+msys_bytes_form() {
+  local p=$1
+  p=$(printf '%s' "$p" | sed -e 's|\\|/|g')     # 反斜杠→斜杠（只动 ASCII 字节；写法已用 bs-test 验真）
+  case "$p" in
+    [A-Za-z]:*) p="/${p:0:1}${p:2}" ;;         # 驱动器形 X:/… → /X/…（盘符大小写随后由 tr 折叠）
+  esac
+  printf '%s' "$p"
+}
+
 canon() {
   local p=$1 c=""
   if command -v cygpath >/dev/null 2>&1; then
-    # 同 gate-evidence 的 canon()：cygpath 必须在 UTF-8 locale 下跑（LC_ALL=C 会把非 ASCII 路径按
-    # ANSI 码页折成乱码），且只在结果可用时采纳；折叠用 tr 逐字节只动 ASCII（${p,,} 会折坏 UTF-8）。
-    c=$(LC_ALL=C.UTF-8 cygpath -u -- "$p" 2>/dev/null) \
-      || c=$(LC_ALL=en_US.UTF-8 cygpath -u -- "$p" 2>/dev/null)
-    if [ -n "$c" ] && { [ ! -e "$p" ] || [ -e "$c" ]; }; then p=$c; fi
+    if [ -e "$p" ]; then
+      # 存在的路径：同 gate-evidence 的 canon()——cygpath 必须在 UTF-8 locale 下跑（LC_ALL=C 会把非
+      # ASCII 路径按 ANSI 码页折成乱码），且只在"结果真的在盘上"时采纳。
+      c=$(LC_ALL=C.UTF-8 cygpath -u -- "$p" 2>/dev/null) \
+        || c=$(LC_ALL=en_US.UTF-8 cygpath -u -- "$p" 2>/dev/null)
+      if [ -n "$c" ] && [ -e "$c" ]; then p=$c; fi
+    else
+      # 不存在的路径：轮 2 在这里"结果非空即采纳"，安全性单点押在 C.UTF-8 生效上（复审 Minor-1）；
+      # 改走 msys_bytes_form 的显式字节级归一，locale 不再参与判定，非 ASCII 字节原样透传。
+      p=$(msys_bytes_form "$p")
+    fi
+    # 折叠必须用 tr 逐字节只动 ASCII（${p,,} 在 LC_ALL=C 下会把 UTF-8 多字节当 Latin-1 折坏）。
     p=$(printf '%s' "$p" | tr 'A-Z' 'a-z')
   fi
   printf '%s' "${p%/}"

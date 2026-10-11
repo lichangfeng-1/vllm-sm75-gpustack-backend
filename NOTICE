@@ -72,9 +72,13 @@ NOTICE —— vllm-sm75-gpustack-backend
         trace/templates/comm.py ← pcie_ipc_all_reduce_trace、
         comm/__init__.py ← PCIe-IPC 符号再导出
       装机与门禁脚本 install-pcieipc.sh、gate-check-v3.py 源自本交付线的前一版部署包
-      （自有件，不属上游 vLLM/SM75 树）；install-pcieipc.sh 的改动仅其头注列出的三处
-      适配（site-packages 构建期探测、--defer-import-gate 开关与证据交接、路径分隔符归一），
-      幂等门与全部断言原样保留。
+      （自有件，不属上游 vLLM/SM75 树）；install-pcieipc.sh 的改动仅其头注列出的四处
+      适配（site-packages 构建期探测、--defer-import-gate 开关与证据交接、路径分隔符归一、
+      $SM75_EVIDENCE_DIR 落点守卫），幂等门与全部断言原样保留；其中第 ④ 处（修复轮 3 新增）
+      在写盘前把证据目录按词法形与 `cd && pwd -P` 物理形各向上遍历一次仓标记（.git 或
+      gpustack/SHA256SUMS-upstream.txt），命中即退 2 且不建目录，建完之后再用真实位置复核一次
+      （命中同样退 2，只 rmdir 本次新建的空目录，绝不递归删）；镜像内 /opt/vllm-sm75/evidence
+      两侧遍历都无标记，行为不变。
       作用域：只写容器内 site-packages 的 flashinfer 包，vllm 树与上游 14 个顶层项零改动。
       镜像内证据：/opt/vllm-sm75/evidence/pcieipc-gate.json（层 1 第三道 RUN 门产出；
       件数门红 17、运行期 import 门禁红 11a、终态门禁红＝gate-check 自有码 2，门红即构建失败，

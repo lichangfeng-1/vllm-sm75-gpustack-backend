@@ -9,7 +9,7 @@
 #   并由任务 14 在带 GPU 的容器里补跑同一句判据——不静默放宽。
 #   旧部署包的位参写法 skip-import-gate 仍接受，语义等同 --defer-import-gate。
 #
-# 本仓适配（相对旧部署包 docker/pcieipc/install-pcieipc.sh 的原件，只动三处，其余逐字保留）：
+# 本仓适配（相对旧部署包 docker/pcieipc/install-pcieipc.sh 的原件，只动四处，其余逐字保留）：
 #   ① 目标路径不再写死 /usr/local/lib/python3.12/dist-packages：默认在构建期用
 #      python 的 importlib.util.find_spec 探测 flashinfer 与 vllm 的 site-packages 实位。
 #      find_spec 只按 sys.path 定位、不执行包内代码，所以无 GPU 构建机上探测不会失败，
@@ -20,10 +20,18 @@
 #      直接引用（避免二次探测与安装期结果不一致）。
 #   ③ 探测结果统一成斜杠形（posix()）：Linux 镜像里是恒等变换，Windows 本地干跑时 python 给
 #      反斜杠形会让 GNU sha256sum 给摘要加 "\" 前缀、污染逐件对拍。
+#   ④ 证据落点守卫（修复轮 3 新增，复审轮 2 遗留-1）：$SM75_EVIDENCE_DIR 原先完全无守卫，指进仓
+#      就会把 pcieipc-install-env.env（含空目录）建进交付树。现按 gate-evidence-v1.sh 同一条判据
+#      做最小版：把 EVIDENCE_DIR 绝对化后走两条解析途（词法形＋`cd && pwd -P` 物理形，穿过符号
+#      链接/目录联接看真实落点），各自向上遍历找仓标记（.git 或 gpustack/SHA256SUMS-upstream.txt），
+#      命中即退 2；判死排在 mkdir 之前（不建目录、不写文件），mkdir 之后再复核一次真实位置（悬空
+#      链接点的尾巴只有建完才看得见），仍命中同样退 2 并只收回本次新建的空目录（rmdir，绝不 rm -rf）。
+#      遍历用文件系统 -e 测试而不是字符串比对，因此天然免疫 Windows 的大小写/盘符/短名形态，也不
+#      需要 cygpath 那套与 locale 纠缠的归一。除这一段守卫外，幂等门与全部断言逐字未动。
 #
 # 退出码（本脚本自有；在镜像构建里 docker 会把非零统一收进 20＝构建失败，日志仍可见本码）：
 #   0   通过
-#   2   基本目录/前置物料缺失（含 site-packages 探测失败、证据目录不可写）
+#   2   基本目录/前置物料缺失（含 site-packages 探测失败、证据目录不可写、证据落点守卫判死）
 #   3   comm/__init__.py 已含 marker（拒绝二次追加）
 #   4   comm/ 下 pcie_ipc_*.py 已存在
 #   5   data/ 下 csrc 或 cuh 已存在
@@ -67,6 +75,98 @@ if [ "$DEFER_REQUESTED" = "1" ]; then
 fi
 PYBIN="${SM75_PY:-python3}"
 EVIDENCE_DIR="${SM75_EVIDENCE_DIR:-/opt/vllm-sm75/evidence}"
+
+# ---------- 证据落点守卫（本仓适配第 ④ 处，判死排在任何写盘之前） ----------
+# 绝对化＋反斜杠→斜杠＋驱动器形 X:/… → /x/…：全部是显式 ASCII 变换，不经 cygpath、不吃 locale。
+ev_norm_form() {
+  _q=$(printf '%s' "$1" | sed -e 's|\\|/|g')     # 先归分隔符与驱动器形，再谈绝对化（顺序错会把 X:/ 当相对段）
+  case "$_q" in
+    [A-Za-z]:*)
+      _d=$(printf '%s\n' "$_q" | cut -c1 | tr 'A-Z' 'a-z')
+      _q="/$_d$(printf '%s\n' "$_q" | cut -c3-)" ;;
+  esac
+  case "$_q" in
+    /*) : ;;
+    *) _q="$PWD/$_q" ;;
+  esac
+  _q=${_q%/}
+  [ -n "$_q" ] || _q=/
+  printf '%s' "$_q"
+}
+
+# 含 .. 段的路径无法在 mkdir 之前可靠判定真实落点，直接判红（确定性红，不猜）。
+ev_has_dotdot() {
+  case "$1" in
+    ..|../*|*/..|*/../*) return 0 ;;
+  esac
+  return 1
+}
+
+# 自给定路径逐级向上找仓标记（与 gate-evidence-v1.sh 的 find_repo_root 同一标记集、同一收敛口径）。
+ev_marker_root() {
+  _p=$1
+  while :; do
+    if [ -e "$_p/.git" ] || [ -f "$_p/gpustack/SHA256SUMS-upstream.txt" ]; then
+      printf '%s' "$_p"
+      return 0
+    fi
+    [ "$_p" != "/" ] || break
+    _n=${_p%/*}
+    [ -n "$_n" ] || _n=/
+    [ "$_n" != "$_p" ] || break
+    _p=$_n
+  done
+  return 1
+}
+
+# 物理形：目录已在盘上就 cd && pwd -P；还没建就先解析最近的存在祖先，再把余下的片段拼回去。
+ev_phys_form() {
+  _t=$1
+  _tail=""
+  while [ ! -d "$_t" ]; do
+    _b=${_t##*/}
+    _p=${_t%/*}
+    case "$_p" in "") _p=/ ;; esac
+    if [ "$_p" = "$_t" ]; then return 1; fi
+    if [ -n "$_tail" ]; then _tail="$_b/$_tail"; else _tail="$_b"; fi
+    _t=$_p
+  done
+  _ph=$(cd -- "$_t" 2>/dev/null && pwd -P 2>/dev/null) || return 1
+  [ -n "$_ph" ] || return 1
+  if [ -n "$_tail" ]; then
+    case "$_ph" in */) _ph="$_ph$_tail" ;; *) _ph="$_ph/$_tail" ;; esac
+  fi
+  printf '%s' "$_ph"
+}
+
+# 两条解析途（词法＋物理）各自向上遍历；任一命中仓标记即打印原因并返回 0。
+ev_guard_reason=""
+ev_check_target() {
+  _lex=$1
+  _phys=$(ev_phys_form "$_lex") || _phys=""
+  for _cand in "$_lex" "$_phys"; do
+    [ -n "$_cand" ] || continue
+    _hit=$(ev_marker_root "$_cand") || _hit=""
+    if [ -n "$_hit" ]; then
+      ev_guard_reason="解析途「$_cand」向上遍历命中仓标记，仓根 $_hit"
+      return 0
+    fi
+  done
+  return 1
+}
+
+echo "=== 0) 证据落点守卫（写盘前判死，见头注第 ④ 处适配） ==="
+EV_LEX=$(ev_norm_form "$EVIDENCE_DIR")
+[ -n "$EV_LEX" ] || { echo "ASSERT_FAIL 证据目录绝对化得到空串：$EVIDENCE_DIR"; exit 2; }
+if ev_has_dotdot "$EV_LEX"; then
+  echo "ASSERT_FAIL 证据目录路径含 .. 段，无法可靠判定真实落点：$EVIDENCE_DIR（请给不含 .. 的绝对路径）"
+  exit 2
+fi
+if ev_check_target "$EV_LEX"; then
+  echo "ASSERT_FAIL 证据目录不得落在任何仓根及其子树之下（$ev_guard_reason；SM75_EVIDENCE_DIR=$EVIDENCE_DIR）——请指到镜像内 /opt/vllm-sm75/evidence 或仓外沙箱目录"
+  exit 2
+fi
+echo "EVIDENCE_DIR_GUARDED $EV_LEX（词法＋物理两条向上遍历均无仓标记）"
 
 echo "=== 0a) 定位 site-packages 实位（构建期 python 探测，不写死版本路径） ==="
 command -v "$PYBIN" >/dev/null 2>&1 || { echo "ASSERT_FAIL 找不到解释器 $PYBIN（可用 SM75_PY 指定）"; exit 2; }
@@ -126,9 +226,24 @@ FI="$SP/flashinfer"
 export SM75_SITE_PACKAGES="$SP"
 echo "SITE_PACKAGES=$SP（来源=$SP_SRC）"
 echo "VLLM_SITE_PACKAGES=${VLLM_SP:-未定位}"
+if [ -d "$EVIDENCE_DIR" ]; then _ev_existed=1; else _ev_existed=0; fi
 mkdir -p "$EVIDENCE_DIR" 2>/dev/null || { echo "ASSERT_FAIL 证据目录不可创建：$EVIDENCE_DIR"; exit 2; }
 [ -d "$EVIDENCE_DIR" ] || { echo "ASSERT_FAIL 证据目录不存在：$EVIDENCE_DIR"; exit 2; }
 [ -w "$EVIDENCE_DIR" ] || { echo "ASSERT_FAIL 证据目录不可写：$EVIDENCE_DIR"; exit 2; }
+# 建完之后复核一次真实位置：目录本身还不存在、但其某级父目录是悬空链接点时，mkdir 之前看不见
+# 真身（词法途与"最近存在祖先"的物理途都只到链接点为止）。命中同样退 2，且只收回本次新建的空
+# 目录（rmdir 只对空目录生效，绝不递归删——不是本脚本建的东西一律留着）。
+_ev_phys=$(cd -- "$EVIDENCE_DIR" 2>/dev/null && pwd -P 2>/dev/null) || _ev_phys=""
+if [ -n "$_ev_phys" ]; then
+  _ev_hit=$(ev_marker_root "$_ev_phys") || _ev_hit=""
+  if [ -n "$_ev_hit" ]; then
+    echo "ASSERT_FAIL 证据目录的真实位置落在仓内（cd&&pwd -P 解析为 $_ev_phys，向上遍历命中仓标记，仓根 $_ev_hit）——该路径经链接点指进了仓，请改指镜像内或仓外沙箱目录"
+    if [ "$_ev_existed" = 0 ] && [ -d "$EVIDENCE_DIR" ] && [ -z "$(ls -A "$EVIDENCE_DIR" 2>/dev/null)" ]; then
+      rmdir "$EVIDENCE_DIR" 2>/dev/null || true
+    fi
+    exit 2
+  fi
+fi
 echo "EVIDENCE_DIR=$EVIDENCE_DIR"
 
 echo "=== 0b) 基本目录 ==="

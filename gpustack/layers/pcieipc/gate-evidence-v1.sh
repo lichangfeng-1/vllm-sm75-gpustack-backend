@@ -11,11 +11,17 @@
 # 失败怎么办：
 #   - gate-check 红 → 仍写出 gate_pass=false 的证据，然后按 gate-check 自有红码退出（实测 2）。
 #   - 前置件缺失（安装期交接 env 不存在、ctx 清单缺失、探测到的树不存在）→ 退 2 并点名缺什么。
-#   - 落点守卫（修复轮 2，双向判定）：对**脚本目录**与**证据落点目录**分别做仓标记向上遍历
-#     （.git 或 gpustack/SHA256SUMS-upstream.txt），路径先经 Windows 大小写/盘符归一再比对；
-#     任一侧判定为仓上下文且落点落在仓根之下 → 退 2 且零写盘（锚点取两处判定中最外层的仓根）。
-#     两侧向上遍历都找不到标记＝镜像形位，该守卫自动跳过（NOTE），放行 /opt/vllm-sm75/evidence/。
-#     守卫判定结果（mode/两侧锚点/落点/是否跳过）写进证据 JSON 的 guard 字段，事后可审计。
+#   - 落点守卫（修复轮 3，两条解析途）：对**脚本目录**与**证据落点目录**各做两条向上遍历——
+#     词法途（`cd && pwd`）与物理途（`cd && pwd -P`，会穿过符号链接/目录联接落到真实目标），
+#     路径先经大小写/盘符归一（不存在的路径走与 locale 无关的显式字节级归一）再比对；
+#     标记集＝.git 或 gpustack/SHA256SUMS-upstream.txt。落点侧任一条途命中仓标记 ⇒ 无条件退 2
+#     且零写盘（不看脚本侧；锚点只作记录进 guard 字段，不参与判定）；脚本侧命中且落点（词法形或
+#     物理形）在其仓根之下也退 2。四条途到 / 都无标记＝镜像形位，守卫自动跳过并打印 NOTE——
+#     NOTE 只在两条途都跑过且都无标记时才说"落点在仓外"，与实判逐字一致。
+#     守卫判定结果（mode/skipped/两条途的仓根/落点的词法形与物理形/解析途计数）写进证据 JSON 的
+#     guard 字段，事后可审计。
+#     拦的是误写（防呆）不是恶意：本地把 .git 改名即可绕过；容器内看不见宿主的 .git，容器档的
+#     落点约束另由任务 8 简报补"禁指挂载点"口径。
 #   - 不得手工伪造证据文件绕过本步：任务 6 的指纹桥会再比一次镜像内实 sha。
 #
 # 用法：
@@ -120,24 +126,43 @@ INSTALL_CTX=$(read_env SM75_PCIEIPC_CTX)
 PY_VERSION=$(read_env SM75_PCIEIPC_PY_VERSION)
 export SM75_SITE_PACKAGES="$SP"
 
-# 落点守卫（修复轮 2：复审 new-1）——上一轮的守卫只看**脚本自身位置**的仓标记锚定，不看**输出落点**：
-# ①仓根子目录放假日标记即可把锚点抬窄、往真仓写（假 .git 抬锚）；②住在无标记目录的脚本副本（镜像里
-# /opt/vllm-sm75/pcieipc 恒如此形态，仓内做脚本副本同理）对任意落点放行＝守卫零保护；③Windows 上
-# /TMP 与 /tmp、短名与长名是同一目录的两种写法，`cd && pwd` 只归盘符不归大小写，字符串不同形即静默漏拦。
-# 修复形态：对 OUT_DIR_ABS 也跑**同一条**向上遍历＋仓标记判定，锚点取"脚本位与落点位两处判定中最外层
-# 的仓根"；任一侧判为仓上下文 ⇒ 落点在任何仓根之下即红（红码仍是 bad_usage 的 2，判死排在任何写盘之前）。
-# 两侧到 / 都无标记＝镜像形位：NOTE 跳过守卫，放行镜像内的合法落点 /opt/vllm-sm75/evidence/
-# （前置条件已含"落点侧遍历也已跑过且无标记"，不再只看脚本侧）。判定结果写进证据 JSON 的 guard 字段。
-# canon() 与 gpustack/testkit 夹具的 canon() 同形（本轮把夹具那一处也补了大小写归一，两守卫共用同一口径）。
+# 落点守卫（修复轮 3：复审轮 2 的新-1 与遗留-1）——轮 2 的守卫已经"看向落点本身"，但看的是落点的
+# **名字**不是落点：判定用 `cd && pwd` 的词法路径，`.git`/清单标记只在这条字符串的祖先链上找。
+# 符号链接/目录联接把物理落点换进仓内而词法路径不变 ⇒ 两侧皆"无标记" ⇒ 绿，且 NOTE 谎称"落点在仓外"
+# （实测 rc=0 真把证据 JSON 写进仓）。本轮补第二条解析途：同一目录再走一遍 `cd && pwd -P`（物理形，
+# 穿过链接点），四条遍历（脚本位×2＋落点位×2）任一命中即判死，NOTE 文案与实判逐字一致。
+# 历史三轮病灶（轮 1 只看脚本侧／轮 2 词法判定／轮 0 相对锚点）均已封堵，判死仍排在任何写盘之前、
+# 红码仍是 bad_usage 的 2，不新占码位。
+# canon() 与 gpustack/testkit 夹具的 canon() 同形同口径（本轮两处一起把"不存在路径"那一支改成与
+# locale 无关的显式字节级归一，见 canon() 内注释；复审 Minor-1 的残余就此关闭）。
+
+# 不依赖 locale 的显式字节级归一：只做 ASCII 变换（反斜杠→斜杠、驱动器形 X:/ → /x/），
+# 非 ASCII 字节原样透传——用于"路径不存在、无法用盘上真实性验真"那一支。
+msys_bytes_form() {
+  local p=$1
+  p=$(printf '%s' "$p" | sed -e 's|\\|/|g')     # 反斜杠→斜杠（只动 ASCII 字节；写法已用 bs-test 验真）
+  case "$p" in
+    [A-Za-z]:*) p="/${p:0:1}${p:2}" ;;         # 驱动器形 X:/… → /X/…（盘符大小写随后由 tr 折叠）
+  esac
+  printf '%s' "$p"
+}
+
 canon() {
   local p=$1 c=""
   if command -v cygpath >/dev/null 2>&1; then
-    # LC_ALL=C 下 cygpath 会按 ANSI 码页吃参数，把 UTF-8 非 ASCII 路径折成乱码（本机实测：使用→乱码，
-    # 乱码路径的 -e 测试全空＝守卫反向失效），故在 UTF-8 locale 下跑；且仅当"结果非空，且（原路径不存在
-    # 或结果路径真实存在）"才采纳，否则保持原串——宁可不归一盘符，也不吃坏字节。
-    c=$(LC_ALL=C.UTF-8 cygpath -u -- "$p" 2>/dev/null) \
-      || c=$(LC_ALL=en_US.UTF-8 cygpath -u -- "$p" 2>/dev/null)
-    if [ -n "$c" ] && { [ ! -e "$p" ] || [ -e "$c" ]; }; then p=$c; fi
+    if [ -e "$p" ]; then
+      # 存在的路径：LC_ALL=C 下 cygpath 会按 ANSI 码页吃参数，把 UTF-8 非 ASCII 路径折成乱码，故在
+      # UTF-8 locale 下跑；采纳条件是"结果非空且结果路径真实存在"——折坏的串不在盘上，不会被采纳。
+      c=$(LC_ALL=C.UTF-8 cygpath -u -- "$p" 2>/dev/null) \
+        || c=$(LC_ALL=en_US.UTF-8 cygpath -u -- "$p" 2>/dev/null)
+      if [ -n "$c" ] && [ -e "$c" ]; then p=$c; fi
+    else
+      # 不存在的路径（证据文件名就是典型输入，NC-85 的探漢字-probe.json 同形）：轮 2 在这里"结果非空
+      # 即采纳"，安全性单点押在 C.UTF-8 生效上——某台机器的 MSYS 不认 C.UTF-8/en_US.UTF-8 而 cygpath
+      # 仍 rc=0 时，输出是双重编码的乱码串，且没有任何盘上真实性可验（复审 Minor-1）：非 ASCII 仓路径
+      # 会被静默判成"无标记"＝反向漏拦。改走 msys_bytes_form 的显式字节级归一，locale 不再参与判定。
+      p=$(msys_bytes_form "$p")
+    fi
     # Windows 文件系统大小写不敏感 → 归小写，堵 /TMP 与 /tmp、短名形态的漏拦；
     # Linux 文件系统大小写敏感，绝不可折叠（cygpath 只在 Git Bash/MSYS 上存在）。
     # 折叠必须用 tr 逐字节只动 ASCII A-Z：本脚本 LC_ALL=C，bash 的 ${p,,} 会把 UTF-8 多字节
@@ -167,39 +192,69 @@ find_repo_root() {
 
 OUT_DIR_ABS=$(cd -- "$(dirname -- "$OUT_FILE")" 2>/dev/null && pwd)
 [ -n "$OUT_DIR_ABS" ] || bad_usage "证据输出目录不存在或不可进入：$(dirname -- "$OUT_FILE")"
+# 第二途：同一个目录再取一次**物理形**——pwd -P 会穿过符号链接/目录联接解析到真实目标，
+# 词法途绿＋物理途红即判红（复审轮 2 新-1 的绕过面②-a/②-b 就是靠"名字不变、真身进仓"打穿的）。
+OUT_DIR_PHYS=$(cd -- "$(dirname -- "$OUT_FILE")" 2>/dev/null && pwd -P) \
+  || bad_usage "证据输出目录的物理形解析失败（pwd -P）：$(dirname -- "$OUT_FILE")"
+[ -n "$OUT_DIR_PHYS" ] || bad_usage "证据输出目录的物理形解析得到空串：$(dirname -- "$OUT_FILE")"
+SCRIPT_DIR_PHYS=$(cd -- "$SCRIPT_DIR" && pwd -P)
+[ -n "$SCRIPT_DIR_PHYS" ] || bad_usage "脚本目录的物理形解析得到空串：$SCRIPT_DIR"
 OUT_ABS="$OUT_DIR_ABS/$(basename -- "$OUT_FILE")"
+OUT_ABS_PHYS="$OUT_DIR_PHYS/$(basename -- "$OUT_FILE")"
 SC_DIR_C=$(canon "$SCRIPT_DIR")
+SC_DIR_P=$(canon "$SCRIPT_DIR_PHYS")
 OUT_DIR_C=$(canon "$OUT_DIR_ABS")
+OUT_DIR_P=$(canon "$OUT_DIR_PHYS")
 OUT_ABS_C=$(canon "$OUT_ABS")
+OUT_ABS_P=$(canon "$OUT_ABS_PHYS")
+# 四条遍历＝脚本位×（词法＋物理）＋落点位×（词法＋物理）。
 SCRIPT_REPO=$(find_repo_root "$SC_DIR_C")
+SCRIPT_REPO_P=$(find_repo_root "$SC_DIR_P")
 OUT_REPO=$(find_repo_root "$OUT_DIR_C")
-# 锚点＝两处判定中最外层的仓根（一侧为空取另一侧；两侧互不嵌套时以落点侧为准，判定本就落点优先）。
+OUT_REPO_P=$(find_repo_root "$OUT_DIR_P")
+# lex_phys_differs：某一侧的词法形与物理形不同形＝那次解析经过了链接点或 MSYS 目录别名
+# （/tmp 与 C:\Users\...\Temp 就是本机最常见的一对，非链接也不同形），进 JSON 供事后审计。
+LINK_RESOLVED=false
+[ "$OUT_DIR_C" = "$OUT_DIR_P" ] || LINK_RESOLVED=true
+[ "$SC_DIR_C" = "$SC_DIR_P" ] || LINK_RESOLVED=true
+# 锚点：取四条遍历里最外层的仓根，只作审计记录、不参与判定（判定＝落点侧任一途命中即无条件退 2）。
 GUARD_ANCHOR=""
-if [ -n "$SCRIPT_REPO" ] && [ -n "$OUT_REPO" ]; then
-  case "$OUT_REPO" in
-    "$SCRIPT_REPO"|"$SCRIPT_REPO"/*) GUARD_ANCHOR=$SCRIPT_REPO ;;
-    *) GUARD_ANCHOR=$OUT_REPO ;;
+for cand in "$SCRIPT_REPO" "$SCRIPT_REPO_P" "$OUT_REPO" "$OUT_REPO_P"; do
+  [ -n "$cand" ] || continue
+  if [ -z "$GUARD_ANCHOR" ]; then GUARD_ANCHOR=$cand; continue; fi
+  case "$GUARD_ANCHOR" in
+    "$cand"|"$cand"/*) GUARD_ANCHOR=$cand ;;
   esac
-elif [ -n "$SCRIPT_REPO" ]; then
-  GUARD_ANCHOR=$SCRIPT_REPO
-else
-  GUARD_ANCHOR=$OUT_REPO
+done
+if [ -n "$OUT_REPO" ] || [ -n "$OUT_REPO_P" ]; then
+  # 落点自身在任何仓标记链之下——无论脚本住在哪（真仓/假标记子目录/无标记副本/镜像/经链接点）都判死。
+  OUT_LEG=词法途
+  OUT_HIT=$OUT_REPO
+  if [ -z "$OUT_HIT" ]; then OUT_LEG=物理途; OUT_HIT=$OUT_REPO_P; fi
+  bad_usage "证据输出路径不得在仓内（$OUT_ABS_C 落在仓根 $OUT_HIT 之下＝落点侧向上遍历命中仓标记，命中途=$OUT_LEG；落点词法形 $OUT_DIR_C／物理形 $OUT_DIR_P），请指到沙箱或镜像路径。"
 fi
-if [ -n "$OUT_REPO" ]; then
-  # 落点自身在任何仓标记链之下——无论脚本住在哪（真仓/假标记子目录/无标记副本/镜像）都判死。
-  bad_usage "证据输出路径不得在仓内（$OUT_ABS_C 落在仓根 $OUT_REPO 之下＝落点侧向上遍历命中仓标记），请指到沙箱或镜像路径。"
-fi
-if [ -n "$SCRIPT_REPO" ]; then
-  case "$OUT_ABS_C" in
-    "$SCRIPT_REPO"|"$SCRIPT_REPO"/*)
-      bad_usage "证据输出路径不得在仓内（$OUT_ABS_C 落在仓根 $SCRIPT_REPO 之下＝脚本侧向上遍历命中仓标记），请指到沙箱或镜像路径。" ;;
+SCRIPT_ROOTS=""
+for root in "$SCRIPT_REPO" "$SCRIPT_REPO_P"; do
+  [ -n "$root" ] || continue
+  case " $SCRIPT_ROOTS " in
+    *" $root "*) : ;;
+    *) SCRIPT_ROOTS="$SCRIPT_ROOTS $root" ;;
   esac
+  for cand in "$OUT_ABS_C" "$OUT_ABS_P"; do
+    case "$cand" in
+      "$root"|"$root"/*)
+        bad_usage "证据输出路径不得在仓内（$cand 落在仓根 $root 之下＝脚本侧向上遍历命中仓标记），请指到沙箱或镜像路径。" ;;
+    esac
+  done
+done
+SCRIPT_ROOTS=${SCRIPT_ROOTS# }
+if [ -n "$SCRIPT_ROOTS" ]; then
   GUARD_MODE=repo-context
-  echo "NOTE: 守卫判定=仓上下文（脚本侧仓根 $SCRIPT_REPO，落点侧向上遍历无标记），落点在仓外 → 放行：out=$OUT_ABS_C"
+  echo "NOTE: 守卫判定=仓上下文（脚本侧向上遍历命中仓标记：$SCRIPT_ROOTS；落点侧词法途 $OUT_DIR_C 与物理途 $OUT_DIR_P 两条遍历均无仓标记），落点在仓外（两条解析途都已跑过且都无标记） → 放行：out=$OUT_ABS_C"
 else
-  # 走到这里必须落点侧也无标记（上面 OUT_REPO 非空已判死），NOTE 放行有双零前置。
+  # 走到这里必须落点侧两条途也都无标记（上面命中即判死），NOTE 放行有"四条遍历皆无标记"的前置。
   GUARD_MODE=image-layout-exempt
-  echo "NOTE: 脚本位与落点位两处向上遍历均未在任何上级目录找到仓标记（.git 或 gpustack/SHA256SUMS-upstream.txt），判定为镜像形位（非仓上下文），跳过仓内落点守卫：out=$OUT_ABS_C"
+  echo "NOTE: 脚本位与落点位的四条向上遍历（词法途 cd&&pwd ＋ 物理途 cd&&pwd -P 含符号链接/目录联接解析目标）均未在任何上级目录找到仓标记（.git 或 gpustack/SHA256SUMS-upstream.txt），判定为镜像形位（非仓上下文），跳过仓内落点守卫：out=$OUT_ABS_C"
 fi
 [ -w "$OUT_DIR_ABS" ] || bad_usage "证据输出目录不可写：$OUT_DIR_ABS"
 
@@ -214,7 +269,9 @@ log_dir=$(mktemp -d 2>/dev/null)
 trap 'rm -rf "$log_dir"' EXIT
 OUT_LOG="$log_dir/gate-check-post.log"
 
-# 守卫判定结果落盘成小文件（进证据 JSON 的 guard 字段，事后可审计）。
+# 守卫判定结果落盘成小文件（进证据 JSON 的 guard 字段，事后可审计）：两条解析途（词法＋物理）各自
+# 命中的仓根都记进去；能在盘上持久化的 JSON 只有绿面，绿面里 output_side_repo_root* 恒为 null＝
+# "这两条遍历都跑过且都没命中"的凭证（红面在判死处即退出、不落 JSON，见头注）。
 # 为什么走文件不走 env：Windows/Git Bash 上 MSYS 运行时会把以 "/" 开头的 env 值按 ANSI 码页强转成
 # Windows 路径形态，中文仓根进 env 必折坏（实测 使用→乱码）；文件字节无损，python 按 UTF-8 读。
 # 镜像里（Linux）两种形态都无损，此处差异只影响本地跑样的字符串长相。
@@ -224,11 +281,14 @@ GUARD_SKIPPED=false
 gstr() {
   if [ -n "$1" ]; then printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"; else printf 'null'; fi
 }
-{ printf '{"mode":"%s","skipped":%s,"script_side_repo_root":' "$GUARD_MODE" "$GUARD_SKIPPED"
+{ printf '{"mode":"%s","skipped":%s,"legs":"lexical+physical(pwd -P)","lex_phys_differs":%s,"script_side_repo_root":' "$GUARD_MODE" "$GUARD_SKIPPED" "$LINK_RESOLVED"
   gstr "$SCRIPT_REPO"
+  printf ',"script_side_repo_root_physical":'; gstr "$SCRIPT_REPO_P"
   printf ',"output_side_repo_root":'; gstr "$OUT_REPO"
+  printf ',"output_side_repo_root_physical":'; gstr "$OUT_REPO_P"
   printf ',"anchor_repo_root":'; gstr "$GUARD_ANCHOR"
   printf ',"out_abs":'; gstr "$OUT_ABS_C"
+  printf ',"out_abs_physical":'; gstr "$OUT_ABS_P"
   printf '}\n'
 } > "$GUARD_FILE" || bad_usage "守卫判定文件写入失败：$GUARD_FILE"
 
@@ -341,8 +401,10 @@ if guard_file:
     with open(guard_file, encoding="utf-8") as fh:
         guard = json.load(fh)
 else:
-    guard = {"mode": None, "skipped": None, "script_side_repo_root": None,
-             "output_side_repo_root": None, "anchor_repo_root": None, "out_abs": None}
+    guard = {"mode": None, "skipped": None, "legs": None, "lex_phys_differs": None,
+             "script_side_repo_root": None, "script_side_repo_root_physical": None,
+             "output_side_repo_root": None, "output_side_repo_root_physical": None,
+             "anchor_repo_root": None, "out_abs": None, "out_abs_physical": None}
 
 evidence = {
     "evidence_schema": "sm75.gpustack.pcieipc-gate/v1",
