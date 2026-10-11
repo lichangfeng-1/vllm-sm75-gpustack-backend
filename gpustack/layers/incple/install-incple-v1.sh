@@ -12,7 +12,8 @@
 # 本层做什么：stage0 装完 docker/next 后，镜像内 site-packages 的
 #   vllm/models/qwen4_exp/nvidia/ngram_embedding.py 白名单只认 None/ModelOpt*/Fp8Config；
 #   Intel/Qwen3.8-Flash-Next-W4A16-AutoRound 的 quant_config 是 INCConfig，引擎启动即抛
-#   NotImplementedError。本脚本用锚点法插一支 INCConfig 分支＋一行 import（不整文件覆盖），
+#   NotImplementedError。本脚本用锚点法插一支 INCConfig 分支＋一行 import（不整文件覆盖；
+#   修复轮 1 起：锚点＝整行精确匹配，写盘＝patch 的临时件验绿后原子落位，红面目标件零写盘），
 #   并打印改前/改后 sha、做 INCConfig 计数断言——门红即构建红。
 #   D-04 注记：补丁只作用 site-packages 安装件；镜像内 /opt/vllm-sm75/source 源码副本
 #   保持原样属预期（运行期加载的是前者）。
@@ -27,9 +28,12 @@
 #   注意与任务 3 的 11a 分属不同脚本——11a 在 install-pcieipc.sh 的 import 门，11b 在本链的锚点门）：
 #   0   通过（含幂等再跑：改前改后 sha 一致）
 #   2   定位/前置失败（CTX 缺补丁件、目标探测失败、目标不存在、`..` 段、落点守卫判死、
-#       目标落在镜像源码副本 /opt/vllm-sm75/source）＋ patch 透传的解析失败
-#   11  patch_ple_inc.py 锚点缺失（11b；从 patch 原样透传）
-#   12  INCConfig 计数断言失败 / 终态 py_compile 失败（本任务登记码位）
+#       目标落在镜像源码副本 /opt/vllm-sm75/source）＋ patch 透传的解析/不可读写失败
+#   11  patch_ple_inc.py 锚点缺失（11b；从 patch 原样透传。修复轮 1 起锚点为整行精确匹配，
+#       缩进超集/前缀污染等漂移类都在此门出声且零写盘，不会"硬打"）
+#   12  INCConfig 计数断言失败 / 终态 py_compile 失败 / patch 临时件契约断言失败（本任务登记码位；
+#       修复轮 1 起 patch 为"临时件验绿后原子落位"，12 的红面目标件必然未动——本脚本在第 4 步
+#       对这一点做 sha 自证：patch 非零退出而目标件 sha 变了＝原子性破裂，同样红 12 并报异常）
 set -eu
 
 command -v sha256sum >/dev/null 2>&1 || { echo "ASSERT_FAIL 缺少必要工具 sha256sum"; exit 2; }
@@ -192,13 +196,21 @@ BEFORE_SHA=$(sha256sum "$TARGET" | cut -d' ' -f1)
 [ -n "$BEFORE_SHA" ] || { echo "ASSERT_FAIL 改前 sha 取到空串：$TARGET"; exit 2; }
 echo "BEFORE_SHA256=$BEFORE_SHA $TARGET"
 
-echo "=== 4) 锚点法插入（patch_ple_inc.py；缺锚点退 11b，回读契约/编译失败退 12，均原样透传） ==="
+echo "=== 4) 锚点法插入（patch_ple_inc.py；缺锚点退 11b，临时件契约/编译失败退 12，均原样透传） ==="
 set +e
 PLE_INC_TARGET="$TARGET" "$PYBIN" "$CTX/patch_ple_inc.py"
 patch_rc=$?
 set -e
 if [ "$patch_rc" != "0" ]; then
-  echo "ASSERT_FAIL patch_ple_inc.py 非零退出 rc=$patch_rc（11＝锚点缺失；2＝目标解析；12＝写盘契约）"
+  # 红面自证（修复轮 1 · I-2b）：patch 非零退出时目标件 sha 必须与改前一致——
+  # patch 已改为"临时件验绿后才原子落位"，校验未过根本碰不到目标件；若此处 sha 仍变了
+  # 或目标件消失，说明原子性破裂，不再透传，按断言红 12 出声。
+  FAIL_SHA=$(sha256sum "$TARGET" 2>/dev/null | cut -d' ' -f1) || FAIL_SHA=""
+  if [ -z "$FAIL_SHA" ] || [ "$FAIL_SHA" != "$BEFORE_SHA" ]; then
+    echo "ASSERT_FAIL patch 红退（rc=$patch_rc）但目标件 sha 非改前值或目标件丢失（当前='$FAIL_SHA' 期望=$BEFORE_SHA）＝原子性破裂：$TARGET"
+    exit 12
+  fi
+  echo "ASSERT_FAIL patch_ple_inc.py 非零退出 rc=$patch_rc（11＝锚点缺失；2＝目标解析/不可读写；12＝临时件契约/编译断言）——目标件 sha 与改前一致，红面零写盘"
   exit "$patch_rc"
 fi
 
@@ -211,6 +223,7 @@ if [ "$BEFORE_SHA" = "$AFTER_SHA" ]; then
 fi
 
 echo "=== 6) INCConfig 计数断言（预期常量：1 处 import＋1 处白名单分支） ==="
+# 常量出处：任务 4 简报步骤 3 逐字钉死"1 处 import＋1 处白名单"（非从锚点件推导）——任务 9 溯源用。
 EXPECTED_IMPORT_COUNT=1
 EXPECTED_WHITELIST_COUNT=1
 count_lines() {  # $1=固定串 $2=文件；grep -c 数"匹配行数"，rc=0/1 都合法（0 命中输出 0），rc>=2 是工具/文件级错误

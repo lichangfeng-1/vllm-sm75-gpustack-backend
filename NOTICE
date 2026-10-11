@@ -91,9 +91,13 @@ NOTICE —— vllm-sm75-gpustack-backend
     新增：gpustack/layers/incple/patch_ple_inc.py、gpustack/layers/incple/install-incple-v1.sh；
     改动：gpustack/Dockerfile.v1 续写层 2 段（FROM pcieipc-layer AS incple-layer，两道 RUN 门）。
     物料源：调试档案-20261007-AutoRound映射/部署物料/patch_ple_inc.py（自有件，2026-10-07 实测
-      成果；入库只改两处——①退出码换本任务登记码位：锚点缺失 4→11（＝11b）、写盘契约 5→12、
+      成果；入库改两处、修复轮 1 增至四处——①退出码换本任务登记码位：锚点缺失 4→11（＝11b）、写盘契约 5→12、
       目标解析 3→2；②兜底解析从 import vllm 改 importlib.util.find_spec，不执行包内代码；
-      锚点串、插入分支内容与幂等/契约判据逐字保留）。
+      ③（修复轮 1·审查 I-2a）锚点匹配从 str.count 子串改整行精确匹配（缩进参与比对，缩进超集/
+      前缀污染等漂移类一律锚点门红 11 零写盘，堵死"假阳过门后硬打"）；④（修复轮 1·审查 I-2b）
+      写盘改为临时件验绿后原子落位（py_compile＋回读契约先在临时件上验，红＝弃临时件退 12、
+      目标件不变），install 在第 4 步对"patch 红退但目标件 sha 变了"做原子性破裂自证同样红 12；
+      锚点串、插入分支内容与幂等/契约判据逐字保留，绿面产物与改前逐字节一致）。
     内容：目标模型 Intel/Qwen3.8-Flash-Next-W4A16-AutoRound 的 quant_config 是 INCConfig，
       而镜像内 site-packages 的 vllm/models/qwen4_exp/nvidia/ngram_embedding.py 白名单只认
       None/ModelOpt*/Fp8Config，引擎启动即抛 NotImplementedError。本层用锚点法（内容锚定，
