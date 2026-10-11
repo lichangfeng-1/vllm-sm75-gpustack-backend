@@ -121,5 +121,42 @@ NOTICE —— vllm-sm75-gpustack-backend
     作用域：仓内上游树与基线表零改动（bash gpustack/gate-tree-unchanged-v1.sh rc=0 自证）；
       改动全部落在自研作用域 gpustack/ 与本 NOTICE。
 
+  改动 4（任务 5 · 镜像层 3 时区＝镜像默认 UTC+8）
+    改动：gpustack/Dockerfile.v1 续写层 3 段（FROM incple-layer AS timezone-layer；本段是文件末段＝
+      最终层，任务 14 的成品构建取 --target timezone-layer）。仓内零新增件——本层不 COPY 任何物料。
+    内容：ENV DEBIAN_FRONTEND=noninteractive ＋ apt-get 装 tzdata（--no-install-recommends，装完清
+      缓存与索引；按简报口径不改 apt 源，国内可达性若判红再议）；ENV TZ=Asia/Shanghai 定死镜像默认
+      时区为 UTC+8；再加兜底接线 ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime 与
+      /etc/timezone=Asia/Shanghai（供不读 TZ 环境变量、只认 localtime 文件的消费者）。加这层的依据：
+      上游 beta2 树完全没有时区处理——仓根 grep -rIl（排除 gpustack/）对 tzdata、"TZ="、localtime、
+      zoneinfo 四类命中的文件数均为 0（"utc" 只命中 tools/*.py 里显式的 datetime.now(timezone.utc)，
+      那是上游自有件、不可改，也不受容器 TZ 影响）。
+    门禁（本层全部判据只用一个红码 18＝时区断言）：
+      门 2/3 兜底接线先做存在性断言 test -f /usr/share/zoneinfo/Asia/Shanghai（tzdata 没装成当场出声，
+      不留到 date 比对时才以"缩写不对"的迷惑形态冒出）；
+      门 3/3a 为简报逐字断言 RUN test "$(date +%Z)" = "CST" || (date; exit 18)；
+      门 3/3b 加严腿（仍归 18）断四件事：TZ 真落进容器环境（printenv TZ，空值也走这一支）、
+      date +%z 必须 +0800（CST 缩写本身歧义——America/Chicago 与 America/Havana 冬令时同样输出 CST，
+      只看 %Z 会放走"缩写对但偏移错"的镜像）、/etc/localtime 与上海 tzfile 逐字节一致（cmp 跟随
+      符号链接，防接错区或被 tzdata postinst 改回 Etc/UTC）、/etc/timezone 文本一致；
+      并对 date/printenv/cmp/cat 先做 command -v 存在性断言，工具缺失单独文案点名（仍归 18），
+      避免把"工具不在 PATH"误读成"时区漂移"。
+      apt 自身失败＝apt 的非零码，由 gpustack/build-gpustack-v1.sh --build 统一收进 20＝构建失败；
+      本层不新增码位（18 已在交接约束第 4 条账本登记，且只被本层使用）。
+    运行期覆盖语义（注册卡说明行口径，同时落进镜像 LABEL sm75.gpustack.tz_override）：GPUStack 部署时
+      模型 env 的 TZ 优先于本层镜像默认——2.2.3 证据 gpustack/worker/backends/base.py:457-458
+      （`if self._model.env:` / `    env.update(self._model.env)`，模型 env 直接 update 掉从 worker
+      进程继承的那份 env）；交付用的 env 粘贴块已含 TZ=Asia/Shanghai 行（gpustack/env-paste-v1.txt
+      第 23 行，任务 7 建的 24 行块），与镜像默认同字，不出现两处各定一个时区。
+      gpustack/backend-version-card-v1.md 是任务 7 并行在建的件，本任务不创建也不修改它：该说明行先以
+      Dockerfile 层 3 注释块＋LABEL 字段落地，待任务 7 收口后由任务 9 核对是否已进注册卡。
+    验证形态：阶段一无镜像环境（不可 docker build、不联网、不碰服务器），构建期断言以逻辑等价干跑复算
+      ——判据从 gpustack/Dockerfile.v1 现场抽取（驱动内不存判据副本），只做容器绝对路径→沙箱假 root
+      的替换，date/printenv 用 stub 建模容器 GNU coreutils 行为；25 条用例全 PASS（含容器同族 dash
+      复跑 4 条），红面逐条命中 18，绿面端到端（接线→逐字断言→加严腿）全 0。
+      构建期断言的容器内真跑在阶段二任务 14 复核。
+    作用域：只写容器内的 tzdata 与 /etc/localtime、/etc/timezone 两处接线；仓内上游树与基线表零改动
+      （bash gpustack/gate-tree-unchanged-v1.sh rc=0 自证），改动全部落在自研作用域 gpustack/ 与本 NOTICE。
+
   已确定的自研文件放置约定：本仓新增文件只放在仓根的新顶层路径或 gpustack/ 内，
   不写入上游的 14 个顶层条目，以免与上游冻结面混淆。

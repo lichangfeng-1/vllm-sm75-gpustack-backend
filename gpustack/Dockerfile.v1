@@ -9,7 +9,8 @@
 #   层 1    ＝ pcieipc（本节）：FlashInfer 0.7.0.post1 的 PCIe-IPC allreduce 回填进镜像内 0.6.18；
 #   层 2    ＝ incple（本节）：AutoRound（INC）量化白名单补丁进镜像内 site-packages 的
 #             qwen4_exp PLE/n-gram 嵌入（任务 4，FROM 层 1）；
-#   层 3    ＝ 时区（任务 5 续写，FROM 层 2）。
+#   层 3    ＝ 时区（本节）：tzdata＋ENV TZ=Asia/Shanghai＋构建期断言（任务 4/5 接力，FROM 层 2；
+#             本段是文件末段，段尾即最终层，任务 14 成品构建取 --target timezone-layer）。
 #
 # 构建形态（阶段二任务 14 执行；本阶段只做静态与本地夹具验证）：
 #   docker build --file gpustack/Dockerfile.v1 --target pcieipc-layer \
@@ -20,7 +21,7 @@
 # 门红即构建失败：本文件每个 RUN 都是门禁，任一非零 docker 直接失败；
 #   gpustack/build-gpustack-v1.sh --build 把 docker 的非零码统一收进 20＝构建失败，
 #   层内脚本自己的码（17 件数门、11a import 门禁、11b incple 锚点缺失、12 incple 计数/编译断言、
-#   2 定位/前置、gate-check 自有 2）在构建日志里逐条可见。
+#   18 时区断言（层 3 全部判据只用这一个码）、2 定位/前置、gate-check 自有 2）在构建日志里逐条可见。
 #
 # 上游红线：本文件与 gpustack/layers/ 全在自研作用域，上游 docker/Dockerfile 及 14 个顶层项零改动
 #   （完工跑 bash gpustack/gate-tree-unchanged-v1.sh 须 rc=0）。
@@ -119,4 +120,96 @@ RUN set -eu; \
 
 # 层 2 的物料与脚本保留在镜像内（/opt/vllm-sm75/incple），供任务 14 验收就地重跑；
 # 运行期真正生效的是 site-packages 里的终态件，改前/改后 sha 均打印在构建日志里。
-# ===================== 层 3：时区（任务 5 在本文件续写，FROM incple-layer） =====================
+# ===================== 层 3：时区（任务 5 本节，FROM incple-layer；本段是文件末段＝最终层） =====================
+# 为什么要有这层：上游 beta2 树里没有任何时区处理——仓根执行
+#   grep -rIl --exclude-dir=.git --exclude-dir=gpustack -e tzdata -e "TZ=" -e localtime -e zoneinfo .
+# 四类命中文件数全为 0（"utc" 的命中只落在 tools/validate-sm75-serving.py:38-39 与
+# tools/benchmark-dflash-serving.py 的 datetime.now(timezone.utc)，那是显式 UTC 打时间戳，
+# 不受容器 TZ 影响，且上游件不可改）。基座 vllm/vllm-openai 按官方镜像惯例默认 UTC（该默认值的
+# 容器内实测＝阶段二任务 14 的秒级探针 G-3，本层不依赖它成立——无论基座是哪个区，本层都显式定死）。
+# 结论：日志与推理侧时间戳按 UTC 出，与本机八卡用户的对时习惯不一致，故本层把镜像默认时区定为 Asia/Shanghai（UTC+8）。
+FROM incple-layer AS timezone-layer
+
+ARG BASE_TAG
+
+# 运行期覆盖语义（注册卡说明行的原文口径，见下方 LABEL 的 tz_override 字段）：
+#   1) 本层的 ENV TZ=Asia/Shanghai 只是**镜像默认值**；GPUStack 部署时模型 env 里的 TZ 优先级更高。
+#      2.2.3 证据：gpustack/worker/backends/base.py:457-458 ——
+#        `if self._model.env:` / `    env.update(self._model.env)`
+#      模型 env 直接 update 掉从 worker 进程继承的那份 env，容器创建时模型 env 的 TZ 赢过镜像默认，
+#      所以"用户在 GPUStack 里填了别的时区"不会被本层悄悄覆盖回来，反之用户不填时本层兜住。
+#   2) 交付给用户的 env 粘贴块已含 `TZ=Asia/Shanghai` 行（gpustack/env-paste-v1.txt 第 23 行，
+#      任务 7 建的 24 行块），镜像默认与粘贴块显式值同字，不会出现两处各定一个时区互相打架。
+#   3) gpustack/backend-version-card-v1.md 是任务 7 并行在建的件，本会话不创建也不修改它；
+#      上述说明先以本注释块＋LABEL 字段落进镜像层，待任务 7 收口后由任务 9 核对是否已进注册卡
+#      （已在 task-5-report.md 第九节登记该待办）。
+# 构建形态（任务 14）：docker build --file gpustack/Dockerfile.v1 --target timezone-layer
+#   --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 --tag vllm-sm75-gpustack:v0.1.7-beta2-v1 <仓根>
+#   （设计稿第五节 stage1 收尾口径；是否再补 sm75.gpustack.layers 汇总 LABEL 由任务 9/14 定，本层不擅自加）。
+LABEL sm75.gpustack.layer="3-timezone" \
+      sm75.gpustack.component="timezone-default-asia-shanghai" \
+      sm75.gpustack.base="${BASE_TAG}" \
+      sm75.gpustack.tz_default="Asia/Shanghai" \
+      sm75.gpustack.tz_override="模型 env 的 TZ 优先于本层 ENV TZ（gpustack 2.2.3 gpustack/worker/backends/base.py:457-458 env.update(model env)）；粘贴块 gpustack/env-paste-v1.txt 已含 TZ=Asia/Shanghai（任务 7）" \
+      sm75.gpustack.files_added="0（仓内零新增；容器内新增 tzdata 与 /etc/localtime、/etc/timezone 接线）" \
+      sm75.gpustack.scope="image runtime default only; vllm tree and upstream 14 top-level items untouched" \
+      sm75.gpustack.upstream="tzdata（IANA 时区数据库的 Debian/Ubuntu 打包：tz 数据 public-domain＋Debian 打包 GPL-2）；阶段二构建期从 apt 源安装，本层不往仓内落任何第三方件"
+
+# apt 源不改（简报口径）：本层不动 sources.list，也不换国内 apt 镜像。Debian/Ubuntu 官方 CDN 的
+# 国内可达性一般，若阶段二构建判红，再按任务 2 的 preflight 口径议镜像替换（不在本任务范围）。
+# DEBIAN_FRONTEND 会随层继承到运行期（与任务 2 补丁里 UV_DEFAULT_INDEX 同一口径），
+# 运行期不跑 apt，故不重置；它只是让 tzdata 的 postinst 不弹交互表单。
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 门 1/3 tzdata 装机：--no-install-recommends 只拿 tzdata 本体，装完清缓存与索引，
+# 不给最终层留 apt lists。apt 失败＝它自己的非零码，由 build-gpustack-v1.sh --build 统一收进
+# 20＝构建失败；本层不新增码位（时区判据只用 18）。真装发生在阶段二（本阶段无镜像环境）。
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends tzdata; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+# 镜像默认时区＝UTC+8（简报逐字）
+ENV TZ=Asia/Shanghai
+
+# 门 2/3 兜底接线：存在性断言排在任何比对之前（tzdata 没装成时这里就出声，不留到 date 比对时
+# 才以"缩写不对"的迷惑形态冒出来）。不读 TZ 环境变量、只认 /etc/localtime 与 /etc/timezone 的
+# 消费者（部分 JVM 与 C 库、日志组件）由此拿到同一个区。红 18。
+RUN set -eu; \
+    test -f /usr/share/zoneinfo/Asia/Shanghai \
+      || { echo "红 18：/usr/share/zoneinfo/Asia/Shanghai 不存在——tzdata 未装成或被裁掉，兜底接线无从谈起。"; exit 18; }; \
+    ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
+    printf 'Asia/Shanghai\n' > /etc/timezone; \
+    echo "时区接线完成：/etc/localtime -> /usr/share/zoneinfo/Asia/Shanghai，/etc/timezone=Asia/Shanghai"
+
+# 门 3/3a 构建期断言（简报逐字句；红 18＝本层唯一红码）：容器里的 date 真读出 CST 这层才算成立。
+# 明写：构建期断言的容器内真跑在阶段二任务 14 复核（阶段一无镜像环境，本地只做逻辑等价干跑，
+# 见 task-5-report.md 第五节与负控台账"任务 5 轮"）。
+RUN test "$(date +%Z)" = "CST" || (date; exit 18)
+
+# 门 3/3b 加严腿（仍只用 18）：堵住逐字句的三处残余边界——
+#   a) CST 这个缩写本身是歧义的：America/Chicago 与 America/Havana 冬令时同样输出 CST，
+#      单看 %Z 会放走"缩写对但偏移错"的镜像，故再断 date +%z 必须 +0800（Asia/Shanghai 无夏令时）；
+#   b) 断 TZ 真落进容器环境（printenv 读运行期 env），不是只在 Dockerfile 里写着；
+#   c) 断 /etc/localtime 与 Asia/Shanghai 的 tzfile 逐字节一致、/etc/timezone 文本一致——
+#      防"接错区"或 tzdata postinst 把 localtime 改回 Etc/UTC。
+#   工具不在 PATH 单列文案点名（否则会被误读成时区漂移），码仍归 18。
+RUN set -eu; \
+    command -v date >/dev/null 2>&1 || { echo "红 18：date 不在 PATH（工具缺失，不是时区漂移）。"; exit 18; }; \
+    command -v printenv >/dev/null 2>&1 || { echo "红 18：printenv 不在 PATH（工具缺失，不是时区漂移）。"; exit 18; }; \
+    command -v cmp >/dev/null 2>&1 || { echo "红 18：cmp 不在 PATH（工具缺失，不是时区漂移）。"; exit 18; }; \
+    command -v cat >/dev/null 2>&1 || { echo "红 18：cat 不在 PATH（工具缺失，不是时区漂移）。"; exit 18; }; \
+    test "$(printenv TZ)" = "Asia/Shanghai" \
+      || { echo "红 18：容器环境里的 TZ 不是 Asia/Shanghai（实得 [$(printenv TZ)]，空值也走这一支）。"; exit 18; }; \
+    test "$(date +%z)" = "+0800" \
+      || { echo "红 18：date 读出的 UTC 偏移不是 +0800（实得 [$(date +%z)]）——CST 缩写有歧义，偏移才是判据。"; exit 18; }; \
+    cmp -s /etc/localtime /usr/share/zoneinfo/Asia/Shanghai \
+      || { echo "红 18：/etc/localtime 不存在或与 /usr/share/zoneinfo/Asia/Shanghai 内容不一致（接错区或被 postinst 改回）。"; exit 18; }; \
+    test "$(cat /etc/timezone)" = "Asia/Shanghai" \
+      || { echo "红 18：/etc/timezone 文本不是 Asia/Shanghai（实得 [$(cat /etc/timezone)]）。"; exit 18; }; \
+    echo "时区断言全绿：TZ=Asia/Shanghai、date +%Z=CST、date +%z=+0800、localtime 与 timezone 接线一致"
+
+# 层 3 只在容器内落 tzdata 与两处接线文件，仓内零新增件；本段即最终层，
+# 成品镜像的时区默认值由镜像 ENV TZ 承载，运行期可由 GPUStack 模型 env 的 TZ 覆盖（见上方注释）。
+# ===================== 层 3 结束（文件末段） =====================
