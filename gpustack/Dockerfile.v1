@@ -7,7 +7,8 @@
 #             tag ＝ vllm-sm75:v<docker/VERSION>（当前 vllm-sm75:v0.1.7-beta2），
 #             由 gpustack/build-gpustack-v1.sh --build 产出；
 #   层 1    ＝ pcieipc（本节）：FlashInfer 0.7.0.post1 的 PCIe-IPC allreduce 回填进镜像内 0.6.18；
-#   层 2    ＝ incple（任务 4 续写，FROM 层 1）；
+#   层 2    ＝ incple（本节）：AutoRound（INC）量化白名单补丁进镜像内 site-packages 的
+#             qwen4_exp PLE/n-gram 嵌入（任务 4，FROM 层 1）；
 #   层 3    ＝ 时区（任务 5 续写，FROM 层 2）。
 #
 # 构建形态（阶段二任务 14 执行；本阶段只做静态与本地夹具验证）：
@@ -18,7 +19,8 @@
 #
 # 门红即构建失败：本文件每个 RUN 都是门禁，任一非零 docker 直接失败；
 #   gpustack/build-gpustack-v1.sh --build 把 docker 的非零码统一收进 20＝构建失败，
-#   层内脚本自己的码（17 件数门、11a import 门禁、2 定位/前置、gate-check 自有 2）在构建日志里逐条可见。
+#   层内脚本自己的码（17 件数门、11a import 门禁、11b incple 锚点缺失、12 incple 计数/编译断言、
+#   2 定位/前置、gate-check 自有 2）在构建日志里逐条可见。
 #
 # 上游红线：本文件与 gpustack/layers/ 全在自研作用域，上游 docker/Dockerfile 及 14 个顶层项零改动
 #   （完工跑 bash gpustack/gate-tree-unchanged-v1.sh 须 rc=0）。
@@ -80,3 +82,41 @@ RUN set -eu; \
 
 # 层 1 的物料与脚本保留在镜像内（/opt/vllm-sm75/pcieipc），供验收就地重跑 gate-check；
 # 站点目录里的终态文件才是运行期真正生效的产物，两者由证据 JSON 逐件钉住。
+
+# ===================== 层 2：incple（AutoRound 量化白名单，Intel/Qwen3.8-Flash-Next-W4A16-AutoRound 起机的必要前提） =====================
+FROM pcieipc-layer AS incple-layer
+
+ARG BASE_TAG
+
+# LABEL 证据行：本层改的是 site-packages 安装件（D-04：镜像内 /opt/vllm-sm75/source 源码副本
+# 保持原样属预期，运行期加载的是 site-packages 件）；幂等复跑门把"不许重复插"钉进构建期。
+LABEL sm75.gpustack.layer="2-incple" \
+      sm75.gpustack.component="incple-autoround-ple-whitelist" \
+      sm75.gpustack.base="${BASE_TAG}" \
+      sm75.gpustack.target_model="Intel/Qwen3.8-Flash-Next-W4A16-AutoRound" \
+      sm75.gpustack.patch_script="gpustack/layers/incple/patch_ple_inc.py" \
+      sm75.gpustack.files_modified="1(site-packages ngram_embedding.py)" \
+      sm75.gpustack.scope="only vllm/models/qwen4_exp/nvidia/ngram_embedding.py in site-packages; /opt/vllm-sm75/source copy untouched by design (D-04)" \
+      sm75.gpustack.upstream="插入分支与 vllm 上游既有 INCConfig 形态同构（qwen_gdn_linear_attn.py:45/:778）；锚点法只插一行 import＋一支 if，不整文件覆盖"
+
+COPY gpustack/layers/incple /opt/vllm-sm75/incple
+
+# 门 1/2 装机＋构建期即验（红码：2 定位/前置与落点守卫、11b 锚点缺失、12 计数/编译断言）：
+# find_spec 探测 site-packages 实位（不写死路径）→ 落点守卫（词法＋物理向上遍历仓标记）
+# → 改前 sha → 锚点法插入 → 改后 sha → INCConfig 计数断言（1 处 import＋1 处白名单）。
+RUN set -eu; \
+    sh /opt/vllm-sm75/incple/install-incple-v1.sh /opt/vllm-sm75/incple
+
+# 门 2/2 幂等复跑：第二次必须退 0 且打印改前改后 sha 一致（IDEMPOTENT_NO_CHANGE），
+# 证明补丁不重复插；若发生重复插，计数断言（期望 1/1）红 12 直接构建失败。
+RUN set -eu; \
+    rc=0; out=$(sh /opt/vllm-sm75/incple/install-incple-v1.sh /opt/vllm-sm75/incple 2>&1) || rc=$?; \
+    printf '%s\n' "$out"; \
+    if [ "$rc" -ne 0 ]; then echo "红：incple 幂等复跑非零退出 rc=$rc（本码即复跑实跑码，门红＝构建红）"; exit "$rc"; fi; \
+    printf '%s\n' "$out" | grep -q "IDEMPOTENT_NO_CHANGE" || { \
+      echo "红：incple 幂等复跑未报 IDEMPOTENT_NO_CHANGE（第二次运行改前改后 sha 不一致？）"; exit 12; }; \
+    echo "INCPLE_IDEMPOTENT_RERUN_OK"
+
+# 层 2 的物料与脚本保留在镜像内（/opt/vllm-sm75/incple），供任务 14 验收就地重跑；
+# 运行期真正生效的是 site-packages 里的终态件，改前/改后 sha 均打印在构建日志里。
+# ===================== 层 3：时区（任务 5 在本文件续写，FROM incple-layer） =====================

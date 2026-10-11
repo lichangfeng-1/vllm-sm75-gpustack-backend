@@ -87,5 +87,35 @@ NOTICE —— vllm-sm75-gpustack-backend
       --build-arg PCIEIPC_DEFER=1 --build-arg PCIEIPC_IMPORT_GATE_LABEL=deferred，
       层 1 有 RUN 门核对两者不成对即构建失败，镜像 LABEL 上留得下证据。
 
+  改动 3（任务 4 · 镜像层 2 incple＝AutoRound 量化白名单补丁）
+    新增：gpustack/layers/incple/patch_ple_inc.py、gpustack/layers/incple/install-incple-v1.sh；
+    改动：gpustack/Dockerfile.v1 续写层 2 段（FROM pcieipc-layer AS incple-layer，两道 RUN 门）。
+    物料源：调试档案-20261007-AutoRound映射/部署物料/patch_ple_inc.py（自有件，2026-10-07 实测
+      成果；入库只改两处——①退出码换本任务登记码位：锚点缺失 4→11（＝11b）、写盘契约 5→12、
+      目标解析 3→2；②兜底解析从 import vllm 改 importlib.util.find_spec，不执行包内代码；
+      锚点串、插入分支内容与幂等/契约判据逐字保留）。
+    内容：目标模型 Intel/Qwen3.8-Flash-Next-W4A16-AutoRound 的 quant_config 是 INCConfig，
+      而镜像内 site-packages 的 vllm/models/qwen4_exp/nvidia/ngram_embedding.py 白名单只认
+      None/ModelOpt*/Fp8Config，引擎启动即抛 NotImplementedError。本层用锚点法（内容锚定，
+      不用行号）在该件插入一行 INCConfig import 与一支 Unquantized 分支——插入形态与上游既有
+      同构先例对齐（vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py:45/:778）；
+      只插不覆盖（0.16 的整文件替换形态跨版本漂移过，本轮不复用）。锚点经复核：beta2 overlay
+      docker/next/overlay/vllm/models/qwen4_exp/nvidia/ngram_embedding.py:186 为
+      `if not isinstance(quant_config, Fp8Config):` 且全件不含 INCConfig（上游未吸收，补丁必要）。
+      装机与断言：install-incple-v1.sh 构建期用 python find_spec 探测 site-packages 实位（不写死
+      路径），打印改前/改后 sha256，锚点法插入后断言 INCConfig 计数＝预期常量（1 处 import＋
+      1 处白名单分支）并终态 py_compile；落点守卫抄任务 3 修复轮 3 定形范式（词法＋`cd && pwd -P`
+      物理两条途各自向上遍历仓标记 .git / gpustack/SHA256SUMS-upstream.txt，命中即退 2 零写盘；
+      含 .. 段的路径确定性红）。层 2 第二道 RUN 为构建期幂等复跑：第二次必须退 0 且改前改后
+      sha 一致（IDEMPOTENT_NO_CHANGE），双插会被计数断言红 12。
+    退出码归属（与交接约束第 4 条登记一致）：11b 锚点缺失在 patch_ple_inc.py（install 原样透传）；
+      12 计数/编译断言在 install-incple-v1.sh 与 patch 的回读契约；2 定位/前置/落点守卫；
+      与任务 3 的 11a（install-pcieipc.sh 的 import 门）分属不同脚本、不同语义。
+      构建期 docker 把非零统一收进 20＝构建失败，门红即构建红。
+    D-04 注记：本补丁仅对 site-packages 安装件生效；镜像内 /opt/vllm-sm75/source 源码副本
+      保持原样属预期（运行期加载的是前者；install 对后者落点直接判红拒装）。
+    作用域：仓内上游树与基线表零改动（bash gpustack/gate-tree-unchanged-v1.sh rc=0 自证）；
+      改动全部落在自研作用域 gpustack/ 与本 NOTICE。
+
   已确定的自研文件放置约定：本仓新增文件只放在仓根的新顶层路径或 gpustack/ 内，
   不写入上游的 14 个顶层条目，以免与上游冻结面混淆。
