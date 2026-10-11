@@ -1,0 +1,141 @@
+# syntax=docker/dockerfile:1.7
+#
+# Dockerfile.bench-v1 —— BenchLocal 测速容器（任务 6；本文件是我方文件，不属上游冻结面）
+#
+# 这层容器做什么：把 BenchLocal 测试台（Node harness ＋ benchlocal verifier 运行时）
+#   装到 stage1 成品镜像（gpustack/Dockerfile.v1 末段 timezone-layer 的产物，
+#   tag＝vllm-sm75-gpustack:v0.1.7-beta2-v1）之上，与 GPUStack 管的推理容器并行跑分。
+#   两容器是不是同一层产物，由 gpustack/bridge-sha-v1.sh 逐件对拍 10 件层产物
+#   （pcieipc 9 件＋incple 目标件 1 件）的 sha256 来钉（一致退 0，不一致退 13 打印差集表）。
+#
+# 构建形态（阶段二任务 14 执行；阶段一只做静态验证：bash -n 与夹具负控，见 task-6-report.md）：
+#   docker build --file gpustack/Dockerfile.bench-v1 \
+#     --build-arg STAGE1_TAG=vllm-sm75-gpustack:v0.1.7-beta2-v1 \
+#     -t vllm-sm75-gpustack-bench:v1 <仓根>
+#   运行必带 --network host（硬约束 1，见下）。
+#
+# ===================== 两段式抄录门（审计 C-01 处置） =====================
+# 抄录来源：上游 docker/Dockerfile.ultra-full 的 benchlocal 相关段（仓内 ultra-full 是
+#   上游原字节、已冻结；先读 :253-283 区段确认真实行号与内容后抄录——本文件注记的行号
+#   以未改动上游字节为基准，比对以内容锚定为准，行号只作注记）。
+#   门第 1 段（RUN 逐字）：抄录段的来源 RUN 行（:256、:267-268、:270 共三行/组）与本文件
+#     逐字一致、零 diff；我方新增的 RUN 只有 npm 源切换一行，正文就近标注"非抄录域"。
+#   门第 2 段（结构行对照）：FROM/ARG/COPY/ENV/WORKDIR/LABEL 允许改动，但每行都进下方
+#     "来源行号→本文件行号"对照表（含原样抄入行，便于整表复核）；未抄入的来源行逐行
+#     列"不抄原因"，不给"漏抄当免检"留空间。
+#
+# 结构行对照表（左＝docker/Dockerfile.ultra-full 行号与内容要旨，右＝本文件行号与改动说明）：
+#   :3   ARG NODE_IMAGE=<官方 node:22.23.2 digest 钉定> → 104 改动：默认值换国内代理前缀，tag 与 digest 随上游不动（见"国内源设计"）
+#   :253 FROM ${NODE_IMAGE} AS harness                → 107 原样
+#   :254 WORKDIR /opt/harness                         → 108 原样
+#   :255 COPY ultra/harness/package.json ultra/harness/package-lock.json ./ → 109 原样
+#   :258 FROM sm75-core AS final                      → 118 改动：基座换 stage1 成品 tag（本容器非 ultra 全身，stage1 即 GPUStack 线的 sm75-core 等价物）
+#   :265 COPY --from=harness /usr/local/bin/node /usr/local/bin/node → 120 原样
+#   :266 COPY --from=harness /opt/harness/node_modules /opt/harness/node_modules → 121 原样
+#   :269 COPY ultra/source /opt/sm75-workbench        → 125 原样（构建上下文＝仓根，ultra/ 在上游冻结树内，只读引用）
+#   :271 LABEL io.sm75.benchlocal.unified="1"         → 128 原样（保留上游 benchlocal 统一标记，运行期探测读它）
+#   :282 WORKDIR /opt/sm75-workbench                  → 140 原样
+#   :283 ENV SM75_BENCHLOCAL_RUNTIME=/opt/sm75-workbench/benchlocal-native → 141 原样
+#
+# RUN 逐字行对照（内容锚定；来源行 → 本文件行）：
+#   :256 RUN npm ci --omit=dev --no-audit --no-fund                     → 115
+#   :267-268 RUN ln -sf /opt/harness/node_modules/pnpm/bin/pnpm.mjs …  → 123-124（两行续行形制原样，含缩进）
+#   :270 RUN python3 /opt/sm75-workbench/benchlocal-verifiers/install-runtime.py → 127
+#
+# 未抄入的来源行与原因（均在 :253-283 区段内，逐行归置）：
+#   :259 ENV NCCL_P2P_LEVEL=SYS         — ultra final 的部署拓扑项，非 benchlocal 测试台依赖；
+#                                         GPUStack 侧通信拓扑判据归任务 7 compat-matrix 与任务 14 实测，本容器不擅自继承。
+#   :260-264 ARG SOURCE_REVISION/RELEASE_VERSION 与三条 OCI 身份 LABEL
+#                                        — 上游镜像身份标注；本文件以我方 sm75.gpustack.* LABEL 代替
+#                                          （见 bench 段），避免一个镜像里两套身份互相矛盾。
+#   :272-273 ARG INSTALL_LMCACHE 与 lmcache 可选段
+#                                        — 与 BenchLocal 跑分无关，不引入（少一个构建期下载点少一分阶段二风险）。
+#   :274-277 font-scale 与 console native plugins/verify bundles 的 RUN
+#                                        — 控制台 UI 段，非测试台；其 RUN 若抄入会引入非来源段逐字约束之外的耦合。
+#   :278-281 pstate-supervisor 与 SM75_CONSOLE_* / NVIDIA_DRIVER_CAPABILITIES ENV
+#                                        — 省电守护与控制台端口；审计 C-04 结论是 GPUStack 形态下守护方案未定，本容器不带。
+#   :284 ENV SM75_EDITION=ultra          — 本容器不是 ultra 全身；误继承会让运行期 edition 探测走错分支。
+#   :285-286 ENTRYPOINT/CMD              — 入口随 stage1 的 GPUStack 形态继承；bench 容器由人
+#                                         docker exec 驱动跑分，不重复声明入口。
+#
+# ===================== BenchLocal 三硬约束（审计 C-01；设计说明） =====================
+# 约束 1：verifier 回连 127.0.0.1 ⇒ 容器必须以 --network host 运行。
+#   仓内证据：ultra/source/benchlocal-verifiers/gateway.mjs:69 与 :87 ——
+#   fetch('http://127.0.0.1:'+innerPort+'/health') 与 fetch('http://127.0.0.1:'+innerPort+req.url)
+#   两处；回连目标是容器自身回环，不走网卡。推理 server 在同宿主 GPUStack 容器里时，
+#   本容器只有开 host 网络，127.0.0.1:端口才够得着宿主暴露的推理端口。
+#   陷阱形态：bridge 网络下 verifier 直接超时，文案像"模型没起来"而不是网络问题，易误诊——
+#   所以列成硬约束，任务 14 的运行核对表第一行就是 docker run --network host。
+# 约束 2：主程序实名 benchlocal-app；无头显示依赖 xvfb-run，而 xvfb-run 依赖 xauth 在位。
+#   出处说明（不粉饰）：仓内零命中——全仓 grep -ri "benchlocal-app"/"xvfb"/"xauth" 均 0 行
+#   （过程件记录见 task-6-report.md）；本约束来自审计 C-01 与服务器实测档
+#   （sdd-workspace/plan-v1/server-inventory-v1.md 容器行 bl-dbg＝benchlocal:0.4.0-xvfb）。
+#   运行期坑：xauth 缺位时 xvfb-run 报 "xvfb-run: error: xauth command not found"——
+#   文案指 xauth，根因是包缺失而非 X 显示配置错。
+#   门禁项＋秒级探针（阶段一不可定，任务 14 执行）：
+#     docker exec <bench容器> sh -c 'command -v benchlocal-app; command -v xvfb-run; command -v xauth'
+#   三行都出路径才算绿；若 xauth/xvfb 缺，补救是本文件追加一支我方 RUN（apt-get install，
+#   与抄录域无关）——是否追加待探针出红再动，本档不预抄。
+# 约束 3：跑分受 max-num-seqs=4 限制，只能 serial（一次一任务）。
+#   仓内证据：ultra/source/console/public/app.js:1401 —— ["seq", "--max-num-seqs", "4"]（档位默认）；
+#   ultra/source/console/model-launch.mjs:66/:75-77 —— 预设只用 1/8/16，其中 8/16 超出八卡
+#   显存实限（4），并发跑分不是变红而是排队超时→分数虚低。
+#   结论：harness 并发参数固定 1；任何并行跑分结果不作数（任务 14 跑分核对表条目）。
+#
+# ===================== 国内源设计（bench-v1 是我方文件，直接写国内默认） =====================
+# NODE_IMAGE：默认值＝国内代理前缀 docker.m.daocloud.io/library/ ＋上游 :3 同一 tag 同一
+#   digest（digest 是内容地址，代理与官方同 digest ⇒ 产物字节一致可证）。
+#   官方回退口（上游原值，代理不可达时整行传此值，产物不变）：
+#     --build-arg NODE_IMAGE=node:22.23.2-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
+#   换代理源属结构行改动 ⇒ 进上方对照表 :3 一行。
+# npm 源：默认 registry.npmmirror.com（下方"非抄录域"RUN 一行切源）；
+#   官方回退口：--build-arg NPM_REGISTRY=https://registry.npmjs.org。
+#   为何 npm ci 逐字行不改也吃得到换源：ultra/harness/package-lock.json 有 586 个 resolved
+#   字段指向 registry.npmjs.org（仓根 grep -o 实测计数 586），npm≥9 默认
+#   replace-registry-host=npmjs——npm ci 会把 resolved 里的 npmjs.org 主机自动改写到当前
+#   配置的 registry，故换源行与逐字抄来的 "RUN npm ci --omit=dev --no-audit --no-fund"
+#   共存且生效，不改 lock 一个字节。
+# apt 源不改（任务 5 层 3 同口径）：:270 的逐字 RUN（install-runtime.py）内部自跑
+#   apt-get update/install（物料清单见该件 :36-39），吃容器现有 sources.list；
+#   国内可达性若阶段二判红，按任务 2 的 preflight 口径议镜像替换，不在本文件擅改。
+
+ARG STAGE1_TAG=vllm-sm75-gpustack:v0.1.7-beta2-v1
+# 对照表 :3 行（改动见上）；ARG NPM_REGISTRY 为我方新增（非抄录域，服务换源 RUN 一行）
+ARG NODE_IMAGE=docker.m.daocloud.io/library/node:22.23.2-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+
+FROM ${NODE_IMAGE} AS harness
+WORKDIR /opt/harness
+COPY ultra/harness/package.json ultra/harness/package-lock.json ./
+
+# 我方新增 RUN（非抄录域）：切 npm 源到国内默认，官方回退口见上方"国内源设计"。
+RUN npm config set registry ${NPM_REGISTRY}
+
+# 抄上游 :256（RUN 逐字行，零 diff）
+RUN npm ci --omit=dev --no-audit --no-fund
+
+# 对照表 :258 行（改动见上）：基座＝stage1 成品（GPUStack 三段层的末段产物）
+FROM ${STAGE1_TAG} AS bench
+
+COPY --from=harness /usr/local/bin/node /usr/local/bin/node
+COPY --from=harness /opt/harness/node_modules /opt/harness/node_modules
+# 抄上游 :267-268（RUN 逐字行组，两行续行形制含缩进零 diff）
+RUN ln -sf /opt/harness/node_modules/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm \
+    && pnpm --version
+COPY ultra/source /opt/sm75-workbench
+# 抄上游 :270（RUN 逐字行，零 diff）
+RUN python3 /opt/sm75-workbench/benchlocal-verifiers/install-runtime.py
+LABEL io.sm75.benchlocal.unified="1"
+
+# 我方新增 LABEL（非抄录域；代替上游 :260-264 的 OCI 身份标注，形态与 Dockerfile.v1 各层一致）
+LABEL sm75.gpustack.layer="bench-v1" \
+      sm75.gpustack.component="benchlocal-testrig" \
+      sm75.gpustack.stage1="${STAGE1_TAG}" \
+      sm75.gpustack.node_image="${NODE_IMAGE}" \
+      sm75.gpustack.npm_registry="${NPM_REGISTRY}" \
+      sm75.gpustack.transcript_source="docker/Dockerfile.ultra-full benchlocal 段（:253-283，RUN 逐字＋结构行对照表见文件头）" \
+      sm75.gpustack.hard_constraints="1) --network host（verifier 回连 127.0.0.1）; 2) benchlocal-app 实名＋xvfb-run 依赖 xauth（任务 14 三件套探针）; 3) serial only（max-num-seqs=4）" \
+      sm75.gpustack.scope="test rig only; upstream tree and stage1 image untouched"
+
+WORKDIR /opt/sm75-workbench
+ENV SM75_BENCHLOCAL_RUNTIME=/opt/sm75-workbench/benchlocal-native

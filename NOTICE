@@ -158,5 +158,36 @@ NOTICE —— vllm-sm75-gpustack-backend
     作用域：只写容器内的 tzdata 与 /etc/localtime、/etc/timezone 两处接线；仓内上游树与基线表零改动
       （bash gpustack/gate-tree-unchanged-v1.sh rc=0 自证），改动全部落在自研作用域 gpustack/ 与本 NOTICE。
 
+  改动 5（任务 6 · 测速容器配方与速度层指纹桥）
+    新增：gpustack/Dockerfile.bench-v1（BenchLocal 测速容器配方）、
+          gpustack/bridge-sha-v1.sh（两容器速度层指纹桥，退出码 13＝桥差集）。
+    bench-v1 归属与抄录：测试台段抄自上游 docker/Dockerfile.ultra-full 的 benchlocal 相关段
+      （:253-283，行号以未改动上游字节为基准、比对以内容锚定）。两段式抄录门（审计 C-01）：
+      三条来源 RUN（:256 npm ci、:267-268 ln－pnpm、:270 install-runtime.py）逐字零 diff
+      （sed 定点比对实测）；FROM/ARG/COPY/ENV/WORKDIR/LABEL 结构行的改动与原样抄入行全部
+      列进文件头"来源行号→本文件行号"对照表，未抄入的来源行逐行注明不抄原因。
+      我方文件口径的两处直写：NODE_IMAGE 默认值＝docker.m.daocloud.io 代理前缀＋上游同一
+      tag 同一 digest（digest 相等即产物一致；官方回退口整行注明）；npm 源默认
+      registry.npmmirror.com（非抄录域 RUN 一行切换；lock 内 586 个 npmjs.org resolved
+      字段由 npm≥9 的 replace-registry-host 默认行为自动改写，逐字 npm ci 行不改动也吃得到
+      换源）。apt 源不改，与层 3 同口径。
+      BenchLocal 三硬约束（C-01）写进文件头设计说明：①verifier 回连 127.0.0.1（仓内证据
+      ultra/source/benchlocal-verifiers/gateway.mjs:69/:87）⇒ 容器必须 --network host；
+      ②主程序实名 benchlocal-app、xvfb-run 依赖 xauth（仓内零命中，出处为审计 C-01 与服务器
+      实测档 server-inventory bl-dbg＝benchlocal:0.4.0-xvfb；任务 14 三件套 command -v 探针）；
+      ③跑分受 max-num-seqs=4（仓内证据 ultra/source/console/public/app.js:1401）只能 serial。
+    指纹桥清单（10 件＝pcieipc 9＋incple 1）与任务 3/4 落盘脚本的安装路径逐字对齐：
+      六件取 install-pcieipc.sh :282/:292 的 newfiles 落盘形、三处追加目标取 :321-323、
+      incple 目标件取 install-incple-v1.sh :101；容器模式定位复用 install-pcieipc.sh
+      :173-201 的同一 find_spec 逻辑（不写死路径）；--fixture 模式供阶段一本地验证。
+      退出码：0 全一致（逐件对照表＋件数存在性断言）；2 用法/前置/清单自证；13 桥差集
+      （DIFF＝改字节与 MISSING_*＝缺件两类行可区分）。本任务未新增码位。
+    验证形态：bash -n 与 dash -n 双过；负控 9 组先红后绿（改字节→13、删件→13、用法边界→2、
+      清单吞行洗白→2、exit 13 放宽洗白样张→归因证据、stub docker 容器模式红绿两条、
+      同内容→0 且 SAME 行=10=清单数；dash 复跑红绿各一条），台账见 交付仓/负控记录-v1.md
+      "任务 6 轮"（NC-123..NC-129）。docker build 真跑与三硬约束的运行期探针在阶段二任务 14。
+    作用域：两个新文件全在自研作用域 gpustack/；上游树与基线表零改动
+      （bash gpustack/gate-tree-unchanged-v1.sh rc=0 自证）。
+
   已确定的自研文件放置约定：本仓新增文件只放在仓根的新顶层路径或 gpustack/ 内，
   不写入上游的 14 个顶层条目，以免与上游冻结面混淆。
