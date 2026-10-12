@@ -19,28 +19,38 @@
 #   上游原字节、已冻结；先读 :253-283 区段确认真实行号与内容后抄录——本文件注记的行号
 #   以未改动上游字节为基准，比对以内容锚定为准，行号只作注记）。
 #   门第 1 段（RUN 逐字）：抄录段的来源 RUN 行（:256、:267-268、:270 共三行/组）与本文件
-#     逐字一致、零 diff；我方新增的 RUN 只有 npm 源切换一行，正文就近标注"非抄录域"。
+#     逐字一致、零 diff；我方新增的 RUN 只有两支，都在"非抄录域"名下就近标注——
+#     harness 的 npm 源切换＋生效断言、bench 的 LABEL 证据值断言（见下方"我方新增行清单"）。
 #   门第 2 段（结构行对照）：FROM/ARG/COPY/ENV/WORKDIR/LABEL 允许改动，但每行都进下方
 #     "来源行号→本文件行号"对照表（含原样抄入行，便于整表复核）；未抄入的来源行逐行
 #     列"不抄原因"，不给"漏抄当免检"留空间。
 #
-# 结构行对照表（左＝docker/Dockerfile.ultra-full 行号与内容要旨，右＝本文件行号与改动说明）：
-#   :3   ARG NODE_IMAGE=<官方 node:22.23.2 digest 钉定> → 104 改动：默认值换国内代理前缀，tag 与 digest 随上游不动（见"国内源设计"）
-#   :253 FROM ${NODE_IMAGE} AS harness                → 107 原样
-#   :254 WORKDIR /opt/harness                         → 108 原样
-#   :255 COPY ultra/harness/package.json ultra/harness/package-lock.json ./ → 109 原样
-#   :258 FROM sm75-core AS final                      → 118 改动：基座换 stage1 成品 tag（本容器非 ultra 全身，stage1 即 GPUStack 线的 sm75-core 等价物）
-#   :265 COPY --from=harness /usr/local/bin/node /usr/local/bin/node → 120 原样
-#   :266 COPY --from=harness /opt/harness/node_modules /opt/harness/node_modules → 121 原样
-#   :269 COPY ultra/source /opt/sm75-workbench        → 125 原样（构建上下文＝仓根，ultra/ 在上游冻结树内，只读引用）
-#   :271 LABEL io.sm75.benchlocal.unified="1"         → 128 原样（保留上游 benchlocal 统一标记，运行期探测读它）
-#   :282 WORKDIR /opt/sm75-workbench                  → 140 原样
-#   :283 ENV SM75_BENCHLOCAL_RUNTIME=/opt/sm75-workbench/benchlocal-native → 141 原样
+# 结构行对照表（左＝docker/Dockerfile.ultra-full 行号与内容要旨，右＝本文件行号与改动说明；
+#   右列行号在"ARG 作用域修复"后已按当前文件重算，改动只增行不改抄入行的内容）：
+#   :3   ARG NODE_IMAGE=<官方 node:22.23.2 digest 钉定> → 120 改动：默认值换国内代理前缀，tag 与 digest 随上游不动（见"国内源设计"）
+#   :253 FROM ${NODE_IMAGE} AS harness                → 123 原样
+#   :254 WORKDIR /opt/harness                         → 129 原样（其上新增 ARG NPM_REGISTRY 一行，见"我方新增行清单"）
+#   :255 COPY ultra/harness/package.json ultra/harness/package-lock.json ./ → 130 原样
+#   :258 FROM sm75-core AS final                      → 153 改动：基座换 stage1 成品 tag（本容器非 ultra 全身，stage1 即 GPUStack 线的 sm75-core 等价物）
+#   :265 COPY --from=harness /usr/local/bin/node /usr/local/bin/node → 171 原样
+#   :266 COPY --from=harness /opt/harness/node_modules /opt/harness/node_modules → 172 原样
+#   :269 COPY ultra/source /opt/sm75-workbench        → 176 原样（构建上下文＝仓根，ultra/ 在上游冻结树内，只读引用）
+#   :271 LABEL io.sm75.benchlocal.unified="1"         → 179 原样（保留上游 benchlocal 统一标记，运行期探测读它）
+#   :282 WORKDIR /opt/sm75-workbench                  → 191 原样
+#   :283 ENV SM75_BENCHLOCAL_RUNTIME=/opt/sm75-workbench/benchlocal-native → 192 原样
+#
+# 我方新增行清单（不在抄录对照表内，全部属自研作用域；行号为本次 ARG 作用域修复后的现值）：
+#   118-121 全局 ARG 区（STAGE1_TAG／NODE_IMAGE 对照 :3／NPM_REGISTRY ＋一行注记）——只有 FROM 行吃得到
+#   128 ARG NPM_REGISTRY   — harness stage 内重声明（跨 stage 不继承；缺此行即本轮缺陷本体）
+#   136-147 RUN npm 源切换＋生效断言（红 21/22/23，非抄录域）
+#   157-159 ARG STAGE1_TAG／NODE_IMAGE／NPM_REGISTRY — bench stage 内重声明，三条 LABEL 证据值吃这三行
+#   162-169 RUN LABEL 证据值断言（红 24，非抄录域）
+#   182-189 sm75.gpustack.* LABEL 组（代替上游 :260-264 的 OCI 身份标注）
 #
 # RUN 逐字行对照（内容锚定；来源行 → 本文件行）：
-#   :256 RUN npm ci --omit=dev --no-audit --no-fund                     → 115
-#   :267-268 RUN ln -sf /opt/harness/node_modules/pnpm/bin/pnpm.mjs …  → 123-124（两行续行形制原样，含缩进）
-#   :270 RUN python3 /opt/sm75-workbench/benchlocal-verifiers/install-runtime.py → 127
+#   :256 RUN npm ci --omit=dev --no-audit --no-fund                     → 150（换源与生效断言在其前一支 RUN 里，本行零 diff）
+#   :267-268 RUN ln -sf /opt/harness/node_modules/pnpm/bin/pnpm.mjs …  → 174-175（两行续行形制原样，含缩进）
+#   :270 RUN python3 /opt/sm75-workbench/benchlocal-verifiers/install-runtime.py → 178
 #
 # 未抄入的来源行与原因（均在 :253-283 区段内，逐行归置）：
 #   :259 ENV NCCL_P2P_LEVEL=SYS         — ultra final 的部署拓扑项，非 benchlocal 测试台依赖；
@@ -88,8 +98,14 @@
 #   官方回退口（上游原值，代理不可达时整行传此值，产物不变）：
 #     --build-arg NODE_IMAGE=node:22.23.2-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
 #   换代理源属结构行改动 ⇒ 进上方对照表 :3 一行。
-# npm 源：默认 registry.npmmirror.com（下方"非抄录域"RUN 一行切源）；
-#   官方回退口：--build-arg NPM_REGISTRY=https://registry.npmjs.org。
+# npm 源：默认 registry.npmmirror.com（下方"非抄录域"RUN 切源，并在同一支 RUN 里回读断言）；
+#   断言三道：红 21＝ARG 值为空、红 22＝npm 生效源≠请求值、红 23＝生效源不含 npmmirror。
+#   官方回退口：--build-arg NPM_REGISTRY=https://registry.npmjs.org——注意这条现在会撞红 23，
+#   这是有意的：本仓默认口径＝国内源，走官方源算"改动"，须显式改红 23 那行的字面量并留档，
+#   不接受把换源藏在 --build-arg 里静默通过（与"跳了门禁而镜像里看不出来"同一红线）。
+#   ARG 作用域：跨 stage 的 ARG 不继承，全局那三行只有 FROM 吃得到；harness 与 bench 各自
+#   重声明，且 bench 的红 24 断言盯着"三条 LABEL 源值非空"——本文件曾缺这几行，
+#   结果是 npm config set 拿空值 rc=0 不报错、586 个包静默走官方源、三条证据 LABEL 全空。
 #   为何 npm ci 逐字行不改也吃得到换源：ultra/harness/package-lock.json 有 586 个 resolved
 #   字段指向 registry.npmjs.org（仓根 grep -o 实测计数 586），npm≥9 默认
 #   replace-registry-host=npmjs——npm ci 会把 resolved 里的 npmjs.org 主机自动改写到当前
@@ -100,22 +116,57 @@
 #   国内可达性若阶段二判红，按任务 2 的 preflight 口径议镜像替换，不在本文件擅改。
 
 ARG STAGE1_TAG=vllm-sm75-gpustack:v0.1.7-beta2-v1
-# 对照表 :3 行（改动见上）；ARG NPM_REGISTRY 为我方新增（非抄录域，服务换源 RUN 一行）
+# 对照表 :3 行（改动见上）；ARG NPM_REGISTRY 为我方新增（非抄录域，服务下方换源＋生效断言那支 RUN）
 ARG NODE_IMAGE=docker.m.daocloud.io/library/node:22.23.2-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 FROM ${NODE_IMAGE} AS harness
+# 跨 stage 的 ARG 不继承：文件顶部的 ARG 只在 FROM 行可见，stage 内引用得到空值。
+# 与 Dockerfile.v1 各 stage 重声明 ARG BASE_TAG 同一形制（实测：stage 内不带默认值的
+# ARG 同时继承全局默认与 --build-arg 两路，读数见 task-14-benchfix-report-v1.md §2）。
+# 本 stage 只用 NPM_REGISTRY，故只重声明这一行；NODE_IMAGE 只被 FROM 吃，无需重声明。
+ARG NPM_REGISTRY
 WORKDIR /opt/harness
 COPY ultra/harness/package.json ultra/harness/package-lock.json ./
 
-# 我方新增 RUN（非抄录域）：切 npm 源到国内默认，官方回退口见上方"国内源设计"。
-RUN npm config set registry ${NPM_REGISTRY}
+# 我方新增 RUN（非抄录域）：切 npm 源到国内默认，并当场回读断言"源真落地"。
+# 为什么必须有断言：npm config set registry 拿到空值时 rc=0 不报错（实测），
+# 结果是构建绿、npm ci 静默走官方源——正是"跳了门禁而镜像里看不出来"那一类。
+# 红码 21/22/23 各归一道，互不抢走；不降级成 WARN。
+RUN set -eu; \
+    if [ -z "${NPM_REGISTRY:-}" ]; then echo "红 21：NPM_REGISTRY 为空（本 stage 内没有 ARG 重声明，或 --build-arg 传了空值）——拒绝静默走默认源。"; exit 21; fi; \
+    npm config set registry "${NPM_REGISTRY}"; \
+    req=$(printf '%s' "${NPM_REGISTRY}" | sed 's#/*$##'); \
+    got=$(npm config get registry | sed 's#/*$##'); \
+    echo "NPM_REGISTRY_REQUESTED=${NPM_REGISTRY}"; \
+    echo "NPM_REGISTRY_EFFECTIVE=$got"; \
+    if [ "$got" != "$req" ]; then echo "红 22：npm 实际生效源与请求值不一致（请求 ${NPM_REGISTRY}／实得 $got）——config set 静默失败。"; exit 22; fi; \
+    case "$got" in \
+      *npmmirror*) echo NPM_MIRROR_GATE_OK ;; \
+      *) echo "红 23：生效源不含 npmmirror（实得 $got）——国内源默认值未落地。确需官方回退口时须改这一行的字面量并在构建留档，不接受静默换源。"; exit 23 ;; \
+    esac
 
 # 抄上游 :256（RUN 逐字行，零 diff）
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # 对照表 :258 行（改动见上）：基座＝stage1 成品（GPUStack 三段层的末段产物）
 FROM ${STAGE1_TAG} AS bench
+
+# 跨 stage 的 ARG 不继承（同 harness stage 的说明）：下面三条 LABEL 的证据值吃的就是这三行。
+# 实测改前：这三行缺位 ⇒ sm75.gpustack.stage1 / node_image / npm_registry 三条在成品里全空。
+ARG STAGE1_TAG
+ARG NODE_IMAGE
+ARG NPM_REGISTRY
+# 我方新增 RUN（非抄录域）：证据行前置断言——三条 LABEL 的源值必须非空，红码 24。
+# 排在所有 COPY/RUN 之前：先证意图再花构建时间，不允许"LABEL 静默为空＋产物照发"。
+RUN set -eu; \
+    miss=0; \
+    check_evidence() { if [ -z "$2" ]; then echo "红 24：LABEL 源变量 $1 为空（本 stage 内没有对应的 ARG 重声明）——证据行会静默为空。"; miss=$((miss + 1)); else echo "EVIDENCE_ARG_$1=$2"; fi; }; \
+    check_evidence stage1 "${STAGE1_TAG}"; \
+    check_evidence node_image "${NODE_IMAGE}"; \
+    check_evidence npm_registry "${NPM_REGISTRY}"; \
+    if [ "$miss" -ne 0 ]; then echo "LABEL_EVIDENCE_GATE_FAIL missing=$miss code=24"; exit 24; fi; \
+    echo LABEL_EVIDENCE_GATE_OK
 
 COPY --from=harness /usr/local/bin/node /usr/local/bin/node
 COPY --from=harness /opt/harness/node_modules /opt/harness/node_modules
