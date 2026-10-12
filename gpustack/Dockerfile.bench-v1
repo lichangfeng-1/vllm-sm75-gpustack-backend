@@ -32,25 +32,25 @@
 #   :254 WORKDIR /opt/harness                         → 129 原样（其上新增 ARG NPM_REGISTRY 一行，见"我方新增行清单"）
 #   :255 COPY ultra/harness/package.json ultra/harness/package-lock.json ./ → 130 原样
 #   :258 FROM sm75-core AS final                      → 153 改动：基座换 stage1 成品 tag（本容器非 ultra 全身，stage1 即 GPUStack 线的 sm75-core 等价物）
-#   :265 COPY --from=harness /usr/local/bin/node /usr/local/bin/node → 171 原样
-#   :266 COPY --from=harness /opt/harness/node_modules /opt/harness/node_modules → 172 原样
-#   :269 COPY ultra/source /opt/sm75-workbench        → 176 原样（构建上下文＝仓根，ultra/ 在上游冻结树内，只读引用）
-#   :271 LABEL io.sm75.benchlocal.unified="1"         → 179 原样（保留上游 benchlocal 统一标记，运行期探测读它）
-#   :282 WORKDIR /opt/sm75-workbench                  → 191 原样
-#   :283 ENV SM75_BENCHLOCAL_RUNTIME=/opt/sm75-workbench/benchlocal-native → 192 原样
+#   :265 COPY --from=harness /usr/local/bin/node /usr/local/bin/node → 174 原样
+#   :266 COPY --from=harness /opt/harness/node_modules /opt/harness/node_modules → 175 原样
+#   :269 COPY ultra/source /opt/sm75-workbench        → 179 原样（构建上下文＝仓根，ultra/ 在上游冻结树内，只读引用）
+#   :271 LABEL io.sm75.benchlocal.unified="1"         → 182 原样（保留上游 benchlocal 统一标记，运行期探测读它）
+#   :282 WORKDIR /opt/sm75-workbench                  → 194 原样
+#   :283 ENV SM75_BENCHLOCAL_RUNTIME=/opt/sm75-workbench/benchlocal-native → 195 原样
 #
 # 我方新增行清单（不在抄录对照表内，全部属自研作用域；行号为本次 ARG 作用域修复后的现值）：
 #   118-121 全局 ARG 区（STAGE1_TAG／NODE_IMAGE 对照 :3／NPM_REGISTRY ＋一行注记）——只有 FROM 行吃得到
 #   128 ARG NPM_REGISTRY   — harness stage 内重声明（跨 stage 不继承；缺此行即本轮缺陷本体）
 #   136-147 RUN npm 源切换＋生效断言（红 21/22/23，非抄录域）
 #   157-159 ARG STAGE1_TAG／NODE_IMAGE／NPM_REGISTRY — bench stage 内重声明，三条 LABEL 证据值吃这三行
-#   162-169 RUN LABEL 证据值断言（红 24，非抄录域）
-#   182-189 sm75.gpustack.* LABEL 组（代替上游 :260-264 的 OCI 身份标注）
+#   165-172 RUN LABEL 证据值断言（红 24，非抄录域）
+#   185-192 sm75.gpustack.* LABEL 组（代替上游 :260-264 的 OCI 身份标注）
 #
 # RUN 逐字行对照（内容锚定；来源行 → 本文件行）：
 #   :256 RUN npm ci --omit=dev --no-audit --no-fund                     → 150（换源与生效断言在其前一支 RUN 里，本行零 diff）
-#   :267-268 RUN ln -sf /opt/harness/node_modules/pnpm/bin/pnpm.mjs …  → 174-175（两行续行形制原样，含缩进）
-#   :270 RUN python3 /opt/sm75-workbench/benchlocal-verifiers/install-runtime.py → 178
+#   :267-268 RUN ln -sf /opt/harness/node_modules/pnpm/bin/pnpm.mjs …  → 177-178（两行续行形制原样，含缩进）
+#   :270 RUN python3 /opt/sm75-workbench/benchlocal-verifiers/install-runtime.py → 181
 #
 # 未抄入的来源行与原因（均在 :253-283 区段内，逐行归置）：
 #   :259 ENV NCCL_P2P_LEVEL=SYS         — ultra final 的部署拓扑项，非 benchlocal 测试台依赖；
@@ -159,12 +159,15 @@ ARG NODE_IMAGE
 ARG NPM_REGISTRY
 # 我方新增 RUN（非抄录域）：证据行前置断言——三条 LABEL 的源值必须非空，红码 24。
 # 排在所有 COPY/RUN 之前：先证意图再花构建时间，不允许"LABEL 静默为空＋产物照发"。
+# 三处引用一律 ${VAR:-}：ARG 不在本 stage 声明时，BuildKit 不会替 RUN 展开未知变量
+#   （实测日志回显里 ${STAGE1_TAG} 原样留着），配 set -u 会被 shell 以"parameter not found"
+#   抢先退 2——护栏就白设了（负控 NC-a2 第一次跑就是这样，码位是 2 不是 24）。
 RUN set -eu; \
     miss=0; \
     check_evidence() { if [ -z "$2" ]; then echo "红 24：LABEL 源变量 $1 为空（本 stage 内没有对应的 ARG 重声明）——证据行会静默为空。"; miss=$((miss + 1)); else echo "EVIDENCE_ARG_$1=$2"; fi; }; \
-    check_evidence stage1 "${STAGE1_TAG}"; \
-    check_evidence node_image "${NODE_IMAGE}"; \
-    check_evidence npm_registry "${NPM_REGISTRY}"; \
+    check_evidence stage1 "${STAGE1_TAG:-}"; \
+    check_evidence node_image "${NODE_IMAGE:-}"; \
+    check_evidence npm_registry "${NPM_REGISTRY:-}"; \
     if [ "$miss" -ne 0 ]; then echo "LABEL_EVIDENCE_GATE_FAIL missing=$miss code=24"; exit 24; fi; \
     echo LABEL_EVIDENCE_GATE_OK
 
