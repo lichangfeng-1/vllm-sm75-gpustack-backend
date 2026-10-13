@@ -2,8 +2,8 @@
 # lint-paste-v1.sh —— 两枚 GPUStack 粘贴块的结构护栏（任务 7）
 #
 # 做什么：校验粘贴块能否整块贴进 GPUStack 2.2.3 的模型表单——
-#   env 块：逐行 KEY=VALUE（键与值两侧、值内都不得含空白或制表）、键不重复、恰 24 行，
-#     再与脚本内置的 24 行常量表逐行逐字比顺序（简报钦定 22 条速度 env 原序＋TZ＋shm）；
+#   env 块：逐行 KEY=VALUE（键与值两侧、值内都不得含空白或制表）、键不重复、恰 25 行，
+#     再与脚本内置的 25 行常量表逐行逐字比顺序（简报钦定 22 条速度 env 原序＋TZ＋shm＋显存申报值）；
 #   args 块：逐行 --flag=value、行内不得含空白、恰 24 行、同样与内置常量表逐行逐字比顺序；
 #     不含 GPUStack 会自己尾补的 --host/--port/--served-model-name
 #     （含则同一参数出现两次，引擎按后值取，用户档位被吃掉）、不含字面 ${（GPUStack 对后端
@@ -32,18 +32,18 @@
 #   2  用法/前置红——缺必要工具、文件不存在或不可读、空块、含 CR 字节、末行缺换行、参数含 .. 段
 #   14 参数排除红——args 出现 GPUStack 尾补三条之一
 #   15 env 键重复
-#   16 内容断言红——行形态非法 / env 值含 ${ / env 行数 != 24 / args 含 ${ / args 含
+#   16 内容断言红——行形态非法 / env 值含 ${ / env 行数 != 25 / args 含 ${ / args 含
 #      --speculative-config / args flag 重复 / 关键 flag 缺失 / --max-model-len 取值不符 /
 #      args 行数 != 24 / env 或 args 与内置常量表逐字或顺序不符（L11-L13 为修复轮 1 新增门，
 #      红面全部归 16，本轮不新增码位）
 #
 # 断言顺序（五道负控各自命中自己的码，谁也不许被更早的门抢走）：
-#   L0 前置 → L1 env 行形态 → L2 env 键唯一(15) → L3 env 值占位符(16) → L4 env 行数==24(16)
+#   L0 前置 → L1 env 行形态 → L2 env 键唯一(15) → L3 env 值占位符(16) → L4 env 行数==25(16)
 #   → L5 args 行形态 → L6 args 尾补三条(14) → L7 args 占位符(16) → L8 args 投机(16)
 #   → L9 args flag 唯一(16) → L10 关键 flag 在列＋max-model-len 取值(16)
 #   → L11 args 行数==24(16) → L12 env 逐字有序(16) → L13 args 逐字有序(16)
 #   L1 排在 L2 之前：坏样张里新增的重复键行本身形态合法，形态门不会抢走 15（夹具自检钉死这点）。
-#   L2 排在 L4 之前：塞一行重复键后 env 变 25 行，必须命中 15，不能被行数门以 16 抢走。
+#   L2 排在 L4 之前：塞一行重复键后 env 变 26 行，必须命中 15，不能被行数门以 16 抢走。
 #   L6 排在 L7/L8/L10 之前：塞 --port 的样张必须先命中 14，不能被占位符/关键项门以 16 抢走。
 #   L10 排在 L11-L13 之前：抽掉 --max-model-len 行的样张（同时只有 23 行）前面十道里由 L10
 #     判红，点名必须是「关键项缺失」而不是行数/有序门。
@@ -143,9 +143,11 @@ if grep -qF -- '${' "$ENV_FILE"; then
 $(grep -nF -- '${' "$ENV_FILE" | tr '\n' ' ')"
 fi
 
-# L4：行数是简报对 env 块的钦定契约（22 速度项＋TZ＋shm），钉死它才能挡住"顺手加一行/删一行"。
-if [ "$env_lines" -ne 24 ]; then
-  die 16 "断言 L4 env 行数——实测 $env_lines 行，简报契约 24 行（前 22 条速度 env 原序＋TZ＋shm）。"
+# L4：行数是简报对 env 块的钦定契约（22 速度项＋TZ＋shm＋显存申报值），钉死它才能挡住"顺手加一行/删一行"。
+#   第 25 行 GPUSTACK_MODEL_VRAM_CLAIM 原本只写在正文散文里、没烘进粘贴块，结果"整块粘贴"的人
+#   调度器永远排队且不报错（10-14 实撞）——所以它必须进块、并由这道行数门守。
+if [ "$env_lines" -ne 25 ]; then
+  die 16 "断言 L4 env 行数——实测 $env_lines 行，简报契约 25 行（前 22 条速度 env 原序＋TZ＋shm＋VRAM_CLAIM）。"
 fi
 
 # ---------------- args 块 ----------------
@@ -200,7 +202,7 @@ if [ "$mml" != "--max-model-len=262144" ]; then
 fi
 
 # ---------------- L11-L13：行数与逐字有序常量门（修复轮 1，关闭 I-3 与疑虑 2） ----------------
-# 两张表是粘贴块契约的常驻副本：env＝简报钦定 22 条原序＋TZ＋shm，args＝生成器产物的 24 行。
+# 两张表是粘贴块契约的常驻副本：env＝简报钦定 22 条原序＋TZ＋shm＋显存申报值（25 行），args＝生成器产物的 24 行。
 # 有了它们，"顺手改一行值""整块倒序""少贴一行"都会在这里点名到行，而不是只在生成那一次被验。
 # 排位是硬条件（见文件头「断言顺序」）：必须全部排在 L10 之后，否则 15 与 14 两个码位会从整套
 #   负控里消失，兜底门把所有多改动负控整体抢走。
@@ -227,7 +229,8 @@ VLLM_ENFORCE_STRICT_TOOL_CALLING=1
 VLLM_SM75_QSA_MIXED_PREFILL=1
 VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC=1
 TZ=Asia/Shanghai
-GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64'
+GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64
+GPUSTACK_MODEL_VRAM_CLAIM=120779177984'
 
 ARGS_EXPECT='--dtype=float16
 --hf-overrides={"dtype":"float16"}
@@ -261,15 +264,16 @@ if [ "$args_lines" -ne 24 ]; then
   die 16 "断言 L11 args 行数——实测 $args_lines 行，契约 24 行（与 L13 常量表等长；env 侧同一契约由 L4 守）。"
 fi
 
-ordered_gate() { # ordered_gate 实际件 常量表 门号 名称 —— 只读比对，首个差异即红 16 并点名行号
-  local file=$1 expect=$2 gate=$3 label=$4
+ordered_gate() { # ordered_gate 实际件 常量表 门号 名称 契约行数 —— 只读比对，首个差异即红 16 并点名行号
+  local file=$1 expect=$2 gate=$3 label=$4 want_lines=$5
   local want i actual expected
   want=$(printf '%s\n' "$expect" | wc -l)
   num "$want" "$gate 常量表行数"
   # 表本身先自证：拿一张被改坏的表去比样张，"全绿"没有任何含义（空判据的镜像面＝错判据）。
-  [ "$want" -eq 24 ] || die 2 "错误：$gate 常量表自身不符——表内 $want 行，与 24 行契约不一致，拒绝校验（护栏脚本被改坏，样张判定作废）。"
+  # 契约行数按门传入（env 25／args 24）——两块的行数从 10-14 起不再相等，共用一个常数会让其中一块自证必红。
+  [ "$want" -eq "$want_lines" ] || die 2 "错误：$gate 常量表自身不符——表内 $want 行，与 $want_lines 行契约不一致，拒绝校验（护栏脚本被改坏，样张判定作废）。"
   i=1
-  while [ "$i" -le 24 ]; do
+  while [ "$i" -le "$want_lines" ]; do
     # 逐行取文本比较（POSIX 形）。禁止照抄 cmp -s <(canon)——那是 bash-only 进程替换，
     # 而本脚本现过 dash -n 语法双检。
     actual=$(sed -n "${i}p" "$file")
@@ -281,8 +285,8 @@ ordered_gate() { # ordered_gate 实际件 常量表 门号 名称 —— 只读�
   done
 }
 
-ordered_gate "$ENV_FILE" "$ENV_EXPECT" L12 "env 逐字有序"
-ordered_gate "$ARGS_FILE" "$ARGS_EXPECT" L13 "args 逐字有序"
+ordered_gate "$ENV_FILE" "$ENV_EXPECT" L12 "env 逐字有序" 25
+ordered_gate "$ARGS_FILE" "$ARGS_EXPECT" L13 "args 逐字有序" 24
 
 echo "绿｜env $ENV_FILE：$env_lines 行，形态合法、键唯一、无占位符、与常量表逐字同序"
 echo "绿｜args $ARGS_FILE：$args_lines 行，形态合法、无尾补三条、无占位符、无投机、flag 唯一、关键项在列、与常量表逐字同序"

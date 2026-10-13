@@ -125,7 +125,7 @@ ENV_FILE_DEFAULT=$SCRIPT_DIR/env-paste-v1.txt
 ARGS_FILE_DEFAULT=$SCRIPT_DIR/args-paste-v1.txt
 # 镜像默认 tag 取自仓内权威登记：gpustack/backend-version-card-v1.md 第 13 行「镜像名称 image_name」。
 IMAGE_DEFAULT=vllm-sm75-gpustack:v0.1.7-beta2-v1
-MIN_BLOCK_LINES=24            # 简报契约：两枚粘贴块各 24 行，取此为下限
+MIN_BLOCK_LINES=24            # 粘贴块下限：args 24 行／env 25 行，取较小者 24（精确行数由 lint 的 L4／L11 钉）
 PCIE_KEY=VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC
 SPEC_FLAG=--speculative-config
 REPO_MARKER_GIT=.git
@@ -320,7 +320,7 @@ precheck_block() { # precheck_block 路径 名称 —— 存在性＋非空＋�
   lines=$(wc -l < "$1" | tr -d '[:space:]')
   num "$lines" "$2 行数"
   [ "$lines" -ge "$MIN_BLOCK_LINES" ] \
-    || die 2 "错误：$2 行数 $lines 低于下限 $MIN_BLOCK_LINES（简报契约：两枚粘贴块各 24 行）：$1"
+    || die 2 "错误：$2 行数 $lines 低于下限 $MIN_BLOCK_LINES（简报契约：args 24 行、env 25 行）：$1"
   cr=$(tr -dc '\r' < "$1" | wc -c | tr -d '[:space:]')
   num "$cr" "$2 CR 字节数"
   [ "$cr" -eq 0 ] \

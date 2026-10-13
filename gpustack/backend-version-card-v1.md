@@ -45,7 +45,7 @@ vllm serve  <模型路径>  <GPUStack 版本门参数>  <后端参数粘贴块> 
 |---|---|
 | 后端版本 | `0.1.7-sm75.1-custom` |
 | 后端参数 | 整块粘贴 `gpustack/args-paste-v1.txt`（24 行，一行一条，**行内任何位置不得含空格或制表**；值一律等号形，JSON 值必须写成 `--flag={…}` 紧贴等号，不许写 `--flag {…}`） |
-| 环境变量 | 整块粘贴 `gpustack/env-paste-v1.txt`（24 行，一行一条 `KEY=VALUE`，键与值两侧、值内都不得含空格或制表） |
+| 环境变量 | 整块粘贴 `gpustack/env-paste-v1.txt`（**25 行**，一行一条 `KEY=VALUE`，键与值两侧、值内都不得含空格或制表）**第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM=120779177984` 是硬性项，不许省**：没有它，平台按启发式算出 204.5 GiB 需求（本机八卡可分配只有 117.76 GiB），模型会一直排队、界面不报错也不给原因——这一条 10-14 实撞过一次，改前它只写在《参数字典》B 表第 25 行的散文里、没烘进粘贴块，所以照"整块粘贴"走的人必踩 |
 | 投机解码 | 不启用 |
 | 副本数／worker | 1 台 8 卡 worker，`--tensor-parallel-size=8` 已在参数块里 |
 
@@ -60,13 +60,13 @@ bash gpustack/lint-paste-v1.sh
 - 做什么：把两枚粘贴块再跑一遍结构护栏。门序 L0-L13：前置（存在性／CR／末行换行）→ env 行形态 → env 键唯一 → env 占位符 → env 行数==24 → args 行形态 → 尾补三条排除 → args 占位符 → args 投机 → args flag 唯一 → 关键项在列且 `--max-model-len=262144` → **L11 args 行数==24** → **L12 env 与脚本内置常量表逐行逐字同序** → **L13 args 同上**。改值、乱序、增删行、原地留一行空行都会点名到具体行号。
 - 为什么：注册卡与教程里的块是人手复制粘贴的，生成器那道门只保护生成那一次；表单里那一份没有第二道锁。
 - 三条写法规矩（与 §四 同口径，护栏判死的面）：①一行一条，行内任何位置不得含空格或制表；②值一律等号形，JSON 值必须 `--flag={…}` 紧贴等号；③空格形会被 shlex 拆成两个 token、JSON 值当场坏且不报错，机制见 `gpustack/utils/command.py:226-301`（触发条件 `:245`）与 `:338-351`。
-- 预期输出：两行"绿｜"加末行 `LINT_PASTE_OK env=24 args=24`，退出码 0。
+- 预期输出：两行"绿｜"加末行 `LINT_PASTE_OK env=25 args=24`，退出码 0。
 - 失败怎么办：按文案点名的那道门改回粘贴块本身，不要改护栏脚本；退出码 14＝块里有 GPUStack 会尾补的参数，15＝env 键重复，16＝内容断言红（含 L11-L13 的行数与逐字有序），2＝文件或行尾问题（含 CR 时按下面的克隆形重新检出）。
 - 确要改档（改值／增删行／换顺序）时**两处一起改**：粘贴块本身，与 `gpustack/lint-paste-v1.sh` 里的 `ENV_EXPECT`／`ARGS_EXPECT` 常量表；只改一处则 L12/L13 必红——这是设计而不是故障。args 侧还要重跑 `python gpustack/gen-args-paste-v1.py` 确认产物与块一致（生成器的 A1 与 lint 的 L5 同形，含空白的形状在生成侧就被判死）。
 
 ### 为什么偏偏这两枚 `.txt` 块会中招
 
-仓内 `.gitattributes` 给 `*.sh`／`*.py`／`*.md`／`*.json`／`Dockerfile*` 等显式写了 `text eol=lf`，**唯独没有 `*.txt` 规则**；而 `.gitattributes` 属交接约束第 1 条的 14 个上游禁写面，本线不能替它补一条。于是在 Windows 上用默认 `core.autocrlf=true` 检出时，只有 `gpustack/env-paste-v1.txt` 与 `gpustack/args-paste-v1.txt` 各 24 行的行尾被换成 CRLF（同批检出的 `.sh`／`.md` 不受影响），而 CRLF 块贴进表单＝每行尾部多带一个 CR。护栏对它是**响亮失败**：L0 前置直接退 2 并打印 CR 个数，不会静默放行；唯一修法是用钦定形重新检出——`git -c core.autocrlf=false clone <url>`（`<url>` 替换为你的地址）。
+仓内 `.gitattributes` 给 `*.sh`／`*.py`／`*.md`／`*.json`／`Dockerfile*` 等显式写了 `text eol=lf`，**唯独没有 `*.txt` 规则**；而 `.gitattributes` 属交接约束第 1 条的 14 个上游禁写面，本线不能替它补一条。于是在 Windows 上用默认 `core.autocrlf=true` 检出时，只有 `gpustack/env-paste-v1.txt`（25 行）与 `gpustack/args-paste-v1.txt`（24 行）的行尾被换成 CRLF（同批检出的 `.sh`／`.md` 不受影响），而 CRLF 块贴进表单＝每行尾部多带一个 CR。护栏对它是**响亮失败**：L0 前置直接退 2 并打印 CR 个数，不会静默放行；唯一修法是用钦定形重新检出——`git -c core.autocrlf=false clone <url>`（`<url>` 替换为你的地址）。
 
 ## 六、阶段二门禁项（本地判不了，实机用只读探针）
 
@@ -75,7 +75,7 @@ bash gpustack/lint-paste-v1.sh
 | 镜像在服务器可用 | `docker images vllm-sm75-gpustack` | 有该 tag；否则先 load |
 | 容器按 GPUStack 形态起来 | GPUStack 实例页看容器状态＋`docker ps` | host 网络、特权、`--shm-size=64g`、restart 不自动拉起 |
 | shm 真值 | 容器内 `df -h /dev/shm` | 64 GiB；不是则 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB` 未生效 |
-| env 真值 | 引擎进程 `/proc/<pid>/environ` | 24 条逐一在位；面板回显不算证据 |
+| env 真值 | 引擎进程 `/proc/<pid>/environ` | 25 条逐一在位（第 25 条 claim 是平台调度侧读的，但它同样进进程；本机带着它跑通整轮推理，未见引擎消费或报错）；面板回显不算证据 |
 | 档位未被钳 | `GET /v1/models` ＋引擎启动日志的 max_model_len | 262144；出现 8192 即参数块没进 |
 | 时区 | 容器内 `date +%z` | `+0800` |
 | 对外名回显 | `GET /v1/models` | 与部署时模型名一致 |

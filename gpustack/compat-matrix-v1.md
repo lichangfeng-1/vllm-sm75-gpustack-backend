@@ -40,7 +40,7 @@ ABSENT /usr/lib/libnvidia-api.so.1
 
 | 门禁 | 探针 | 判据 |
 |---|---|---|
-| env 22＋2 条真进引擎进程 | 容器内 `tr '\0' '\n' < /proc/1/environ`（引擎非 PID 1 时取实际 pid） | 24 条逐一在位；面板回显不算证据 |
+| env 22＋3 条真进引擎进程 | 容器内 `tr '\0' '\n' < /proc/1/environ`（引擎非 PID 1 时取实际 pid） | 25 条逐一在位；面板回显不算证据 |
 | shm 64 GiB | 容器内 `df -h /dev/shm` | 64 GiB；不是则 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB` 未生效 |
 | 档位未被静默钳 | 引擎启动日志的 `max_model_len` | 262144；出现 8192 即参数块没进（`vllm.py:705-716`） |
 | 容器时区 | 容器内 `date +%z` | `+0800` |
