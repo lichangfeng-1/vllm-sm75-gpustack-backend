@@ -16,7 +16,7 @@
 +
 +# 国内源改动 b)：flashinfer 两个包拆成两条安装。
 +# flashinfer-python 由上面的国内 pypi 镜像解析；flashinfer-cubin 体积过大，
-+# 改走本仓托管 wheel 直链，下面 PLACEHOLDER 形式的 URL 由任务 13 回填。
++# 改走本仓托管 wheel 直链。当前状态＝直链未回填，下面那行是占位形态，照抄即构建红；回填前提＝任务 13 把该 wheel 挂上本仓 Release 并登记校验值（版本与 sha 仍按上游钉住，只换地址、不换产物）。
 +RUN uv pip uninstall --system flashinfer-jit-cache
 +RUN uv pip install --system --no-cache --no-deps flashinfer-python==0.6.18
 +RUN uv pip install --system --no-cache --no-deps \
@@ -39,7 +39,7 @@
  COPY docker/helpers/pstate-entrypoint.sh /opt/vllm-sm75/pstate-entrypoint.sh
  COPY docker/helpers/pstate-supervisor.sh /opt/vllm-sm75/pstate-supervisor.sh
  COPY docker/helpers/nvidia-pstated.NOTICE /opt/vllm-sm75/nvidia-pstated.NOTICE
-+# 国内源改动 c)：省电组件二进制改走本仓托管直链，下面 PLACEHOLDER 形式的 URL 由任务 13 回填。
++# 国内源改动 c)：省电组件二进制改走本仓托管直链。当前状态＝直链未回填，下面那行是占位形态，照抄即构建红；回填前提＝任务 13 把该二进制挂上本仓 Release 并登记 sha256 校验值（上游的版本钉法与校验口径不变）。
  RUN curl -fsSL -o /usr/local/bin/nvidia-pstated \
 -        "https://github.com/sasha0552/nvidia-pstated/releases/download/v${NVIDIA_PSTATE_VERSION}/nvidia-pstated" && \
 +        "PLACEHOLDER://release/nvidia-pstated" && \

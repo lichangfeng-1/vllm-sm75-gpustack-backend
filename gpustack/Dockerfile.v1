@@ -26,6 +26,20 @@
 # 上游红线：本文件与 gpustack/layers/ 全在自研作用域，上游 docker/Dockerfile 及 14 个顶层项零改动
 #   （完工跑 bash gpustack/gate-tree-unchanged-v1.sh 须 rc=0）。
 
+# 基座前置（BASE_TAG 是本地镜像 tag，不是 registry 地址——docker build 不会替你把它拉下来）：
+#   要哪一层＝vllm-sm75:v0.1.7-beta2，即上游 docker/Dockerfile 经 gpustack/mirror-patch-v1.patch
+#     应用后取 --target final 的产物（版本号取仓根 docker/VERSION，现值 0.1.7-beta2），
+#     由 bash gpustack/build-gpustack-v1.sh --build 产出；本文件只在其上追加层 1/2/3。
+#   盘上现状＝这层镜像不在仓内、也不在阶段一的产物里（阶段一只做静态与本地夹具验证，不构建镜像），
+#     收件人机器上默认也没有该 tag。所以 docker build 的第一红通常是 FROM 找不到基座：
+#     先在构建机上产出基座层，或 --build-arg BASE_TAG=<你本地已有的同名层> 指过去。
+#   基座必须是**未经本线加装**的 beta2 成品层：不能拿已经含层 1/层 2 产物的 tip tag 当基座——
+#     层 1 的 install-pcieipc.sh 是追加型装机，幂等门见 gpustack/layers/pcieipc/install-pcieipc.sh:35-41，
+#     已含 marker 即退 3-7 拒装，构建直接红。
+#   为什么阶段二通常不需要重建基座：层 1/2/3 全是 FROM ${BASE_TAG} 之上的追加层，不动基座内容；
+#     基座内容由补丁门（build-gpustack-v1.sh 门 1-5）与上游冻结门钉住，一次成型后复用。只有基座自身
+#     要变（上游版本或补丁改动）才重建，届时须重跑 gpustack/bridge-sha-v1.sh 的十件对拍确认没漂移。
+
 ARG BASE_TAG=vllm-sm75:v0.1.7-beta2
 
 # ===================== 层 1：pcieipc（八卡 PCIe 直连通信提速） =====================
@@ -142,7 +156,7 @@ ARG BASE_TAG
 #      任务 7 建的 24 行块），镜像默认与粘贴块显式值同字，不会出现两处各定一个时区互相打架。
 #   3) gpustack/backend-version-card-v1.md 是任务 7 并行在建的件，本会话不创建也不修改它；
 #      上述说明先以本注释块＋LABEL 字段落进镜像层，待任务 7 收口后由任务 9 核对是否已进注册卡
-#      （已在 task-5-report.md 第九节登记该待办）。
+#      （该待办登记在任务 5 的过程件第九节，过程件未随包发布）。
 # 构建形态（任务 14）：docker build --file gpustack/Dockerfile.v1 --target timezone-layer
 #   --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 --tag vllm-sm75-gpustack:v0.1.7-beta2-v1 <仓根>
 #   （设计稿第五节 stage1 收尾口径；是否再补 sm75.gpustack.layers 汇总 LABEL 由任务 9/14 定，本层不擅自加）。
@@ -185,7 +199,7 @@ RUN set -eu; \
 
 # 门 3/3a 构建期断言（简报逐字句；红 18＝本层唯一红码）：容器里的 date 真读出 CST 这层才算成立。
 # 明写：构建期断言的容器内真跑在阶段二任务 14 复核（阶段一无镜像环境，本地只做逻辑等价干跑，
-# 见 task-5-report.md 第五节与负控台账"任务 5 轮"）。
+# 干跑记录在任务 5 的过程件第五节与负控台账"任务 5 轮"，两者均属过程件、未随包发布）。
 RUN test "$(date +%Z)" = "CST" || (date; exit 18)
 
 # 门 3/3b 加严腿（仍只用 18）：堵住逐字句的三处残余边界——

@@ -184,7 +184,7 @@ NOTICE —— vllm-sm75-gpustack-backend
       （DIFF＝改字节与 MISSING_*＝缺件两类行可区分）。本任务未新增码位。
     验证形态：bash -n 与 dash -n 双过；负控 9 组先红后绿（改字节→13、删件→13、用法边界→2、
       清单吞行洗白→2、exit 13 放宽洗白样张→归因证据、stub docker 容器模式红绿两条、
-      同内容→0 且 SAME 行=10=清单数；dash 复跑红绿各一条），台账见 交付仓/负控记录-v1.md
+      同内容→0 且 SAME 行=10=清单数；dash 复跑红绿各一条），负控台账属过程件、未随包发布，编号保留备查：
       "任务 6 轮"（NC-123..NC-129）。docker build 真跑与三硬约束的运行期探针在阶段二任务 14。
     作用域：两个新文件全在自研作用域 gpustack/；上游树与基线表零改动
       （bash gpustack/gate-tree-unchanged-v1.sh rc=0 自证）。

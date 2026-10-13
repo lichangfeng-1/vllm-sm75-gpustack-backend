@@ -8,7 +8,7 @@
 #   两容器是不是同一层产物，由 gpustack/bridge-sha-v1.sh 逐件对拍 10 件层产物
 #   （pcieipc 9 件＋incple 目标件 1 件）的 sha256 来钉（一致退 0，不一致退 13 打印差集表）。
 #
-# 构建形态（阶段二任务 14 执行；阶段一只做静态验证：bash -n 与夹具负控，见 task-6-report.md）：
+# 构建形态（阶段二任务 14 执行；阶段一只做静态验证：bash -n 与夹具负控，记录在任务 6 的过程件、未随包发布）：
 #   docker build --file gpustack/Dockerfile.bench-v1 \
 #     --build-arg STAGE1_TAG=vllm-sm75-gpustack:v0.1.7-beta2-v1 \
 #     -t vllm-sm75-gpustack-bench:v1 <仓根>
@@ -78,8 +78,8 @@
 #   所以列成硬约束，任务 14 的运行核对表第一行就是 docker run --network host。
 # 约束 2：主程序实名 benchlocal-app；无头显示依赖 xvfb-run，而 xvfb-run 依赖 xauth 在位。
 #   出处说明（不粉饰）：仓内零命中——全仓 grep -ri "benchlocal-app"/"xvfb"/"xauth" 均 0 行
-#   （过程件记录见 task-6-report.md）；本约束来自审计 C-01 与服务器实测档
-#   （sdd-workspace/plan-v1/server-inventory-v1.md 容器行 bl-dbg＝benchlocal:0.4.0-xvfb）。
+#   （记录在任务 6 的过程件、未随包发布，此处保留结论）；本约束来自审计 C-01 与服务器实测档
+#   （服务器实测档的容器行 bl-dbg＝benchlocal:0.4.0-xvfb，该档属过程件、未随包发布）。
 #   运行期坑：xauth 缺位时 xvfb-run 报 "xvfb-run: error: xauth command not found"——
 #   文案指 xauth，根因是包缺失而非 X 显示配置错。
 #   门禁项＋秒级探针（阶段一不可定，任务 14 执行）：
@@ -123,7 +123,7 @@ ARG NPM_REGISTRY=https://registry.npmmirror.com
 FROM ${NODE_IMAGE} AS harness
 # 跨 stage 的 ARG 不继承：文件顶部的 ARG 只在 FROM 行可见，stage 内引用得到空值。
 # 与 Dockerfile.v1 各 stage 重声明 ARG BASE_TAG 同一形制（实测：stage 内不带默认值的
-# ARG 同时继承全局默认与 --build-arg 两路，读数见 task-14-benchfix-report-v1.md §2）。
+# ARG 同时继承全局默认与 --build-arg 两路，读数在任务 14 的过程件 §2、未随包发布）。
 # 本 stage 只用 NPM_REGISTRY，故只重声明这一行；NODE_IMAGE 只被 FROM 吃，无需重声明。
 ARG NPM_REGISTRY
 WORKDIR /opt/harness
