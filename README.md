@@ -16,6 +16,44 @@
 
 [English](README.en.md) · [发布说明](docs/releases/v0.1.7-beta2.md) · [参数模板](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
 
+## 0.5 性能实测（同一台机、同一把尺）
+
+测试台：BenchLocal，**并发数 1、超时 30 s、提示词长度九档 512 → 131072**，全部 `1/1 并发成功`。
+硬件：`G292Z20 8*T10 SM-75`。下面三张图的备注文字按测试台原文照录，未改写。
+
+### 测试参数配置（三张图完全相同）
+
+工具：**大模型 Prefill & Decode 性能测试工具 v3（chao 魔改版）**，即本镜像自带的测速台。
+
+| 项 | 值 | 项 | 值 |
+| --- | --- | --- | --- |
+| 最小提示词长度 | 512 | 最大提示词长度 | 131072 |
+| 步长 | 128 | 步长倍数 | 2（指数级：128→256→512→…1024…） |
+| 期望输出长度 | **1024** | 并发数 | 1 |
+| 请求超时 | 30000 ms | Temperature | 1 |
+| Top P | 0.95 | Presence Penalty | 0 |
+| Frequency Penalty | 0 | | |
+
+### 裸上游基线（未打本仓任何优化层）
+
+![上游基准](gpustack/assets/bench-upstream-baseline-w4.png)
+
+备注 `G292Z20 8*T10 SM-75 Qwen3.8-Flash-Next-W4`｜平均总输出 **43.31 tokens/s**｜平均总预填充 2742.54 tokens/s｜ITL 22.89–23.62 ms
+
+### 优化后模型一：FP8PLE
+
+![FP8PLE](gpustack/assets/bench-sm75-0.17-fp8ple.png)
+
+备注 `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4 FP8PLE`｜平均总输出 **57.73 tokens/s**｜平均总预填充 2749.96 tokens/s｜ITL 17.22–17.61 ms
+
+### 优化后模型二：W4A16-AutoRound
+
+![W4A16-AutoRound](gpustack/assets/bench-sm75-0.17-w4a16-autoround.png)
+
+备注 `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4A16-AutoRound`｜平均总输出 **57.04 tokens/s**｜平均总预填充 2762.51 tokens/s｜ITL 17.24–18.24 ms
+
+**这三张表怎么读（口径按用户确认，非本仓推断）**：第一张与第二张是**同一枚模型 FP8PLE**——第一张是只拉上游 `v0.1.7-beta2`、不打本仓任何优化层的裸基线，测试台备注里的 `W4` 与实际权重名不一致，以本句为准。所以 **43.31 → 57.73 是同模型直比 ＝ 输出侧 +33.3%**，而两档的平均预填充（2742.54 与 2749.96）几乎持平 ⇒ **本仓优化层的收益集中在解码侧，不在预填充侧**。第三张 `W4A16-AutoRound` 是另一枚模型，**没有配对的裸上游基线**，不要拿它跟前两张做百分比。另：第三张的 512 档（54.87、ITL 18.24）是首格冷启动离群点，别当稳态。
+
 ## 1. 简要说明
 
 面向 NVIDIA Turing / SM75（Tesla T4、T10 等）的 vLLM 0.30.0 适配，支持 Qwen3.8 27B FP8 / AWQ / NVFP4 和 Flash Next W4A16，保留 GDN、FP8 KV、MTP、DFlash2、Firefly、CPU KV、自动休眠和监控等功能。

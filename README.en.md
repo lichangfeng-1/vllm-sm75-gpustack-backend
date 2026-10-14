@@ -16,6 +16,44 @@ their new digests are updated in place in `gpustack/SHA256SUMS-upstream.txt` and
 
 [中文](README.md) · [Release notes](docs/releases/v0.1.7-beta2.md) · [Model profiles](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
 
+## 0.5 Measured performance (same machine, same ruler)
+
+Harness: BenchLocal, **concurrency 1, timeout 30 s, nine prompt lengths 512 → 131072**, all `1/1 success`.
+Hardware: `G292Z20 8*T10 SM-75`. The caption under each image is the harness note verbatim.
+
+### Test configuration (identical across all three runs)
+
+Tool: **Prefill & Decode benchmark v3 (chao mod)** — the benchmark harness shipped inside this image.
+
+| Field | Value | Field | Value |
+| --- | --- | --- | --- |
+| Min prompt length | 512 | Max prompt length | 131072 |
+| Step | 128 | Step multiplier | 2 (exponential: 128→256→512→…1024…) |
+| Expected output length | **1024** | Concurrency | 1 |
+| Request timeout | 30000 ms | Temperature | 1 |
+| Top P | 0.95 | Presence Penalty | 0 |
+| Frequency Penalty | 0 | | |
+
+### Bare upstream baseline (none of this repo's optimization layers)
+
+![upstream baseline](gpustack/assets/bench-upstream-baseline-w4.png)
+
+Note `G292Z20 8*T10 SM-75 Qwen3.8-Flash-Next-W4` | mean total output **43.31 tok/s** | mean prefill 2742.54 tok/s | ITL 22.89-23.62 ms
+
+### Optimized model 1: FP8PLE
+
+![FP8PLE](gpustack/assets/bench-sm75-0.17-fp8ple.png)
+
+Note `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4 FP8PLE` | mean total output **57.73 tok/s** | mean prefill 2749.96 tok/s | ITL 17.22-17.61 ms
+
+### Optimized model 2: W4A16-AutoRound
+
+![W4A16-AutoRound](gpustack/assets/bench-sm75-0.17-w4a16-autoround.png)
+
+Note `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4A16-AutoRound` | mean total output **57.04 tok/s** | mean prefill 2762.51 tok/s | ITL 17.24-18.24 ms
+
+**How to read these three (scope confirmed by the maintainer, not inferred here)**: the first and second runs are **the same model, FP8PLE** — the first is the bare upstream `v0.1.7-beta2` with none of this repo's optimization layers applied; the harness note says `W4` but the actual checkpoint is FP8PLE, and this sentence is authoritative. So **43.31 → 57.73 is a same-model comparison = +33.3% on output**, while mean prefill barely moves (2742.54 vs 2749.96) ⇒ **this repo's optimization layers pay off on decode, not prefill**. The third run, `W4A16-AutoRound`, is a different model with **no paired bare-upstream baseline** — do not express it as a percentage against the first two. Also: in the third table the 512 cell (54.87, ITL 18.24) is a cold-start outlier, not steady state.
+
 ## 1. Overview
 
 vLLM 0.30.0 adapted for NVIDIA Turing / SM75, including Tesla T4 and T10. Supports Qwen3.8 27B FP8 / AWQ / NVFP4 and Flash Next W4A16, with GDN, FP8 KV, MTP, DFlash2, DSpark, Firefly, CPU KV, power management and monitoring.
