@@ -215,3 +215,9 @@ NOTICE —— vllm-sm75-gpustack-backend
   除这两节外上游件仍一字节不改；两枚新摘要已就地同步进
   gpustack/SHA256SUMS-upstream.txt 对应行（表内条目数仍 551），
   门 5（gpustack/gate-tree-unchanged-v1.sh）复跑为绿。
+
+  同批追加（10-15）：README 中英各加"性能实测"节并引入三张测速图
+  （新件位于 gpustack/assets/，不属上游作用域）；gpustack/run-book-v1.md 加第 10 节、
+  gpustack/backend-version-card-v1.md 与 gpustack/compat-matrix-v1.md 各加"性能实测的适用面"一节，
+  统一说明这三档是面板／Ultra 形态的读数、不得当 GPUStack 形态的验收线。
+  以上均为我方文件，未再触碰任何上游件。

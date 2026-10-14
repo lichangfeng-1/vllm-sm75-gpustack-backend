@@ -80,3 +80,15 @@ bash gpustack/lint-paste-v1.sh
 | 时区 | 容器内 `date +%z` | `+0800` |
 | 对外名回显 | `GET /v1/models` | 与部署时模型名一致 |
 | 省电项 | 无探针 | 已实测判死，GPUStack 方案不含（见 `compat-matrix-v1.md`） |
+
+## 性能实测的适用面（10-15 补）
+
+仓根 `README.md` 性能节那三张表（裸上游 **43.31**／FP8PLE **57.73**／W4A16-AutoRound **57.04**，
+平均总输出 tokens/s）是在**镜像自带的 Ultra／面板形态**上、用"大模型 Prefill & Decode 性能测试工具 v3
+（chao 魔改版）"跑的，同尺参数为：并发 1／请求超时 30000 ms／期望输出长度 1024／九档 512→131072／
+Temperature 1／Top P 0.95／Presence 0／Frequency 0。
+
+⇒ **本卡与 `compat-matrix-v1.md` 里那些"速度 env"的收益，就是这三张表量出来的那部分**；
+但**不要**拿这三个数当 GPUStack 形态的验收线——GPUStack 形态要另测，方法见
+`gpustack/run-book-v1.md` 第 10 节。裸上游与 FP8PLE 两档是同模型直比（输出 +33.3%），
+而两档平均预填充 2742.54 与 2749.96 几乎持平 ⇒ **本仓优化层的收益集中在解码侧，不在预填充侧**。
