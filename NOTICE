@@ -24,7 +24,7 @@ NOTICE —— vllm-sm75-gpustack-backend
 
   这 551 枚里含 ultra/ 全树 289 枚（控制面板 console、BenchLocal 测试台与相关
   helpers）——它们与 vllm/ 树一同属上游 VLLM-SM75，本仓未改一字节，也不另设归属条目。
-  本仓自研的是 gpustack/ 目录 34 枚（对接层、粘贴块、构建门与护栏）加 README 两枚。
+  本仓自研的是 gpustack/ 目录 39 枚（对接层、粘贴块、构建门与护栏，含 assets/ 3 枚、layers/ 17 枚、testkit/ 1 枚；口径＝`git ls-files gpustack/ | wc -l`）加 README 两枚。
   针对 SM75／T10 硬件的运行期优化（pcieipc、incple、QSA 系列、PState 组件）来自上游树，
   不属本仓的二次开发。
 

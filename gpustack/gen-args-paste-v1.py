@@ -28,7 +28,7 @@
 #      gpustack/worker/backends/base.py:67-116 _normalize_param_format）都吃得下。
 #
 # 行号口径（修复轮 1 的 M-3）：上面除 runtime-entrypoint.py 之外一律取本地
-#   `gpustack源码/v2.2.3-正式`（正式版，与注册卡同口径），目录已补全、区间改成函数真实起止；
+#   上游 v2.2.3 正式版发布源码（与注册卡同口径），目录已补全、区间改成函数真实起止；
 #   `docker/helpers/runtime-entrypoint.py:21` 取的是**仓内上游件**，不是 GPUStack 源码树。
 #
 # 用法（路径请给目标解释器认得的形态；本机是原生 Windows Python，要 K:/… 或 C:\… 形，

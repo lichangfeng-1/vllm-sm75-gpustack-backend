@@ -53,7 +53,7 @@ docker start sm75-gpustack-server
 
 **两个坑，都是实跑撞过的**：
 
-先说一句指路约定：本节与后文凡写成 `gpustack/xxx.py:行号` 的，指的是**上游 GPUStack v2.2.3 的源码路径与行号**，本仓里没有这些文件（本仓自研件一律带版本后缀，如 `gpustack/run-book-v1.md`）。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核。
+先说一句指路约定：本节与后文凡指向 Python／mjs 源码并带行号的——无论写成 `gpustack/xxx.py:行号` 还是只写 `xxx.py:行号`——指的都是**上游 GPUStack v2.2.3 的源码路径与行号**，本仓里没有这些文件。本仓自研件集中在 `gpustack/` 目录与仓根文档：多数带版本后缀（如 `run-book-v1.md`），也有不带的（如 `layers/incple/patch_ple_inc.py`、`layers/pcieipc/install-pcieipc.sh`），所以按路径区分，别按后缀猜。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核。
 
 - **不要加 `--system-default-container-registry`**。加了它，后端注册表里不含 registry 段的镜像名会被拼成 `quay.io/vllm-sm75-gpustack:…` 去远端拉，报 `Failed to pull image`，而本地明明有这枚镜像；表现是"参数块一行都没被执行"。拼接规则 `gpustack/utils/config.py:87-108`。已经设过就清掉：`PUT /v2/config {"system_default_container_registry":""}`（该字段在运行时白名单 `gpustack/utils/config.py:9-12`，可热改；这条 PUT 要带鉴权，无 token 直接 401）。
 
@@ -122,7 +122,7 @@ bash gpustack/lint-paste-v1.sh
 ```bash
 docker ps --format '{{.Names}} {{.Status}}' | grep run-            # 1 实例容器在跑
 curl -q -sS -H "Authorization: Bearer $GS_KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"qwen3.8-flash-next-w4a16-autoround","messages":[{"role":"user","content":"你好"}],"max_tokens":32}' \
+  -d '{"model":"qwen3.8-flash-next-w4a16-autoround","messages":[{"role":"user","content":"你好"}],"max_tokens":256}' \
   http://${HOST_IP}:8180/v1/chat/completions                       # 2 正文非空
 nvidia-smi --query-gpu=memory.used --format=csv,noheader           # 3 逐卡 ≤ 15500 MiB
 INST="$(docker ps --format '{{.Names}}' | grep run- | head -1)"
