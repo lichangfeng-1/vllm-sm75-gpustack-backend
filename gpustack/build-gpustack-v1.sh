@@ -202,18 +202,22 @@ echo "门 3/5 实应用：绿"
 # feat_count 在文件头部定义（门 2 的诊断也要用）。
 declare -a CHECK_PATTERNS=(
   'PYTORCH_MIRROR'
-  'PLACEHOLDER://release/flashinfer_cubin'
-  'PLACEHOLDER://release/nvidia-pstated'
+  'flashinfer_cubin-0.6.18-py3-none-any.whl'
+  '2dd65c0fcfc6bc44c67f148530de5372979c2e3d260e47935730f94156d4d873'
   'UV_DEFAULT_INDEX'
   'https://download.pytorch.org/whl/cu129'
   'https://flashinfer.ai/whl/'
-  'https://github.com/sasha0552/nvidia-pstated'
+  'ARG NVIDIA_PSTATE_SHA256=4bf5b5eba202c65f'
 )
-# 期望：前四项为补丁应留下的特征（>=2 / ==1 / ==1 / >=1，逐字取自简报），
-# 后三项是被替换掉的原始锈点，替换后必须归零（防"叠加而非替换"造成的多）。
+# 期望：前四项为补丁应留下的特征（>=2 / ==1 / ==1 / >=1），第 2、3 项是 cubin 的上游直链
+#   与它的 sha256 锚（两者缺一都意味着"地址在但字节没钉"）；第 4 项 uv 默认索引；
+#   第 5、6 项是被替换掉的原始锈点，替换后必须归零（防"叠加而非替换"造成的多）；
+#   第 7 项反过来——pstated 这一处补丁**不再改**，所以上游那条 sha 钉必须在位且恰好 1 次。
+#   它原先断言的是"残留 pstated GitHub 直链 == 0"，那是"本仓托管"形态下的写法；
+#   GPL-3.0 件不由本仓分发，故撤掉那处替换，此门随之换成"钉未被清空"（清空＝空判据假绿，正好该红）。
 declare -a CHECK_OP=( '>=' '==' '==' '>=' '==' '==' '==' )
-declare -a CHECK_WANT=( 2 1 1 1 0 0 0 )
-declare -a CHECK_LABEL=( '特征 PyTorch 索引参数' '特征 cubin 托管直链' '特征 pstated 托管直链' '特征 uv 默认索引' '残留 pytorch 官方索引' '残留 flashinfer 官方索引' '残留 pstated GitHub 直链' )
+declare -a CHECK_WANT=( 2 1 1 1 0 0 1 )
+declare -a CHECK_LABEL=( '特征 PyTorch 索引参数' '特征 cubin 上游直链' '特征 cubin sha256 锚' '特征 uv 默认索引' '残留 pytorch 官方索引' '残留 flashinfer 官方索引' '残留 pstated 上游 sha 钉' )
 
 count_bad=0
 echo "门 4/5 特征计数："

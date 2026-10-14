@@ -5,7 +5,8 @@
 #   bash gpustack/preflight-sources-v1.sh                 按内置默认清单探活
 #   bash gpustack/preflight-sources-v1.sh --list FILE     改用外部清单（自检与负控用）
 #   清单格式：每行 源名|类别|URL|切换开关名|分组，# 开头为注释，空行忽略
-#   类别：registry（镜像仓库代理）| index（pypi / wheels 索引）| placeholder（待任务 13 回填）
+#   类别：registry（镜像仓库代理）| index（pypi / wheels 索引，或任何"HEAD 到就算在线"的构建期直链）
+#         | placeholder（清单里暂不放行的占位源；10-14 起本仓清单已无此类行，机制保留给外部夹具）
 #   分组：互为替代的候选共用一个分组名（两条基础镜像代理同组）；没有候选的源自成一组，
 #         组名直接复用源名。源名与分组名都不许为空，源名不许重复（重复会让下面的
 #         "点名差额"定位失效，所以整表校验先判死）。
@@ -79,8 +80,10 @@ pytorch_wheels_mirror|index|https://mirror.sjtu.edu.cn/pytorch-wheels/cu129/|PYT
 # pypi 索引：补丁内 ARG PIP_MIRROR 与 ENV UV_DEFAULT_INDEX 的默认值
 pypi_mirror|index|https://pypi.tuna.tsinghua.edu.cn/simple/|PIP_MIRROR|pypi_mirror
 # 本仓托管件：URL 待任务 13 回填 Release 直链，探活阶段一律豁免
-flashinfer_cubin_release|placeholder|PLACEHOLDER://release/flashinfer_cubin-0.6.18-py3-none-any.whl|无 env 开关（任务 13 改补丁）|release_hosted
-nvidia_pstated_release|placeholder|PLACEHOLDER://release/nvidia-pstated|无 env 开关（任务 13 改补丁）|release_hosted
+# 构建期要下的两枚件：本仓不托管、不重新分发（nvidia-pstated 是 GPL-3.0-only，塞进 Apache 仓＝我们分发 GPL 件），
+# 所以这两行从"placeholder 豁免"升成真实探活——豁免态下这两枚是"有口但没走过"的空判据，报绿不算证过。
+flashinfer_cubin_release|index|https://github.com/flashinfer-ai/flashinfer/releases/download/v0.6.18/flashinfer_cubin-0.6.18-py3-none-any.whl|无 env 开关（上游直链＋URL 片段 sha256 锚）|build_asset
+nvidia_pstated_release|index|https://github.com/sasha0552/nvidia-pstated/releases/download/v1.0.9/nvidia-pstated|无 env 开关（上游 ARG 钉版本＋sha256sum -c）|build_asset
 DEFAULT
   fi
 }
