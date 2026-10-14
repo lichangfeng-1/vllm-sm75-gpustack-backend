@@ -53,11 +53,13 @@ docker start sm75-gpustack-server
 
 **两个坑，都是实跑撞过的**：
 
+先说一句指路约定：本节与后文凡写成 `gpustack/xxx.py:行号` 的，指的是**上游 GPUStack v2.2.3 的源码路径与行号**，本仓里没有这些文件（本仓自研件一律带版本后缀，如 `gpustack/run-book-v1.md`）。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核。
+
 - **不要加 `--system-default-container-registry`**。加了它，后端注册表里不含 registry 段的镜像名会被拼成 `quay.io/vllm-sm75-gpustack:…` 去远端拉，报 `Failed to pull image`，而本地明明有这枚镜像；表现是"参数块一行都没被执行"。拼接规则 `gpustack/utils/config.py:87-108`。已经设过就清掉：`PUT /v2/config {"system_default_container_registry":""}`（该字段在运行时白名单 `gpustack/utils/config.py:9-12`，可热改；这条 PUT 要带鉴权，无 token 直接 401）。
 
   这条警告已于 2026-10-15 在同一台机上跑出**双向证据**：带该 flag 起 server 时，worker 日志逐字 `image resolved to: quay.io/vllm-sm75-gpustack:v0.1.7-beta2-v1`，接 `manifest unknown`，实例转 `ERROR`；换成不带该 flag 重建 server 后，同一个镜像名由本地直接接住，实例转 `RUNNING`。
 
-  还有一条容易读错，别拿它当"没事"的依据：**数据库里那一列是空的，CLI flag 照样生效**。`clusters.system_default_container_registry` 实测为 `NULL`，而 worker 仍去拉 `quay.io/…`；落点在 `gpustack/routes/clusters.py:794-795`（`cluster.system_default_container_registry or cfg.system_default_container_registry`，行号按 `v2.2.3-正式` 那棵树）。所以判这格只能读运行时行为，读库会漏。
+  还有一条容易读错，别拿它当"没事"的依据：**数据库里那一列是空的，CLI flag 照样生效**。`clusters.system_default_container_registry` 实测为 `NULL`，而 worker 仍去拉 `quay.io/…`；落点在 `gpustack/routes/clusters.py:794-795`（`cluster.system_default_container_registry or cfg.system_default_container_registry`）。所以判这格只能读运行时行为，读库会漏。
 - **不要用 `--network host`**。GPUStack 内嵌的 Higress 网关会自己开一串监听口，`--host-ip` 管不到它们，暴露面因此比设计大。这里用 bridge ＋ 显式 `-p 宿主IP:8180:80`，只放这一个口。
 
 ## 4 取初始口令并登录
