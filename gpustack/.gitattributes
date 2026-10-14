@@ -1,0 +1,15 @@
+# gpustack/.gitattributes —— 本仓自研目录的独立规则（不动上游冻结的仓根 .gitattributes）
+#
+# 为什么单独放这一份：仓根 .gitattributes 属上游树内文件（第二节冻结基线 551 枚之一），
+# 改它会被自家门 5（gpustack/gate-tree-unchanged-v1.sh，退出码 7）判红。
+#
+# 承重项：env-paste／args-paste 两枚是要整块粘进 GPUStack 表单的，mirror-patch-v1.patch
+# 是要 patch 到上游 Dockerfile 副本上的。这三枚一旦在 Windows 检出时被换成 CRLF，
+# 前者＝每行尾部多带一个 CR（表单里静默变值），后者＝补丁 dry-run 直接不匹配。
+# lint-paste-v1.sh 的 L0 与 build-gpustack-v1.sh 都会响亮失败，但那是事后拦；
+# 这条规则让坏字节根本不进工作目录。
+*.txt text eol=lf
+*.patch text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
