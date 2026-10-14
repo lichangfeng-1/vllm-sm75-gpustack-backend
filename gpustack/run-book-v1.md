@@ -133,3 +133,28 @@ bash docker/benchlocal.sh connect    # 面板容器不在 bench 那张网上时�
 ```
 
 **一条不匹配要先解决**：`docker/benchlocal.sh` 默认认 **Ultra 面板镜像**（`vllm-sm75:v…-ultra-beta…`）并有一道 label 门 `io.sm75.benchlocal.unified=1`。本 GPUStack 线的测速台另有 `gpustack/Dockerfile.bench-v1`（产物 tag `vllm-sm75-gpustack-bench:v1`）。走这条线时要么 `IMAGE=… bash docker/benchlocal.sh start` 覆盖并满足 label 门，要么先另建 Ultra 镜像。**该覆盖路径本仓未实跑** `【待实跑复核】`。
+
+## 10 性能预期（以及仓根那三张表的适用面，务必先读）
+
+仓根 `README.md` 的性能节挂着三张测速表：裸上游 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出）。
+
+**这三张不是本 run-book 这条路的读数。** 它们的备注逐字是 `G292Z20 8*T10 SM-75 …`，**没有出现 GPUStack 字样**，
+是在镜像自带的 Ultra／面板形态上、用"大模型 Prefill & Decode 性能测试工具 v3（chao 魔改版）"跑出来的。
+⇒ **照本文件起完 GPUStack 之后，不要拿 57.73 当验收线**，否则你会以为自己配错了。
+
+要在 GPUStack 形态上量同一把尺的数，两条路：
+
+1. 用第 9 步那三枚 bench 容器，把它们的 base_url 指向 GPUStack 网关（`http://` ＋ `HOST_IP` ＋ `:8180`，带 API key），
+   参数照 README 那张配置表逐格填：并发 1／请求超时 30000 ms／期望输出长度 **1024**／
+   最小 512／最大 131072／步长 128／步长倍数 2／Temperature 1／Top P 0.95／Presence 0／Frequency 0。
+   **注意第 9 步那条 `IMAGE=` 覆盖路径本仓仍未实跑**，走不通就先用面板形态量。
+2. 或者只认第 8 步那四道防假绿断言（实例 `running` ＋ 一次真实推理非空 ＋ 逐卡 ≤15500 MiB ＋ 零 OOM），
+   速度另开窗口测。
+
+**跨形态比较的三条硬规矩**（都是踩过才写下的）：
+- 只跟**同一把尺的同一字段**比——面板/GPUStack 各自那个"平均总输出"字段，不要拿手算的九格算术均值去对它的均值。
+- 长度集合必须**逐格对齐**（九档就是九档，少一格直减不成立），且单格差落在 **±4.6%** 以内不得当结论。
+- **首格（512）常是冷启动离群点**，跨批比要么固定剔第一格，要么先补一档不计数的预热。
+
+本线目前有一枚 GPUStack 形态的读数，**未进对外表**：维护者判断疑因当时开着视频输入所致，**未归因**，
+所以这里不给数字，也不许拿它去算"GPUStack 比面板慢百分之几"。
