@@ -1,5 +1,19 @@
 # vLLM-SM75 v0.1.7 beta2
 
+
+## 0. 本仓另有用途：GPUStack 对接线（要做这个的话，从这里开始）
+
+本仓在上游 VLLM-SM75 之上多了一条交付线：把 SM75 版 vLLM 作为 **GPUStack 的自定义后端**部署。
+要的是这个，就别按下面第 5 节「标准构建与启动」走（那是面板／Ultra 形态），直接看：
+
+- 操作步骤（拉仓 → 探活与构建 → 起 server/worker → 注册后端版本 → 部署模型 → 四道验收）：`gpustack/run-book-v1.md`
+- 表单要整块粘的两枚：`gpustack/args-paste-v1.txt`（24 行）、`gpustack/env-paste-v1.txt`（**25 行**，第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM` 是硬性项，省掉模型会永久排队且界面不报错）
+- 每条参数为什么这么设、换硬件怎么算：`gpustack/backend-version-card-v1.md`、`gpustack/compat-matrix-v1.md`
+- 改完先自检：`bash gpustack/lint-paste-v1.sh`，末行须逐字 `LINT_PASTE_OK env=25 args=24`
+
+本节与 `README.en.md` 的同名一节，是上游冻结基线之外本仓**有意改动**的两处，
+新摘要已就地同步进 `gpustack/SHA256SUMS-upstream.txt` 对应两行，并在 NOTICE 第三节登记。
+
 [English](README.en.md) · [发布说明](docs/releases/v0.1.7-beta2.md) · [参数模板](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
 
 ## 1. 简要说明

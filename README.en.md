@@ -1,5 +1,19 @@
 # vLLM-SM75 v0.1.7 beta2
 
+
+## 0. This repo also carries a second delivery line: GPUStack backend (start here for that)
+
+On top of upstream VLLM-SM75, this repo adds a line that runs the SM75 build of vLLM as a
+**custom GPUStack backend**. If that is what you want, skip section 5 below (that is the
+panel/Ultra form) and go to:
+
+- Step-by-step (clone, probe & build, start server/worker, register the backend version, deploy, four acceptance gates): `gpustack/run-book-v1.md`
+- The two paste blocks for the form: `gpustack/args-paste-v1.txt` (24 lines) and `gpustack/env-paste-v1.txt` (**25 lines**; line 25 `GPUSTACK_MODEL_VRAM_CLAIM` is mandatory — without it the model queues forever with no error)
+- Why each parameter is set this way and how to re-derive it for other hardware: `gpustack/backend-version-card-v1.md`, `gpustack/compat-matrix-v1.md`
+
+These two README sections are the only deliberate edits made to upstream-frozen files;
+their new digests are updated in place in `gpustack/SHA256SUMS-upstream.txt` and logged in NOTICE section 3.
+
 [中文](README.md) · [Release notes](docs/releases/v0.1.7-beta2.md) · [Model profiles](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
 
 ## 1. Overview

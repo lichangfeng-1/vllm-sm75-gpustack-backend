@@ -207,3 +207,11 @@ NOTICE —— vllm-sm75-gpustack-backend
 
   已确定的自研文件放置约定：本仓新增文件只放在仓根的新顶层路径或 gpustack/ 内，
   不写入上游的 14 个顶层条目，以免与上游冻结面混淆。
+
+  例外登记（10-14，用户批准破一次冻结红线）：README.md 与 README.en.md 各插入一节
+  「GPUStack 对接线从这里开始」，指向上游树之外的 gpustack/run-book-v1.md。
+  理由：仓根 README 讲的是面板／Ultra 形态，公开后复刻的人会先落在错的那条线上，
+  且 gpustack/ 目录没有任何入口指得到 run-book。
+  除这两节外上游件仍一字节不改；两枚新摘要已就地同步进
+  gpustack/SHA256SUMS-upstream.txt 对应行（表内条目数仍 551），
+  门 5（gpustack/gate-tree-unchanged-v1.sh）复跑为绿。
