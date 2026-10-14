@@ -14,6 +14,7 @@
 | 主机内存 | **约 251 GiB** | 参数块带 `--engram-config={"cpu_offload":true}`，一部分权重常驻主机内存。64 GB 的机器会在加载阶段被 OOM killer 杀掉，且现象像"镜像坏了" |
 | 磁盘 | `/data` 可用 ≥ 250 G | 权重 17 枚 `*.safetensors` 合计 `181,196,007,016 B`（≈168.8 GiB），另需镜像与缓存余量 |
 | 网卡 | 记下宿主内网 IP，下面统一用 `HOST_IP` | worker 与浏览器都要能到达它。`export HOST_IP=192.0.2.10` 换成你的地址 |
+| 数据目录 | 起容器**之前**先建好，且容器要能写 | `--mount type=bind` 的源目录不存在时，失败发生在 `docker create` 而不是 `docker start`，原文 `invalid mount config for type "bind": bind source path does not exist`。另注意 GPUStack 会以 root 写这枚目录，事后普通账号删不掉 |
 
 驱动版本下限**本仓未验**（面板线撞过 NVAPI 与驱动版本不匹配，属另一条形制），此处不写成要求。
 
@@ -52,7 +53,11 @@ docker start sm75-gpustack-server
 
 **两个坑，都是实跑撞过的**：
 
-- **不要加 `--system-default-container-registry`**。加了它，后端注册表里不含 registry 段的镜像名会被拼成 `quay.io/vllm-sm75-gpustack:…` 去远端拉，报 `Failed to pull image`，而本地明明有这枚镜像；表现是"参数块一行都没被执行"。拼接规则 `gpustack/utils/config.py:87-108`。已经设过就清掉：`PUT /v2/config {"system_default_container_registry":""}`（该字段在运行时白名单 `gpustack/utils/config.py:9-12`，可热改）。
+- **不要加 `--system-default-container-registry`**。加了它，后端注册表里不含 registry 段的镜像名会被拼成 `quay.io/vllm-sm75-gpustack:…` 去远端拉，报 `Failed to pull image`，而本地明明有这枚镜像；表现是"参数块一行都没被执行"。拼接规则 `gpustack/utils/config.py:87-108`。已经设过就清掉：`PUT /v2/config {"system_default_container_registry":""}`（该字段在运行时白名单 `gpustack/utils/config.py:9-12`，可热改；这条 PUT 要带鉴权，无 token 直接 401）。
+
+  这条警告已于 2026-10-15 在同一台机上跑出**双向证据**：带该 flag 起 server 时，worker 日志逐字 `image resolved to: quay.io/vllm-sm75-gpustack:v0.1.7-beta2-v1`，接 `manifest unknown`，实例转 `ERROR`；换成不带该 flag 重建 server 后，同一个镜像名由本地直接接住，实例转 `RUNNING`。
+
+  还有一条容易读错，别拿它当"没事"的依据：**数据库里那一列是空的，CLI flag 照样生效**。`clusters.system_default_container_registry` 实测为 `NULL`，而 worker 仍去拉 `quay.io/…`；落点在 `gpustack/routes/clusters.py:794-795`（`cluster.system_default_container_registry or cfg.system_default_container_registry`，行号按 `v2.2.3-正式` 那棵树）。所以判这格只能读运行时行为，读库会漏。
 - **不要用 `--network host`**。GPUStack 内嵌的 Higress 网关会自己开一串监听口，`--host-ip` 管不到它们，暴露面因此比设计大。这里用 bridge ＋ 显式 `-p 宿主IP:8180:80`，只放这一个口。
 
 ## 4 取初始口令并登录
@@ -62,6 +67,8 @@ docker exec sm75-gpustack-server cat /var/lib/gpustack/initial_admin_password
 ```
 
 浏览器开 `http://${HOST_IP}:8180` 登录并改口令。**口令别贴进截图、群或任何公开渠道。**
+
+这格只适用于**全新首启**：`initial_admin_password` 是一次性的，改过口令之后该文件就从数据目录里消失（10-15 实测：老部署的目录里已无此件，对照一枚全新空目录起时它在、长度 12）。老部署取不到它，只能走界面重置。另外管理登录口是 `POST /auth/login`，**不带 `/v2` 前缀**（`/v2/auth/login` 实测 404）。
 
 ## 5 起 worker
 
@@ -106,6 +113,7 @@ bash gpustack/lint-paste-v1.sh
 - `环境变量` 整块粘 `gpustack/env-paste-v1.txt`（**25 行**）。**第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM=120779177984` 是硬性项**：没有它，平台按启发式估出 204.5 GiB 需求，而本机八卡可分配只有 117.76 GiB，所以模型永久排队、界面不报错也不给原因。换机器按 `claim ＝ 实测逐卡驻留 MiB × 卡数 × 1048576` 重算。
 - 表单里会多出几条不是你粘的 env（`SAFETENSORS_FAST_GPU`、`RUNAI_STREAMER_*`、`VLLM_CACHE_ROOT`）——那是平台自己塞的默认值，别当成粘坏了。
 - 要开图输入：另加 `--limit-mm-per-prompt={"image":4}`（**紧贴等号**，JSON 里带空格会被拆成两个 token）＋删掉 `--language-model-only` ＋**重跑显存标定回填 claim**。开多模态后逐卡实测 15,372 MiB，已超 `0.92 × 16384 ＝ 15,073` 的可分配口径，所以诚实的 claim 过不了准入，本机这一档存在"准入靠低报、运行靠物理余量"的不体面形态，余量只剩约 1,012 MiB/卡。
+- 上面那句里只有 `--limit-mm-per-prompt` 是"要多张图"才需要的。真正卡住图输入的是 `--language-model-only`：删掉它之后不必显式设限额也能进图——这枚档在平台侧决议成 `Qwen4ExpForConditionalGeneration`（带视觉塔），默认限额 1 张。10-15 实测一张工作台截图进模型、正文准确描述了画面，硬指标 `usage.multimodal_tokens.image = 2040`、prompt 2117 token、`mm_cache_queries_total = 1.0`，引擎自报 `Multi-modal warmup completed`。**该次取证走的是引擎直连口（本机 40028），不是 8180 网关**，网关那条腿当时因无可用 API key 仍是 401，别把这条读成"网关侧图像已验"。
 
 ## 8 验收（四道，缺一不算过）
 
@@ -123,6 +131,11 @@ OpenAI 兼容口与 UI **同一个口**（`gpustack/config/config.py:922-927` �
 八卡在不在位只看 `GET /v2/gpu-devices`（worker 对象上的 `gpu_devices` 是 null，别拿它判断）。
 不许靠继续调低 claim 去骗调度器——claim 低于真实占用就是假绿。
 
+道 2 有两个坑，都是 10-15 撞过的：
+
+1. **`$GS_KEY` 必须在建的时候就要到手。** 平台侧的键是"建时给一次"的形态：`api_keys` 表里 `access_key` 只有 16 个字符（是标识位），secret 只存散列，事后从库里捞不出来。凡是以后还要走网关做验收的部署，**建 key 当场就落盘**，否则这一道整条腿死掉，而它红起来只有一句 401 `Invalid authentication credentials`。
+2. **`max_tokens` 要给够。** 这档带 `--reasoning-parser=qwen3`，思考链与正文分家；预算开小了会被思链吃满，出现 HTTP 200、`finish_reason=length`、`completion_tokens` 恰等于上限而正文 0 字（10-15 实测那发 reasoning_tokens 48、正文长度 0）。只看 HTTP 状态码判不了这一道。
+
 ## 9 可选：独立的测速与雷达图容器
 
 ```bash
@@ -132,7 +145,9 @@ bash docker/benchlocal.sh status     # 逐枚看三枚：sm75-bench-bugfind / -c
 bash docker/benchlocal.sh connect    # 面板容器不在 bench 那张网上时用它补
 ```
 
-**一条不匹配要先解决**：`docker/benchlocal.sh` 默认认 **Ultra 面板镜像**（`vllm-sm75:v…-ultra-beta…`）并有一道 label 门 `io.sm75.benchlocal.unified=1`。本 GPUStack 线的测速台另有 `gpustack/Dockerfile.bench-v1`（产物 tag `vllm-sm75-gpustack-bench:v1`）。走这条线时要么 `IMAGE=… bash docker/benchlocal.sh start` 覆盖并满足 label 门，要么先另建 Ultra 镜像。**该覆盖路径本仓未实跑** `【待实跑复核】`。
+**一条不匹配要先解决**：`docker/benchlocal.sh` 默认认 **Ultra 面板镜像**（`vllm-sm75:v…-ultra-beta…`）并有一道 label 门 `io.sm75.benchlocal.unified=1`。本 GPUStack 线的测速台另有 `gpustack/Dockerfile.bench-v1`（产物 tag `vllm-sm75-gpustack-bench:v1`）。走这条线时要么 `IMAGE=… bash docker/benchlocal.sh start` 覆盖并满足 label 门，要么先另建 Ultra 镜像。
+
+这条覆盖路径的两个前置条件里，**label 门这一条已实测满足**：10-15 现读本机那枚 bench 镜像（ID `992df1afbdc2`）的 `io.sm75.benchlocal.unified` 值为 `1`。剩下的那一半——`benchlocal.sh` 接受 `IMAGE=` 覆盖之后整条链路真跑得通——**本仓仍未实跑** `【待实跑复核】`。
 
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
