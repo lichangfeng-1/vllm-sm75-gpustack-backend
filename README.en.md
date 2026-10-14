@@ -52,7 +52,15 @@ Note `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4 FP8PLE` | mean total output
 
 Note `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4A16-AutoRound` | mean total output **57.04 tok/s** | mean prefill 2762.51 tok/s | ITL 17.24-18.24 ms
 
-**How to read these three (scope confirmed by the maintainer, not inferred here)**: the first and second runs are **the same model, FP8PLE** — the first is the bare upstream `v0.1.7-beta2` with none of this repo's optimization layers applied, **and the maintainer confirms that run is also the speed with P2P not in use**; the harness note says `W4` but the actual checkpoint is FP8PLE, and this sentence is authoritative. So **43.31 → 57.73 is a same-model comparison = +33.3% on output**, while mean prefill barely moves (2742.54 vs 2749.96) ⇒ **the payoff is on decode, not prefill**. **But that 33.3% must not be credited to P2P alone**: the bare upstream also lacks pcieipc, the QSA family, `flashqla_sm75`, the custom scheduler and more, and no per-family single-variable A/B has been run — the correct label is **"the full set of optimizations, P2P included"**. The third run, `W4A16-AutoRound`, is a different model with **no paired bare-upstream baseline** — do not express it as a percentage against the first two. Also: in the third table the 512 cell (54.87, ITL 18.24) is a cold-start outlier, not steady state.
+### Reading the three tables
+
+The first two tables are the same checkpoint, FP8PLE. The first run is bare upstream `v0.1.7-beta2` with none of this repo's optimization layers applied; the maintainer confirms it is also the speed obtained with P2P not in use. The `W4` in the harness note does not match the checkpoint name: both tables refer to the same FP8PLE weights.
+
+Compared like for like, mean total output goes from 43.31 to 57.73 tok/s, +33.3%, while mean prefill barely moves (2742.54 against 2749.96). The gain is on decode, not prefill.
+
+That 33.3% is not P2P alone. The bare upstream is also missing pcieipc, the QSA family, `flashqla_sm75` and the custom scheduler, and no per-family single-variable A/B has been run, so the correct label is "the full set of optimizations, P2P included".
+
+The third table is a different checkpoint, W4A16-AutoRound, with no matching bare-upstream run, so it carries no percentage. Its 512-length cell (54.87 tok/s, ITL 18.24 ms) is a cold start, not steady state.
 
 ## 1. Overview
 
