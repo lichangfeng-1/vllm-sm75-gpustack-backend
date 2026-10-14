@@ -115,8 +115,8 @@ curl -q -sS -H "Authorization: Bearer $GS_KEY" -H 'Content-Type: application/jso
   -d '{"model":"qwen3.8-flash-next-w4a16-autoround","messages":[{"role":"user","content":"你好"}],"max_tokens":32}' \
   http://${HOST_IP}:8180/v1/chat/completions                       # 2 正文非空
 nvidia-smi --query-gpu=memory.used --format=csv,noheader           # 3 逐卡 ≤ 15500 MiB
-docker logs "$(docker ps --format '{{.Names}}' | grep run- | head -1)" 2>&1 \
-  | grep -ciE "out of memory|CUDA error|Traceback"                 # 4 须为 0
+INST="$(docker ps --format '{{.Names}}' | grep run- | head -1)"
+docker logs "$INST" 2>&1 | grep -ciE "out of memory|CUDA error|Traceback"   # 4 须为 0
 ```
 
 OpenAI 兼容口与 UI **同一个口**（`gpustack/config/config.py:922-927` 的 `get_gateway_port` 对非 worker 角色返回 `self.port`），本机就是 8180，**不是 8080**。
