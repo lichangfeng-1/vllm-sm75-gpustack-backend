@@ -1,6 +1,6 @@
 # run-book v1 —— 从零到模型可推理（Linux 宿主）
 
-适用范围：8×Tesla T10（sm_75，16 GiB/卡）＋ GPUStack v2.2.3 ＋ 本仓自建 vLLM 后端镜像。
+适用范围：8×Tesla T10（sm_75，16 GiB/卡）＋ GPUStack v2.2.3 ＋ 我们自己构建的 vLLM 后端镜像。
 本文件只给"照做能跑"的最小命令序列；每条参数为什么这么设、换硬件怎么改，见 `gpustack/backend-version-card-v1.md` 与 `gpustack/compat-matrix-v1.md`。
 
 **标注约定**：`【待实跑复核】`＝该命令由源码行号与既有实跑记录推出，尚未在本机复跑；其余步骤为实跑验证过的形制。
@@ -16,7 +16,7 @@
 | 网卡 | 记下宿主内网 IP，下面统一用 `HOST_IP` | worker 与浏览器都要能到达它。`export HOST_IP=192.0.2.10` 换成你的地址 |
 | 数据目录 | 下面统一用 `GS_DATA_DIR`（示例值 `/data/gpustack-data`），`export GS_DATA_DIR=/你的路径`；并且要在起容器**之前**先建好、容器要能写 | `--mount type=bind` 的源目录不存在时，失败发生在 `docker create` 而不是 `docker start`，原文 `invalid mount config for type "bind": bind source path does not exist`。另注意 GPUStack 会以 root 写这枚目录，事后普通账号删不掉 |
 
-驱动版本下限**本仓未验**（面板线撞过 NVAPI 与驱动版本不匹配，属另一条形制），此处不写成要求。
+驱动版本下限**我们没验过**（面板线撞过 NVAPI 与驱动版本不匹配，属另一条形制），此处不写成要求。
 
 ## 1 拉仓
 
@@ -40,7 +40,7 @@ docker images vllm-sm75-gpustack               # 期望 tag v0.1.7-beta2-v1
 ```
 
 构建期会拉 `vllm/vllm-openai:v0.30.0-cu129` 作基座（十 GB 量级，首次很慢，建议后台跑并跟看日志）。
-两枚构建期下载件（`flashinfer_cubin` wheel 与 `nvidia-pstated` 二进制）都钉在上游 Release ＋ sha256，本仓不托管、不重新分发（后者是 GPL-3.0-only）。
+两枚构建期下载件（`flashinfer_cubin` wheel 与 `nvidia-pstated` 二进制）都钉在上游 Release ＋ sha256，我们不托管、不重新分发（后者是 GPL-3.0-only）。
 
 ## 3 起 GPUStack server
 
@@ -55,7 +55,7 @@ docker start sm75-gpustack-server
 
 **两个坑，都是实跑撞过的**：
 
-先说一句指路约定：本节与后文凡指向 Python／mjs 源码并带行号的——无论写成 `gpustack/xxx.py:行号` 还是只写 `xxx.py:行号`——指的都是**上游 GPUStack v2.2.3 的源码路径与行号**，本仓里没有这些文件。本仓自研件集中在 `gpustack/` 目录与仓根文档：多数带版本后缀（如 `run-book-v1.md`），也有不带的（如 `layers/incple/patch_ple_inc.py`、`layers/pcieipc/install-pcieipc.sh`），所以按路径区分，别按后缀猜。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核。
+先说一句指路约定：本节与后文凡指向 Python／mjs 源码并带行号的——无论写成 `gpustack/xxx.py:行号` 还是只写 `xxx.py:行号`——指的都是**上游 GPUStack v2.2.3 的源码路径与行号**，这个仓里没有这些文件。我们自己写的件集中在 `gpustack/` 目录与仓根文档：多数带版本后缀（如 `run-book-v1.md`），也有不带的（如 `layers/incple/patch_ple_inc.py`、`layers/pcieipc/install-pcieipc.sh`），所以按路径区分，别按后缀猜。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核。
 
 - **不要加 `--system-default-container-registry`**。加了它，后端注册表里不含 registry 段的镜像名会被拼成 `quay.io/vllm-sm75-gpustack:…` 去远端拉，报 `Failed to pull image`，而本地明明有这枚镜像；表现是"参数块一行都没被执行"。拼接规则 `gpustack/utils/config.py:87-108`。已经设过就清掉：`PUT /v2/config {"system_default_container_registry":""}`（该字段在运行时白名单 `gpustack/utils/config.py:9-12`，可热改；这条 PUT 要带鉴权，无 token 直接 401）。
 
@@ -151,7 +151,7 @@ bash docker/benchlocal.sh connect    # 面板容器不在 bench 那张网上时�
 
 **一条不匹配要先解决**：`docker/benchlocal.sh` 默认认 **Ultra 面板镜像**（`vllm-sm75:v…-ultra-beta…`）并有一道 label 门 `io.sm75.benchlocal.unified=1`。本 GPUStack 线的测速台另有 `gpustack/Dockerfile.bench-v1`（产物 tag `vllm-sm75-gpustack-bench:v1`）。走这条线时要么 `IMAGE=… bash docker/benchlocal.sh start` 覆盖并满足 label 门，要么先另建 Ultra 镜像。
 
-这条覆盖路径的两个前置条件里，**label 门这一条已实测满足**：10-15 现读本机那枚 bench 镜像（ID `992df1afbdc2`）的 `io.sm75.benchlocal.unified` 值为 `1`。剩下的那一半——`benchlocal.sh` 接受 `IMAGE=` 覆盖之后整条链路真跑得通——**本仓仍未实跑** `【待实跑复核】`。
+这条覆盖路径的两个前置条件里，**label 门这一条已实测满足**：10-15 现读本机那枚 bench 镜像（ID `992df1afbdc2`）的 `io.sm75.benchlocal.unified` 值为 `1`。剩下的那一半——`benchlocal.sh` 接受 `IMAGE=` 覆盖之后整条链路真跑得通——**我们还没实跑** `【待实跑复核】`。
 
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
@@ -166,7 +166,7 @@ bash docker/benchlocal.sh connect    # 面板容器不在 bench 那张网上时�
 1. 用第 9 步那三枚 bench 容器，把它们的 base_url 指向 GPUStack 网关（`http://` ＋ `HOST_IP` ＋ `:8180`，带 API key），
    参数照 README 那张配置表逐格填：并发 1／请求超时 30000 ms／期望输出长度 **1024**／
    最小 512／最大 131072／步长 128／步长倍数 2／Temperature 1／Top P 0.95／Presence 0／Frequency 0。
-   **注意第 9 步那条 `IMAGE=` 覆盖路径本仓仍未实跑**，走不通就先用面板形态量。
+   **注意第 9 步那条 `IMAGE=` 覆盖路径我们还没实跑**，走不通就先用面板形态量。
 2. 或者只认第 8 步那四道防假绿断言（实例 `running` ＋ 一次真实推理非空 ＋ 逐卡 ≤15500 MiB ＋ 零 OOM），
    速度另开窗口测。
 

@@ -1,66 +1,41 @@
 # vLLM-SM75 v0.1.7 beta2
 
 
-## 0. 本仓另有用途：GPUStack 对接线（要做这个的话，从这里开始）
+## 0. 在 GPUStack 里用它
 
-本仓在上游 VLLM-SM75 之上多了一条交付线：把 SM75 版 vLLM 作为 **GPUStack 的自定义后端**部署。
-要的是这个，就别按下面第 5 节「标准构建与启动」走（那是面板／Ultra 形态），直接看：
+这个仓把 SM75 版 vLLM 做成了 GPUStack 的自定义后端，让 T4 / T10 这类老卡能在 GPUStack 里跑大模型。
+官方 vLLM 里 Turing 没有加速路径，Marlin 和 FP8 W8A8 都不支持，7.5 只是它肯跑起来的最低门槛。
+上游 VLLM-SM75 做的是 SM75 适配。我们在它之上带了两层代码——八卡 PCIe 直连通信（pcieipc）和
+AutoRound 量化白名单（incple），又用一组环境变量把底座的 QSA、FlashQLA、自建调度打开。
+下面 0.5 量的就是这一整组加上去的效果。
 
-- 操作步骤（拉仓 → 探活与构建 → 起 server/worker → 注册后端版本 → 部署模型 → 四道验收）：`gpustack/run-book-v1.md`
-- 表单要整块粘的两枚：`gpustack/args-paste-v1.txt`（24 行）、`gpustack/env-paste-v1.txt`（**25 行**，第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM` 是硬性项，省掉模型会永久排队且界面不报错）
-- 每条参数为什么这么设、换硬件怎么算：`gpustack/backend-version-card-v1.md`、`gpustack/compat-matrix-v1.md`
-- 改完先自检：`bash gpustack/lint-paste-v1.sh`，末行须逐字 `LINT_PASTE_OK env=25 args=24`
+前提：8 张 16 GiB 卡 ＋ 251 GiB 主机内存。要跑的档权重 168.7 GiB，比显存总和大，靠主机内存补，
+所以内存不够会在加载阶段被杀，现象看起来像镜像坏了。
 
-本节与 `README.en.md` 的同名一节，是上游冻结基线之外本仓**有意改动**的两处，
-新摘要已就地同步进 `gpustack/SHA256SUMS-upstream.txt` 对应两行，并在 NOTICE 第三节登记。
+操作看 `gpustack/run-book-v1.md`，从头做到尾：构建镜像 → 起 server 和 worker → 注册后端版本 →
+部署模型 → 四道验收。表单里要整块粘的两枚参数是 `gpustack/args-paste-v1.txt`（24 行）和
+`gpustack/env-paste-v1.txt`（25 行，第 25 行的显存配额是硬性项，漏了模型会一直排队且不报错）。
+粘完跑一次 `bash gpustack/lint-paste-v1.sh`，末行出现 `LINT_PASTE_OK env=25 args=24` 才算粘齐。
+
+每条参数为什么这么设、换硬件怎么重算，看 `gpustack/backend-version-card-v1.md` 和
+`gpustack/compat-matrix-v1.md`。
 
 [English](README.en.md) · [发布说明](docs/releases/v0.1.7-beta2.md) · [参数模板](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
 
-## 0.5 性能实测（同一台机、同一把尺）
+## 0.5 速度
 
-测试台：BenchLocal，**并发数 1、超时 30 s、提示词长度九档 512 → 131072**，全部 `1/1 并发成功`。
-硬件：`G292Z20 8*T10 SM-75`。下面三张图的备注文字按测试台原文照录，未改写。
+同一台 8×T10，同一套测法（镜像自带的 BenchLocal，并发 1，提示词九档 512→131072，每档 1/1 成功）：
 
-### 测试参数配置（三张图完全相同）
+| 配置 | 平均输出 | 平均预填充 |
+|---|---|---|
+| VLLM-SM75 v0.1.7-beta2（基线，已含 SM75 适配） | 43.31 tok/s | 2742.54 |
+| 同一权重，叠上上面那一整组 · FP8PLE | 57.73 tok/s | 2749.96 |
+| 叠上这一整组 · W4A16-AutoRound | 57.04 tok/s | 2762.51 |
 
-工具：**大模型 Prefill & Decode 性能测试工具 v3（chao 魔改版）**，即本镜像自带的测速台。
+输出侧 +33.3%，预填充几乎没动，提升在解码这一段。这三张表怎么读、哪些数不能互相比、
+以及它们为什么不是 GPUStack 形态的验收线，见 `gpustack/compat-matrix-v1.md` 最后一节。
 
-| 项 | 值 | 项 | 值 |
-| --- | --- | --- | --- |
-| 最小提示词长度 | 512 | 最大提示词长度 | 131072 |
-| 步长 | 128 | 步长倍数 | 2（指数级：128→256→512→…1024…） |
-| 期望输出长度 | **1024** | 并发数 | 1 |
-| 请求超时 | 30000 ms | Temperature | 1 |
-| Top P | 0.95 | Presence Penalty | 0 |
-| Frequency Penalty | 0 | | |
 
-### 裸上游基线（未打本仓任何优化层）
-
-![上游基准](gpustack/assets/bench-upstream-baseline-w4.png)
-
-备注 `G292Z20 8*T10 SM-75 Qwen3.8-Flash-Next-W4`｜平均总输出 **43.31 tokens/s**｜平均总预填充 2742.54 tokens/s｜ITL 22.89–23.62 ms
-
-### 优化后模型一：FP8PLE
-
-![FP8PLE](gpustack/assets/bench-sm75-0.17-fp8ple.png)
-
-备注 `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4 FP8PLE`｜平均总输出 **57.73 tokens/s**｜平均总预填充 2749.96 tokens/s｜ITL 17.22–17.61 ms
-
-### 优化后模型二：W4A16-AutoRound
-
-![W4A16-AutoRound](gpustack/assets/bench-sm75-0.17-w4a16-autoround.png)
-
-备注 `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4A16-AutoRound`｜平均总输出 **57.04 tokens/s**｜平均总预填充 2762.51 tokens/s｜ITL 17.24–18.24 ms
-
-### 三张表怎么读
-
-前两张是同一枚权重 FP8PLE 的对照。第一张只装上游 `v0.1.7-beta2`，本仓的优化层一个都没打；据维护者确认，那一档同时也是 P2P 没用上时的速度。备注里的 `W4` 与权重实际名字不一致，两张表指的是同一枚 FP8PLE。
-
-同模型直比，平均总输出从 43.31 到 57.73 tokens/s，+33.3%；两档的平均预填充是 2742.54 与 2749.96，基本没动。提升来自解码，不来自预填充。
-
-这 33.3% 不能算在 P2P 一项上。裸上游缺的不止 P2P：pcieipc、QSA 一族、`flashqla_sm75`、自建调度器都没有，本仓没有做过逐族单变量对照，所以只能记作"含 P2P 在内的整组优化"。
-
-第三张是另一枚权重 W4A16-AutoRound，没有配对的裸上游档，因此不与前面做百分比。它 512 长度那一格的 54.87（ITL 18.24 ms）是首格冷启动，不是稳态值。
 
 ## 1. 简要说明
 

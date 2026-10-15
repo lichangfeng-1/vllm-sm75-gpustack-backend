@@ -1,66 +1,47 @@
 # vLLM-SM75 v0.1.7 beta2
 
 
-## 0. This repo also carries a second delivery line: GPUStack backend (start here for that)
+## 0. Using this repo as a GPUStack backend
 
-On top of upstream VLLM-SM75, this repo adds a line that runs the SM75 build of vLLM as a
-**custom GPUStack backend**. If that is what you want, skip section 5 below (that is the
-panel/Ultra form) and go to:
+This repo wires the SM75 build of vLLM into **GPUStack** as a custom backend, so older Turing
+cards (T4 / T10) can serve large models from inside GPUStack. Upstream vLLM has no accelerated
+path for Turing: Marlin and FP8 W8A8 are unsupported, and 7.5 is only the lowest compute capability
+it will run on. VLLM-SM75 does the SM75 adaptation. On top of it we ship two code layers - PCIe
+direct all-reduce across the eight cards (pcieipc) and the AutoRound quantization whitelist
+(incple) - and we turn on the base image's QSA, FlashQLA and custom scheduler through environment
+variables. Section 0.5 measures what that whole set is worth.
 
-- Step-by-step (clone, probe & build, start server/worker, register the backend version, deploy, four acceptance gates): `gpustack/run-book-v1.md`
-- The two paste blocks for the form: `gpustack/args-paste-v1.txt` (24 lines) and `gpustack/env-paste-v1.txt` (**25 lines**; line 25 `GPUSTACK_MODEL_VRAM_CLAIM` is mandatory — without it the model queues forever with no error)
-- Why each parameter is set this way and how to re-derive it for other hardware: `gpustack/backend-version-card-v1.md`, `gpustack/compat-matrix-v1.md`
+What you need: eight 16 GiB cards and 251 GiB of host RAM. The checkpoint we run weighs
+168.7 GiB, more than the total VRAM, and part of it stays in host memory - too little RAM gets you
+an OOM kill during load, which looks like a broken image.
 
-These two README sections are the only deliberate edits made to upstream-frozen files;
-their new digests are updated in place in `gpustack/SHA256SUMS-upstream.txt` and logged in NOTICE section 3.
+Follow `gpustack/run-book-v1.md` start to finish: build the image, start server and worker,
+register the backend version, deploy, then run the four acceptance gates. The two blocks you paste
+into the form are `gpustack/args-paste-v1.txt` (24 lines) and `gpustack/env-paste-v1.txt`
+(25 lines; line 25, the VRAM claim, is mandatory - without it the model queues forever and says nothing).
+After pasting, run `bash gpustack/lint-paste-v1.sh`; the last line must read `LINT_PASTE_OK env=25 args=24`.
+
+Why each parameter is set that way, and how to re-derive it for other hardware:
+`gpustack/backend-version-card-v1.md` and `gpustack/compat-matrix-v1.md`.
 
 [中文](README.md) · [Release notes](docs/releases/v0.1.7-beta2.md) · [Model profiles](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
 
-## 0.5 Measured performance (same machine, same ruler)
+## 0.5 Speed
 
-Harness: BenchLocal, **concurrency 1, timeout 30 s, nine prompt lengths 512 → 131072**, all `1/1 success`.
-Hardware: `G292Z20 8*T10 SM-75`. The caption under each image is the harness note verbatim.
+One 8xT10 machine, one setup (the BenchLocal shipped in this image, concurrency 1, nine prompt
+lengths from 512 to 131072, every cell 1/1 success):
 
-### Test configuration (identical across all three runs)
+| Configuration | Mean output | Mean prefill |
+|---|---|---|
+| VLLM-SM75 v0.1.7-beta2 (baseline, already SM75-adapted) | 43.31 tok/s | 2742.54 |
+| same weights, with the set above applied - FP8PLE | 57.73 tok/s | 2749.96 |
+| with the set above applied - W4A16-AutoRound | 57.04 tok/s | 2762.51 |
 
-Tool: **Prefill & Decode benchmark v3 (chao mod)** — the benchmark harness shipped inside this image.
+Output is +33.3%, prefill barely moves: the gain is on decode. How to read these three runs,
+which numbers must not be compared, and why none of them is a GPUStack acceptance line -
+see the last section of `gpustack/compat-matrix-v1.md`.
 
-| Field | Value | Field | Value |
-| --- | --- | --- | --- |
-| Min prompt length | 512 | Max prompt length | 131072 |
-| Step | 128 | Step multiplier | 2 (exponential: 128→256→512→…1024…) |
-| Expected output length | **1024** | Concurrency | 1 |
-| Request timeout | 30000 ms | Temperature | 1 |
-| Top P | 0.95 | Presence Penalty | 0 |
-| Frequency Penalty | 0 | | |
 
-### Bare upstream baseline (none of this repo's optimization layers)
-
-![upstream baseline](gpustack/assets/bench-upstream-baseline-w4.png)
-
-Note `G292Z20 8*T10 SM-75 Qwen3.8-Flash-Next-W4` | mean total output **43.31 tok/s** | mean prefill 2742.54 tok/s | ITL 22.89-23.62 ms
-
-### Optimized model 1: FP8PLE
-
-![FP8PLE](gpustack/assets/bench-sm75-0.17-fp8ple.png)
-
-Note `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4 FP8PLE` | mean total output **57.73 tok/s** | mean prefill 2749.96 tok/s | ITL 17.22-17.61 ms
-
-### Optimized model 2: W4A16-AutoRound
-
-![W4A16-AutoRound](gpustack/assets/bench-sm75-0.17-w4a16-autoround.png)
-
-Note `G292Z20 8*T10 SM-75 0.17 Qwen3.8-Flash-Next-W4A16-AutoRound` | mean total output **57.04 tok/s** | mean prefill 2762.51 tok/s | ITL 17.24-18.24 ms
-
-### Reading the three tables
-
-The first two tables are the same checkpoint, FP8PLE. The first run is bare upstream `v0.1.7-beta2` with none of this repo's optimization layers applied; the maintainer confirms it is also the speed obtained with P2P not in use. The `W4` in the harness note does not match the checkpoint name: both tables refer to the same FP8PLE weights.
-
-Compared like for like, mean total output goes from 43.31 to 57.73 tok/s, +33.3%, while mean prefill barely moves (2742.54 against 2749.96). The gain is on decode, not prefill.
-
-That 33.3% is not P2P alone. The bare upstream is also missing pcieipc, the QSA family, `flashqla_sm75` and the custom scheduler, and no per-family single-variable A/B has been run, so the correct label is "the full set of optimizations, P2P included".
-
-The third table is a different checkpoint, W4A16-AutoRound, with no matching bare-upstream run, so it carries no percentage. Its 512-length cell (54.87 tok/s, ITL 18.24 ms) is a cold start, not steady state.
 
 ## 1. Overview
 

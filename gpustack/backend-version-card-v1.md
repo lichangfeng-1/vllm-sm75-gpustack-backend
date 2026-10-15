@@ -2,13 +2,13 @@
 
 一句话：在 GPUStack 2.2.3 上注册一枚自定义 vLLM 后端，把 SM75 八卡档位原样带进平台，入口覆盖与执行命令都留空。
 
-本文所有源码行号一律取 **GPUStack v2.2.3 正式版源码**（即上游 v2.2.3 正式版发布源码；本仓不含这些文件）；开发态检出那套树行号不同，别混用。
+本文所有源码行号一律取 **GPUStack v2.2.3 正式版源码**（即上游 v2.2.3 正式版发布源码；这个仓不含这些文件）；开发态检出那套树行号不同，别混用。
 
 ## 一、注册表单逐项
 
 | 字段（界面名 ／ 接口键） | 填什么 | 为什么 |
 |---|---|---|
-| 后端类型 type | 自定义（custom） | 不走内置镜像目录，镜像由本仓构建 |
+| 后端类型 type | 自定义（custom） | 不走内置镜像目录，镜像由这个仓构建 |
 | 版本名 backend_version | `0.1.7-sm75.1-custom` | 数字形态＋`-custom` 后缀。GPUStack 用 `should_default_to_ray`（`gpustack/utils/command.py:416-433`，阈值常量 `:413`＝`0.18.0`）选分布式执行器：版本名不含 `-custom` 一律回落 Ray，而标准镜像不带 Ray；解析抛异常也回落 Ray（`except Exception: return True`）。加 `-custom` 就是把"镜像里没有 Ray"告诉平台。单 worker 部署不进该分支（`gpustack/worker/backends/vllm.py:261/280` 需要 distributed_follower／distributed_leader 才触发），所以本卡只承诺单机 |
 | 镜像名称 image_name | `vllm-sm75-gpustack:v0.1.7-beta2-v1` | 完整 tag 写进这一个字段，不拆成"仓库＋标签"两处 |
 | 框架 custom_framework | `CUDA` | 该字段用于部署与兼容性检查（`gpustack/schemas/inference_backend.py:41`，字段声明 `:49`） |
@@ -23,9 +23,9 @@
 vllm serve  <模型路径>  <GPUStack 版本门参数>  <后端参数粘贴块>  --host <worker IP>  --port <端口>  --served-model-name <对外模型名>
 ```
 
-- 模型路径是第一个位置参数（`vllm.py:613`），所以粘贴块里没有 `${MODEL}`：GPUStack 对后端参数不做模板渲染，占位符会字面直达引擎（审计 A-01）。渲染只在 run_command 与 env 取值两条路上发生（`gpustack/schemas/inference_backend.py:201-232`），后端参数走纯切分（`gpustack/worker/backends/base.py:1138-1152`），所以 `${MODEL}` 和 `{{model_path}}` 写进参数块都是字面量。
-- 尾补三条由 `extend_args_no_exist` 只在用户没写时补（正式版 `gpustack/worker/backends/vllm.py:654-659`；修复轮 1 的 M-3 把此处原来误写的 `vllm.py:705-710` 改到真实位置——`:705` 起的其实是 max-model-len 那个函数，见下一条），粘贴块里同样不写，写了两遍即重复参数。
-- `--max-model-len` 必须由粘贴块提供：用户参数里没有它时，平台按推导值注入 8192（`gpustack/worker/backends/vllm.py:705-716` 的 `_build_max_model_len_arguments`，判定在 `:708-712`、注入在 `:714-715`，审计 B-04），262144 档会被静默砍到 8192。
+- 模型路径是第一个位置参数（`vllm.py:613`），所以粘贴块里不用写 `${MODEL}`。写了也不会被替换——GPUStack 对后端参数不做模板渲染，`${MODEL}` 会原样送到引擎。渲染只发生在启动命令和环境变量两处（`gpustack/schemas/inference_backend.py:201-232`），参数那边只是按空格切开（`gpustack/worker/backends/base.py:1138-1152`）。`${MODEL}` 和 `{{model_path}}` 都一样。
+- 尾补的三条由 `extend_args_no_exist` 在你没写的时候自动补上（`gpustack/worker/backends/vllm.py:654-659`），所以粘贴块里也不用写，写了就成了重复参数。
+- `--max-model-len` 必须由粘贴块提供：用户参数里没有它时，平台按推导值注入 8192（`gpustack/worker/backends/vllm.py:705-716` 的 `_build_max_model_len_arguments`，判定在 `:708-712`、注入在 `:714-715`），262144 会被静默砍到 8192。
 - 若一定要显式填执行命令，可用模板变量只有 `{{model_path}} {{port}} {{worker_ip}} {{model_name}} {{gpu_count}} {{gpu_ids}}`（正式版逐串替换的实现见 `gpustack/schemas/inference_backend.py:201-227`），写成 `vllm serve {{model_path}}` 与默认同形。注意这里合法的是双花括号 `{{ }}`，参数块里出现的必须是零个 `{{`（占位符未回填即字面直达引擎）。
 
 ## 三、三句声明（逐字，部署时照此执行）
@@ -49,7 +49,7 @@ vllm serve  <模型路径>  <GPUStack 版本门参数>  <后端参数粘贴块> 
 | 投机解码 | 不启用 |
 | 副本数／worker | 1 台 8 卡 worker，`--tensor-parallel-size=8` 已在参数块里 |
 
-这三条写法规矩为什么是硬性的（修复轮 1 补，此前只在护栏文案里写过，属隐性约束）：GPUStack 会把表单里的每一行再用 shlex 切一遍（正式版 `gpustack/worker/backends/base.py:1138-1152` `_flatten_backend_param` → `gpustack/utils/command.py:338-351` `safe_split`），而 JSON 掩码**只在 `=` 紧跟 `{` 或 `[` 时才触发**（`gpustack/utils/command.py:226-301` `_mask_json_segments`，触发条件在 `:245`）。所以从 vLLM 官方文档或别处档位抄来的空格形 `--engram-config {"cpu_offload":true}` 会拆成两个 token、值退化成 `{cpu_offload:true}`（非法 JSON）；引擎不一定报错，只是把这一项吃掉——静默降能。抄完先跑 §五 的护栏，这类形状会被 L5 直接判红。
+这三条写法是硬性的，原因是 GPUStack 会把表单里的每一行再用 shlex 切一遍（正式版 `gpustack/worker/backends/base.py:1138-1152` `_flatten_backend_param` → `gpustack/utils/command.py:338-351` `safe_split`），而 JSON 掩码**只在 `=` 紧跟 `{` 或 `[` 时才触发**（`gpustack/utils/command.py:226-301` `_mask_json_segments`，触发条件在 `:245`）。所以从 vLLM 官方文档或别处档位抄来的空格形 `--engram-config {"cpu_offload":true}` 会拆成两个 token、值退化成 `{cpu_offload:true}`（非法 JSON）；引擎不一定报错，只是把这一项吃掉——静默降能。抄完先跑 §五 的护栏，这类形状会被 L5 直接判红。
 
 ## 五、手改后复检
 
@@ -91,4 +91,4 @@ Temperature 1／Top P 0.95／Presence 0／Frequency 0。
 也就是说，**本卡与 `compat-matrix-v1.md` 里那些"速度 env"的收益，就是这三张表量出来的那部分**；
 但**不要**拿这三个数当 GPUStack 形态的验收线——GPUStack 形态要另测，方法见
 `gpustack/run-book-v1.md` 第 10 节。裸上游与 FP8PLE 两档是同模型直比（输出 +33.3%），
-而两档平均预填充 2742.54 与 2749.96 几乎持平，所以**本仓优化层的收益集中在解码侧，不在预填充侧**。**这 33.3% 是含 P2P 在内的整组优化，不得记到 P2P 单独名下**——裸上游同时缺 pcieipc、QSA 一族、`flashqla_sm75`、自建调度器等多处，本仓未做过逐族单变量 A/B。另：维护者确认裸上游那一档也正是 P2P 没用上时的速度。
+而两档平均预填充 2742.54 与 2749.96 几乎持平，所以**我们的优化层的收益集中在解码侧，不在预填充侧**。**这 33.3% 是含 P2P 在内的整组优化，不得记到 P2P 单独名下**——裸上游同时缺 pcieipc、QSA 一族、`flashqla_sm75`、自建调度器等多处，这个仓未做过逐族单变量 A/B。另：维护者确认裸上游那一档也正是 P2P 没用上时的速度。
