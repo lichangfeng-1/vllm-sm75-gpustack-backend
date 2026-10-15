@@ -31,7 +31,7 @@
 #   上游 v2.2.3 正式版发布源码（与注册卡同口径），目录已补全、区间改成函数真实起止；
 #   `docker/helpers/runtime-entrypoint.py:21` 取的是**仓内上游件**，不是 GPUStack 源码树。
 #
-# 用法（路径请给目标解释器认得的形态；本机是原生 Windows Python，要 K:/… 或 C:\… 形，
+# 用法（路径请给目标解释器认得的形态；本机是原生 Windows Python，要 D:/… 或 C:\… 形，
 #   Git Bash 的 /tmp/… 形会被解析成 C:\tmp\…）：
 #   python gen-args-paste-v1.py                       # 默认：仓内档位模板 → 仓内粘贴块
 #   python gen-args-paste-v1.py --profile P.json --out OUT.txt   # 负控夹具（OUT 必须在沙箱）

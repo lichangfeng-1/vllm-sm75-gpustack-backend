@@ -46,7 +46,7 @@ esac
 command -v realpath >/dev/null 2>&1 || { echo "错误：缺少必要工具 realpath，无法判定目录归属。" >&2; exit 2; }
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
-# realpath -m 会保留输入里的盘符形态（K:/… 与 /k/… 两种写法互不相等），
+# realpath -m 会保留输入里的盘符形态（D:/… 与 /d/… 两种写法互不相等），
 # 所以两侧都再过一道 cygpath -u（Linux 上没有这个工具，即恒等）。
 # 修复轮 2 补一处：Windows 文件系统大小写不敏感，/TMP 与 /tmp、短名与长名是同一目录的两种写法，
 # cygpath 只归盘符不归大小写 → 有 cygpath 时统一折叠为小写；Linux 大小写敏感，绝不折叠。
