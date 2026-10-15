@@ -12,9 +12,9 @@
 | 项 | 要求 | 为什么 |
 | --- | --- | --- |
 | 主机内存 | **约 251 GiB** | 参数块带 `--engram-config={"cpu_offload":true}`，一部分权重常驻主机内存。64 GB 的机器会在加载阶段被 OOM killer 杀掉，且现象像"镜像坏了" |
-| 磁盘 | `/data` 可用 ≥ 250 G | 权重 17 枚 `*.safetensors` 合计 `181,196,007,016 B`（≈168.8 GiB），另需镜像与缓存余量 |
+| 磁盘 | 数据目录所在盘可用 ≥ 250 G | 权重 17 枚 `*.safetensors` 合计 `181,196,007,016 B`（≈168.8 GiB），另需镜像与缓存余量 |
 | 网卡 | 记下宿主内网 IP，下面统一用 `HOST_IP` | worker 与浏览器都要能到达它。`export HOST_IP=192.0.2.10` 换成你的地址 |
-| 数据目录 | 起容器**之前**先建好，且容器要能写 | `--mount type=bind` 的源目录不存在时，失败发生在 `docker create` 而不是 `docker start`，原文 `invalid mount config for type "bind": bind source path does not exist`。另注意 GPUStack 会以 root 写这枚目录，事后普通账号删不掉 |
+| 数据目录 | 下面统一用 `GS_DATA_DIR`（示例值 `/data/gpustack-data`），`export GS_DATA_DIR=/你的路径`；并且要在起容器**之前**先建好、容器要能写 | `--mount type=bind` 的源目录不存在时，失败发生在 `docker create` 而不是 `docker start`，原文 `invalid mount config for type "bind": bind source path does not exist`。另注意 GPUStack 会以 root 写这枚目录，事后普通账号删不掉 |
 
 驱动版本下限**本仓未验**（面板线撞过 NVAPI 与驱动版本不匹配，属另一条形制），此处不写成要求。
 
@@ -24,6 +24,8 @@
 git clone 你的仓地址 vllm-sm75-gpustack-backend
 cd vllm-sm75-gpustack-backend
 ```
+
+**本文件的命令一律在包根目录里执行**（上面那条 `cd` 之后就不要离开）。仓内脚本要么用相对包根的路径，要么用自身位置定位（`SCRIPT_DIR`），所以从哪个绝对位置克隆都不影响；包内不存在指向某台具体机器的路径。属于你这台机器的两样东西统一用变量给：`HOST_IP` 与 `GS_DATA_DIR`。
 
 `gpustack/.gitattributes` 已给本目录下的 `*.txt`／`*.patch` 写了 `text eol=lf`（仓根那份属上游冻结面，不动它），正常 `git clone` 即可。
 若你的 git 全局设过 `core.autocrlf=true`，用这条覆盖一次更稳：`git -c core.autocrlf=false clone …`。
@@ -46,7 +48,7 @@ docker images vllm-sm75-gpustack               # 期望 tag v0.1.7-beta2-v1
 docker create --name sm75-gpustack-server --hostname sm75-gpustack-server \
   --network bridge --restart no --env TZ=Asia/Shanghai \
   -p ${HOST_IP}:8180:80 \
-  --mount type=bind,source=/data/gpustack-data,target=/var/lib/gpustack \
+  --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
   quay.io/gpustack/gpustack:v2.2.3
 docker start sm75-gpustack-server
 ```
@@ -74,14 +76,14 @@ docker exec sm75-gpustack-server cat /var/lib/gpustack/initial_admin_password
 
 ## 5 起 worker
 
-同机部署**不需要 token**：worker 取 token 的路径是 `gpustack/config/config.py:312-313` 的 `read_registration_token(self.data_dir)`，读的是共享 data 目录里的文件，而本形制下 server 与 worker 挂的是同一份 `/data/gpustack-data`。
+同机部署**不需要 token**：worker 取 token 的路径是 `gpustack/config/config.py:312-313` 的 `read_registration_token(self.data_dir)`，读的是共享 data 目录里的文件，而本形制下 server 与 worker 挂的是同一份 `${GS_DATA_DIR}`。
 
 ```bash
 docker create --name sm75-gpustack-worker --hostname sm75-gpustack-worker \
   --restart no --env TZ=Asia/Shanghai \
   --privileged --network host --runtime nvidia \
   --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
-  --mount type=bind,source=/data/gpustack-data,target=/data/gpustack-data \
+  --mount type=bind,source=${GS_DATA_DIR},target=${GS_DATA_DIR} \
   quay.io/gpustack/gpustack:v2.2.3 \
   --server-url http://${HOST_IP}:8180 \
   --advertise-address ${HOST_IP} \
