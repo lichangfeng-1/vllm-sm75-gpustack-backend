@@ -28,8 +28,9 @@ Why each parameter is set that way, and how to re-derive it for other hardware:
 
 ## 0.5 Speed
 
-One 8xT10 machine, one setup (the BenchLocal shipped in this image, concurrency 1, nine prompt
-lengths from 512 to 131072, every cell 1/1 success):
+One 8xT10 machine, one setup: the harness is the Prefill & Decode benchmark v3 (chao mod), run
+on the image's own Ultra/panel form, concurrency 1, nine prompt lengths from 512 to 131072,
+every cell 1/1 success:
 
 | Configuration | Mean output | Mean prefill |
 |---|---|---|
