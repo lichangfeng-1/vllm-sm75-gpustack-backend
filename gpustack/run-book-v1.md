@@ -32,14 +32,28 @@ cd vllm-sm75-gpustack-backend
 
 ## 2 探活并构建后端镜像
 
+镜像分两段构建。**两段都跑完，第 6 节注册时才有的可填**：第一段产出基座层 `vllm-sm75:v0.1.7-beta2`，第二段在它上面追加我们的三层，产出后端镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v1`。
+
 ```bash
 bash gpustack/preflight-sources-v1.sh          # 只读 HEAD 探测，红就别往下走
 bash gpustack/build-gpustack-v1.sh             # 补丁门五道，不执行 docker build
-bash gpustack/build-gpustack-v1.sh --build     # 绿后组装并执行 docker build
+bash gpustack/build-gpustack-v1.sh --build     # 第一段，产出 vllm-sm75:v0.1.7-beta2
+docker images vllm-sm75                        # 期望这一枚在（十 GB 量级，首次很慢，建议后台跑并跟看日志）
+
+docker build --file gpustack/Dockerfile.v1 --target timezone-layer \
+  --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v1 .      # 第二段：层1 pcieipc ＋ 层2 incple ＋ 层3 时区
+
 docker images vllm-sm75-gpustack               # 期望 tag v0.1.7-beta2-v1
 ```
 
-构建期会拉 `vllm/vllm-openai:v0.30.0-cu129` 作基座（十 GB 量级，首次很慢，建议后台跑并跟看日志）。
+四条会踩的：
+
+- 第一段的产物名是 `vllm-sm75:v…`，**它不是后端镜像**。拿它去注册，实例起不来且现象像镜像坏了。
+- 第二段取 `--target timezone-layer`（`gpustack/Dockerfile.v1:145`，文件末段＝最终层）。取 `pcieipc-layer` 只得到层 1，缺 incple 与 tzdata。
+- `BASE_TAG` 必须是**没被本线加装过**的那层。层 1 的装机脚本是追加型的，见到自己的 marker 就退 3（`gpustack/layers/pcieipc/install-pcieipc.sh:35`），拿已含层 1 的 tag 当基座会把构建直接打红。
+- 基座那枚 tag 与 digest 钉在 `docker/Dockerfile:3` 与 `docker/build.sh:21`，现值 `vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb…`。换基座用第一段的 `BASE_IMAGE=` 环境变量覆盖（脚本原样转成 `--build-arg`，不必改仓内文件）。**要注意换的到底是什么**：上游那几行是按 `--index …/cu129` 重装 `torch==2.13.0+cu129` 并断言 `torch.version.cuda == "12.9"` 的（`docker/Dockerfile:15-17`），所以只换基座时镜像里的 torch 与 triton 不变，变的是它下面那层 CUDA 工具链；要让 torch 也跟着换档，得连这几行一起动，而 `docker/Dockerfile` 在上游冻结清单里。
+
 两枚构建期下载件（`flashinfer_cubin` wheel 与 `nvidia-pstated` 二进制）都钉在上游 Release ＋ sha256，我们不托管、不重新分发（后者是 GPL-3.0-only）。
 
 ## 3 起 GPUStack server
