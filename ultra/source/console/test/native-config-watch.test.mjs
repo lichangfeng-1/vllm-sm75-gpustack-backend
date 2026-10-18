@@ -10,7 +10,7 @@ test('native config watch excludes unreadable siblings while retaining missing p
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'sm75-config-watch-'));
  const root=path.join(base,'@deepseek-ai/dsh-hmr');
  fs.mkdirSync(path.join(root,'lib'),{recursive:true});
- fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({version:'0.1.7-alpha.2'}));
+ fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({version:'0.2.0-rc.2'}));
  const file=path.join(root,'lib/index.js');
  fs.writeFileSync(file,'function optionsFor(filename,target,watchOptions){const watcher = watch(target.root, {\n\t\t...watchOptions,\n\t\tdepth: target.depth,\n});return watcher;}');
  try{
@@ -34,6 +34,6 @@ test('native config watch excludes unreadable siblings while retaining missing p
   assert.equal(result.options.ignorePermissionErrors,false);
   assert.equal(result.options.depth,2);
   fs.writeFileSync(path.join(root,'package.json'),'{"version":"unexpected"}');
-  assert.throws(()=>applyNativeConfigWatch(base),/requires 0.1.7-alpha.2/);
+  assert.throws(()=>applyNativeConfigWatch(base),/requires 0.2.0-rc.2/);
  }finally{fs.rmSync(base,{recursive:true,force:true});}
 });

@@ -64,6 +64,8 @@ vllm-sm75-gpustack:v0.1.7-beta2-v1         （自定义后端：四层全上，�
 
 `vllm-sm75` 只是链条中间产物，**不是后端镜像**；第 6 节注册时必须用链条末端那枚 `vllm-sm75-gpustack`。两段都跑完，注册时才有的可填。
 
+> 2026-10-19 现役交付 tag 为 `vllm-sm75-gpustack:v0.1.7-beta2-v3`（DSH `0.2.0-rc.2` ＋ 思考强度参数兼容 ＋ 面板响应式修复）。下面两段手动示例仍写历史标签 `-v1`，实际构建时把 `-t` 换成需要的 tag 即可。
+
 **推荐只跑一条命令**（基座是内部构建缓存；已在本地就复用）：
 
 ```bash
@@ -171,7 +173,7 @@ curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/clusters/1/registrat
 
 ## 6 注册后端版本（一次即可）
 
-UI 后端页新建：后端 **vLLM**｜版本 `0.1.7-sm75.1-custom`｜自定义 CUDA 可见性｜镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v1`。
+UI 后端页新建：后端 **vLLM**｜版本 `0.1.7-sm75.1-custom`｜自定义 CUDA 可见性｜镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v3`。
 
 注意两处大小写：表单里框架标签显示 `CUDA`，提交值是小写 `cuda`；列表页显示的是落库值。这是两个字段，不是矛盾。
 
@@ -717,7 +719,9 @@ entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
 
 ### 11b 如何更新 DSH（工作台）版本
 
-DSH 已进后端镜像：`/opt/harness/node_modules` 由 `Dockerfile.v1` 的 `harness` stage 用仓内 `ultra/harness/package.json`＋锁文件构建；层 4 再运行 `install-native-plugins.mjs` 装入 SM75 插件与品牌补丁。版本钉在仓内 `ultra/harness/package.json`（当前 `0.1.7-alpha.2`）。模型容器里打开“工作台/使用统计/插件”时，console 按需启动 DSH；`DSH_HOME`／`HOME` 落在 `/var/lib/gpustack/dsh/{home,workspace}`，随 worker 数据目录持久化。
+DSH 已进后端镜像：`/opt/harness/node_modules` 由 `Dockerfile.v1` 的 `harness` stage 用仓内 `ultra/harness/package.json`＋锁文件构建；层 4 再运行 `install-native-plugins.mjs` 装入 SM75 插件与品牌补丁。版本钉在仓内 `ultra/harness/package.json`（当前 `0.2.0-rc.2`，2026-10-19 从 `0.1.7-alpha.2` 升级）。模型容器里打开“工作台/使用统计/插件”时，console 按需启动 DSH；`DSH_HOME`／`HOME` 落在 `/var/lib/gpustack/dsh/{home,workspace}`，随 worker 数据目录持久化。
+
+**0.2.x 适配要点**：`dsh-client-ui-layout`／`dsh-llm-pi-ai`／`dsh-web-frontend` 仍随包，但改为 `dsh-web-app` 的传递依赖；`--profile web`、`--patch`、`--host/--port/--no-open` 不变。0.2 新增插件 peerDependencies 精确校验：`dsh-watcher` 与 `sm75-workspace-tools` 的 peer 必须同步钉到 `0.2.0-rc.2`，否则启动时会被判 `incompatible with dsh` 并停用。主题字号范围随上游为 **10–22**（原 12–17）。
 
 ```bash
 # 1) 改版本号（只改这一处）并重生成锁文件（锁与 package.json 必须同步）
@@ -741,5 +745,5 @@ docker build --file gpustack/Dockerfile.v1 --target panel-layer \
 #    $SM75_CONSOLE_ROOT/harness-process.log，并回退版本号。
 ```
 
-**版本参考（2026-10-19 npm 国内镜像现读）**：`latest=0.2.0-rc.2`、`alpha=0.2.1-alpha.5`、`next=0.2.1-rc.2`；现装 `0.1.7-alpha.2`。
+**版本参考（2026-10-19 npm 国内镜像现读）**：`latest=0.2.0-rc.2`、`alpha=0.2.1-alpha.5`、`next=0.2.1-rc.2`；现装 `0.2.0-rc.2`。
 **0.2.0-rc.2 不是 drop-in**：它的客户端包结构已变（`dsh-client-ui-layout`／`dsh-llm-pi-ai`／`dsh-web-frontend` 不再以直接依赖出现），品牌与插件补丁需要重做；候选 `package.json`／锁文件已存 `K:\sm75\调度\dsh-0.2.0-rc.2-candidate\`。跨 minor 升级先升 rc 验证，别直接跟 `alpha`。

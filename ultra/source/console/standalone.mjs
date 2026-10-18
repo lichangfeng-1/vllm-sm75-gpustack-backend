@@ -344,7 +344,7 @@ export class Standalone {
       "--host",
       "127.0.0.1",
       "--port",
-      "3085",
+      String(process.env.SM75_HARNESS_PORT || 3085),
     ];
     const dshEnv = {
       DSH_HOME: home,

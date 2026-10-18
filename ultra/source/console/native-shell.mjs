@@ -18,7 +18,7 @@ export function patchNativeAppearanceRestore(source) {
         const cached = globalThis.__SM75_APPEARANCE_SNAPSHOT__;
         this.preference = cached?.colorMode === "light" || cached?.colorMode === "dark"
           ? cached.colorMode : DEFAULT_PREFERENCE;
-        if (Number.isInteger(cached?.fontSize) && cached.fontSize >= 12 && cached.fontSize <= 17)
+        if (Number.isInteger(cached?.fontSize) && cached.fontSize >= 10 && cached.fontSize <= 22)
           this.fontSize = cached.fontSize;`)
     .replace(adopt, "$1\n        const firstAppearance = this.sm75AppearanceRestored !== true;\n        this.sm75AppearanceRestored = true;")
     .replace(unchanged, "if (!firstAppearance && this.preference === section.preference && this.fontSize === fontSize) return;");
@@ -94,7 +94,7 @@ export function applyUnifiedShell(base) {
   const layoutFile=path.join(base,"@deepseek-ai/dsh-client-ui-layout","lib/client.js");
   let layoutSource=fs.readFileSync(layoutFile,"utf8");
   if (!layoutSource.includes("/* sm75-active-panel-reader */")) {
-    const anchor=/(const layout = new LayoutController\(instance\.actions,[^\n]+\);)/;
+    const anchor=/(const layout = new LayoutController\(instance\.actions,[\s\S]*?\n\s*\}\);)/;
     if ([...layoutSource.matchAll(new RegExp(anchor.source,"g"))].length!==1)
       throw Error("Harness panel reader anchor changed");
     layoutSource=layoutSource.replace(anchor,"$1\n/* sm75-active-panel-reader */\nlayout.sm75ActivePanel = () => instance.getSnapshot().panelInfo.activePanelId;");
@@ -123,13 +123,8 @@ export function applyUnifiedShell(base) {
     if ([...theme.matchAll(pattern)].length!==1) throw Error("Harness global font copy anchor changed");
     theme=theme.replace(pattern, (_match, prefix)=>prefix+JSON.stringify(value));
   }
-  // Older local bundles widened this UI-only range. Use the upstream 12..17
-  // control and validation range; profile values are never rewritten here.
-  theme=theme.replaceAll("disabled: fontSize >= 26","disabled: fontSize >= 17")
-    .replaceAll("px > 26","px > 17")
-    .replaceAll("outside 12..26","outside 12..17")
-    .replaceAll("[FONT_SIZE_FIELD]: Schema.number().step(1).min(12).max(26)","[FONT_SIZE_FIELD]: Schema.number().step(1).min(12).max(17)")
-    .replaceAll("parsed >= 12 && parsed <= 26","parsed >= 12 && parsed <= 17");
+  // 0.2 ships the 10..22 control and validation range; keep it and never
+  // rewrite profile values here.
   const fontWriteMarker="/* sm75-font-write-settlement */";
   if (!theme.includes(fontWriteMarker)) {
     const write="this.host.set(FONT_SIZE_FIELD, px);";

@@ -16,9 +16,9 @@ test('old local history follows the engine while explicit external and same-mode
  assert.equal(resolveManagedSelection(history).model,'new');
 });
 test('client restores cold history from the managed catalog even with an external global default',()=>{
- const input='const current = projected.next ?? catalog.value.default;';
+ const input='const selection = projected.next ?? catalog.value.default;';
  const patched=patchClientModelSelection(input);
- const run=new Function('projected','catalog',patched+';return current;');
+ const run=new Function('projected','catalog',patched+';return selection;');
  const catalog={value:{default:{provider:'external',model:'external'},groups:[{id:'sm75-local',models:[{id:'active'}]}]}};
  assert.deepEqual(run({next:{provider:'sm75-local',model:'old',reasoningEffort:'high'}},catalog),{provider:'sm75-local',model:'active'});
  assert.deepEqual(run({next:null},catalog),catalog.value.default);

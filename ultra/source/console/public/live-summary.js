@@ -48,6 +48,8 @@ export function mountLiveSummary(
     .item[data-metric=kv]{--label-width:2.5ch}
     @media (min-width:1600px){.item[data-metric=prefill],.item[data-metric=kv]{border-left:1px solid var(--line,var(--dsw-alias-border-l3,#ccd3dc));padding-left:6px}}
     @media (max-width:1450px){.bar{gap:4px}.status{display:inline-grid;grid-template-columns:6px 3em;gap:4px;flex:0 0 auto;width:calc(3em + 17px);padding-right:6px}.status .engine,.status .power{display:none}.status .short{display:inline;overflow:hidden;text-overflow:ellipsis}}
+    @media (max-width:1450px){.item[data-metric=kv],.item[data-metric=cacheHit]{display:none}}
+    @media (max-width:1050px){.item[data-metric=prefill],.item[data-metric=decode]{display:none}}
     [data-level=low]{color:var(--gpu-low,var(--dsw-alias-state-success-primary,#087f69))}
     [data-level=medium]{color:var(--gpu-medium,var(--dsw-alias-state-warn-primary,#8a6500))}
     [data-level=elevated]{color:var(--gpu-elevated,#c2680a)}

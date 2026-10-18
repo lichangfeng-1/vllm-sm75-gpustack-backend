@@ -18,9 +18,9 @@ export function patchServerModelSelection(source) {
 }
 export function patchClientModelSelection(source) {
   if(source.includes(marker))return source;
-  return replaceOnce(source,'const current = projected.next ?? catalog.value.default;',marker+`
+  return replaceOnce(source,'const selection = projected.next ?? catalog.value.default;',marker+`
                 const local = catalog.value.groups.find(group=>group.id === 'sm75-local')?.models[0];
-                const current = (${resolveManagedSelection.toString()})(projected.next ?? catalog.value.default,
+                const selection = (${resolveManagedSelection.toString()})(projected.next ?? catalog.value.default,
                   local ? {provider:'sm75-local',model:local.id} : null);`);
 }
 export function applyManagedModelSelection(base) {

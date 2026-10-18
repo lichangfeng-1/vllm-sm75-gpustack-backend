@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 export const thinkingBudgets={low:1024,medium:4096,high:16384};
 export function chatConfig(p){
- const val=k=>{const i=p.args.indexOf(k);return i<0?undefined:p.args[i+1];};
+ const val=k=>{const i=p.args.indexOf(k);if(i>=0)return p.args[i+1];const pre=k+'=';const eq=p.args.find(a=>a.startsWith(pre));return eq===undefined?undefined:eq.slice(pre.length);};
  let generation={};const source=val('--generation-config');
  try{generation=JSON.parse(fs.readFileSync(path.join(source&&source!=='auto'&&source!=='vllm'?source:p.args[0],'generation_config.json'),'utf8'));}catch{}
  try{Object.assign(generation,JSON.parse(val('--override-generation-config')||'{}'));}catch{}
@@ -15,7 +15,8 @@ export function modelInput(p) {
  if (p.args.includes('--language-model-only')) return ['text'];
  try {
   const i=p.args.indexOf('--limit-mm-per-prompt');
-  const limit=i>=0?JSON.parse(p.args[i+1]):{};
+  const raw=i>=0?p.args[i+1]:p.args.find(a=>a.startsWith('--limit-mm-per-prompt='))?.slice('--limit-mm-per-prompt='.length);
+  const limit=JSON.parse(raw||'{}');
   if (limit.image===0 || limit.image?.count===0) return ['text'];
   const cfg=JSON.parse(fs.readFileSync(path.join(p.args[0],'config.json'),'utf8'));
   return cfg.vision_config ? ['text','image'] : ['text'];

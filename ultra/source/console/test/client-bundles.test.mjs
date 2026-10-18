@@ -24,7 +24,7 @@ function releaseFixture(base) {
     fs.mkdirSync(path.dirname(file), {recursive: true});
     fs.writeFileSync(file, content);
   };
-  write('@deepseek-ai/dsh/package.json', JSON.stringify({version: '0.1.7-alpha.2'}));
+  write('@deepseek-ai/dsh/package.json', JSON.stringify({version: '0.2.0-rc.2'}));
   for (const name of ['sm75-brand', 'dsh-watcher']) {
     write(`${name}/package.json`, JSON.stringify({name, type: 'module', dsh: {client: {platform: 'web'}}}));
     write(`${name}/lib/client.js`, `window.__ModuleLoader__.load({id: '${name}', factory: () => ({})});`);

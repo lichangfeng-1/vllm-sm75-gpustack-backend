@@ -6207,7 +6207,7 @@ window.__ModuleLoader__.load({
 		// Tooling contract for the shipped client, checked against the pinned
 		// Harness public Session/Conversation and primitives exports.
 		exports.clientContract = Object.freeze({
-			harnessVersion: "0.1.7-alpha.2",
+			harnessVersion: "0.2.0-rc.2",
 			standardHooks: Object.freeze(["useConversation", "useSession", "useSessionStatus", "useProjection"]),
 			primitives: Object.freeze(["StateDot", "writeClipboard", "IconCheckOutlineRegular", "IconCopyOutlineRegular", "TerminalBlock", "ReadBlock", "DiffBlock", "JsonTree", "MarkdownText", "IconChevronRightOutlineRegular", "useAnchoredPosition", "Pill", "IconRefreshOutlineRegular"]),
 		});

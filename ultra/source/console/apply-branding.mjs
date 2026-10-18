@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const supportedHarnessVersion = "0.1.7-alpha.2";
+export const supportedHarnessVersion = "0.2.0-rc.2";
 
 export function harnessVersion(base = "/opt/harness/node_modules") {
   try { return JSON.parse(fs.readFileSync(path.join(base, "@deepseek-ai/dsh/package.json"), "utf8")).version; }
@@ -30,7 +30,7 @@ export function applyBranding(base = "/opt/harness/node_modules", consoleRoot = 
   if (!/<title>(DeepSeek Harness|工作台)<\/title>/.test(html))
     throw Error("Harness HTML title anchor changed");
   html = html.replace(/<title>(DeepSeek Harness|工作台)<\/title>/, "<title>工作台</title>")
-    .replace(/(?:\/brand\/|\.\/|\/)?favicon\.svg(?:\?v=[^"'\s>]*)?/g, "/brand/favicon.svg");
+    .replace(/(?:\/brand\/|\.\/|\/)?favicon(?:-dark)?\.svg(?:\?v=[^"'\s>]*)?/g, "/brand/favicon.svg");
   fs.writeFileSync(index, html);
   fs.copyFileSync(path.join(consoleRoot, "branding/favicon.svg"), path.join(dist, "favicon.svg"));
   const manifestFile = path.join(dist, "manifest.webmanifest");

@@ -6,7 +6,7 @@ import path from 'node:path';
 export function applyNativeConfigWatch(base) {
   const root=path.join(base,'@deepseek-ai/dsh-hmr');
   const version=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;
-  if(version!=='0.1.7-alpha.2')throw Error('Harness config watcher requires 0.1.7-alpha.2');
+  if(version!=='0.2.0-rc.2')throw Error('Harness config watcher requires 0.2.0-rc.2');
   const file=path.join(root,'lib/index.js');
   let source=fs.readFileSync(file,'utf8');
   const marker='/* sm75-exact-config-watch */';

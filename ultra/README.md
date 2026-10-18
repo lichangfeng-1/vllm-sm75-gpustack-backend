@@ -4,6 +4,8 @@
 
 [当前构建与启动](../README.md#5-快速构建与启动) · [参数模板](../docs/configuration-v0.1.7.md) · [BenchLocal](../docs/benchlocal.md)
 
+> 2026-10-19：GPUStack 后端线已将共享 console/DSH 升级到 `0.2.0-rc.2`（见 `gpustack/run-book-v1.md` §11b）。本目录描述的 Ultra 全身镜像构建脚本仍按 `0.1.7-alpha.2` 钉版，未随本次重测；重建前需先做双版本适配。
+
 ---
 
 # vLLM-SM75 v0.1.7 beta Ultra

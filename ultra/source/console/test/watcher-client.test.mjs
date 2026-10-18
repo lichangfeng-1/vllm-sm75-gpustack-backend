@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const source = fs.readFileSync(new URL('../plugins/dsh-watcher/lib/client.js', import.meta.url), 'utf8');
-// These are the dsh-v0.1.7-alpha.2 public ui-primitives exports the shipped
+// These are the dsh-v0.2.0-rc.2 public ui-primitives exports the shipped
 // Watcher uses, not permissive mocks accepting every requested property.
 const primitiveNames = ['StateDot', 'writeClipboard', 'IconCheckOutlineRegular', 'IconCopyOutlineRegular',
   'TerminalBlock', 'ReadBlock', 'DiffBlock', 'JsonTree', 'MarkdownText',
@@ -91,7 +91,7 @@ function nodes(tree) {
 
 test('shipped Watcher renders and opens using the complete 0.1.7 public hook contract', () => {
   const f = fixture();
-  assert.equal(f.client.clientContract.harnessVersion, '0.1.7-alpha.2');
+  assert.equal(f.client.clientContract.harnessVersion, '0.2.0-rc.2');
   assert.deepEqual(Array.from(f.client.clientContract.standardHooks), ['useConversation', 'useSession', 'useSessionStatus', 'useProjection']);
   assert.deepEqual(Array.from(f.client.clientContract.primitives), primitiveNames);
   // Check every compiled primitive reference, including inspector branches that

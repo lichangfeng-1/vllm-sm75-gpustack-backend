@@ -936,7 +936,10 @@ export function mountConsole(document = globalThis.document, options = {}) {
     // Reserve both action slots on every page, including while hidden, so
     // moving to monitoring cannot relocate the profile selector.
     const controls = fixedControls.reduce((width, node) => width + Math.max(30 * scale, minimum(node)), 0);
-    const required = leading + 96 * scale + $("liveSummary").getBoundingClientRect().width
+    const summary = $("liveSummary");
+    const summaryBar = summary.shadowRoot?.querySelector(".bar");
+    const summaryWidth = Math.max(summary.getBoundingClientRect().width, summaryBar?.scrollWidth || 0);
+    const required = leading + 96 * scale + summaryWidth
       + controls + minimum($("signout")) + Math.max(46 * scale, minimum($("taskToggle")))
       + gap * (5 + fixedControls.length);
     const compact = required > header.clientWidth;

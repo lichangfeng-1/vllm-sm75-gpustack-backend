@@ -120,11 +120,11 @@ test('installer retains native layout behavior and loads the sampling adapter th
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm75-harness-install-'));
   const write = (name, text) => {const target = path.join(root, name); fs.mkdirSync(path.dirname(target), {recursive: true}); fs.writeFileSync(target, text);};
   try {
-    write('@deepseek-ai/dsh-hmr/package.json','{"version":"0.1.7-alpha.2"}');
+    write('@deepseek-ai/dsh-hmr/package.json','{"version":"0.2.0-rc.2"}');
     write('@deepseek-ai/dsh-hmr/lib/index.js','function watchConfig(){const watcher = watch(target.root, {\n\t\t...watchOptions,\n\t\tdepth: target.depth,\n});}');
-    write('@deepseek-ai/dsh/package.json', JSON.stringify({version: '0.1.7-alpha.2', dependencies: {}}));
+    write('@deepseek-ai/dsh/package.json', JSON.stringify({version: '0.2.0-rc.2', dependencies: {}}));
     for (const name of ['dsh-client-ui-layout', 'dsh-llm-pi-ai'])
-      write(`@deepseek-ai/${name}/package.json`, JSON.stringify({version: '0.1.7-alpha.2', type: 'module'}));
+      write(`@deepseek-ai/${name}/package.json`, JSON.stringify({version: '0.2.0-rc.2', type: 'module'}));
     write('@deepseek-ai/dsh-web-frontend/dist/index.html', '<html><head><title>DeepSeek Harness</title><link href="./favicon.svg"></head></html>');
     write('@deepseek-ai/dsh-web-frontend/dist/manifest.webmanifest', '{}');
     const marker = '...options.sessionId === void 0 ? {} : { sessionId: String(options.sessionId) },';
@@ -135,7 +135,7 @@ test('installer retains native layout behavior and loads the sampling adapter th
     write('@deepseek-ai/dsh-client-ui-conversation/lib/client.js', 'function ConversationHeader({value}) {return value;}');
     write('@deepseek-ai/dsh-client-ui-settings-general/lib/client.js', 'function SettingsRoot(props) {return props.value;} function GeneralSection({value}) {return value;}');
     write('@deepseek-ai/dsh-client-ui-theme/lib/client.js', `const zh={"fontSize.title":"字号大小","fontSize.description":"仅影响会话内容的字号"};const en={"fontSize.title":"Font size","fontSize.description":"Only affects conversation content"};
-      const fontControls={disabled: fontSize >= 26};
+      const fontControls={disabled: fontSize >= 22};
       const FONT_SIZE_FIELD="fontSize", THEME_PREFERENCE_FIELD="preference", DEFAULT_PREFERENCE="dark";
       const isThemePreference=id=>["light","dark","system"].includes(id);
       class ThemeRuntime {
@@ -152,13 +152,13 @@ test('installer retains native layout behavior and loads the sampling adapter th
     write('@deepseek-ai/dsh-client-ui-open-in-app/lib/client.js', 'const endpoint="/open-in-app/apps";');
     write('@deepseek-ai/dsh-client-ui-workspace/lib/client.js', 'const normalizedQuery = sanitizeSearchQuery(query).trim();\n(0, react_jsx_runtime.jsx)("div", {\n\t\t\t\t\t\tclassName: WorkspaceBrowser_module_css_default.listArea,children: t("search.noMatches")});');
     const nativeLayout = 'function DocumentTitle(props) {return props;} function AppFrame({value}) {return value;} const productTitle = "DeepSeek Harness"; function updateTitle(title) { document.title = title === undefined ? productTitle : `${title} — ${productTitle}`; }';
-    write('@deepseek-ai/dsh-client-ui-layout/lib/client.js', nativeLayout + '\nfunction owner() {\nconst layout = new LayoutController(instance.actions, id => true);\nreturn layout;}');
+    write('@deepseek-ai/dsh-client-ui-layout/lib/client.js', nativeLayout + '\nfunction owner() {\nconst layout = new LayoutController(instance.actions, {\n  select: id => true,\n});\nreturn layout;}');
     write('@deepseek-ai/dsh-client-ui-token-usage/package.json', '{}');
     write('sm75-workbench/lib/client.js', '// obsolete inverse embedding');
     const manifestBefore = JSON.parse(fs.readFileSync(path.join(root, '@deepseek-ai/dsh/package.json'), 'utf8'));
     manifestBefore.dependencies['@deepseek-ai/dsh-client-ui-token-usage'] = '0.1.6';
     write('@deepseek-ai/dsh/package.json', JSON.stringify(manifestBefore));
-    write('@deepseek-ai/dsh-client-ui-model-selection/lib/client.js','const current = projected.next ?? catalog.value.default;');
+    write('@deepseek-ai/dsh-client-ui-model-selection/lib/client.js','const selection = projected.next ?? catalog.value.default;');
     write('@deepseek-ai/dsh-api-session-controller/lib/index.js',`if (picked !== void 0) return picked;
 if (loggedHeader === void 0) return defaultModel.currentSelection();
 const logged = loggedHeader.config;\n\t\t\t\treturn {
@@ -203,7 +203,7 @@ if (picked?.provider !== provider || picked.model !== model || picked.reasoningE
     assert.match(fs.readFileSync(path.join(root,'@deepseek-ai/dsh-client-ui-theme/lib/client.js'),'utf8'), /全局字号/);
     const themeSandbox={fontSize:17};
     vm.runInNewContext(fs.readFileSync(path.join(root,'@deepseek-ai/dsh-client-ui-theme/lib/client.js'),'utf8'),themeSandbox);
-    assert.match(fs.readFileSync(path.join(root,'@deepseek-ai/dsh-client-ui-theme/lib/client.js'),'utf8'), /disabled: fontSize >= 17/);
+    assert.match(fs.readFileSync(path.join(root,'@deepseek-ai/dsh-client-ui-theme/lib/client.js'),'utf8'), /disabled: fontSize >= 22/);
     let accepted=14;
     const writes=[];
     const runtime=new themeSandbox.ThemeRuntime({logger:{warn(){}}},{getSnapshot:()=>({value:{preference:'dark',fontSize:accepted}}),set:(_key,value)=>new Promise((resolve,reject)=>writes.push({value,resolve,reject}))});
@@ -290,9 +290,9 @@ if (picked?.provider !== provider || picked.model !== model || picked.reasoningE
     fs.writeFileSync(layoutFile, nativeLayout);
     write('@deepseek-ai/dsh-client-ui-layout/package.json', '{"version":"0.1.6"}');
     assert.throws(() => applyBranding(root), /dsh-client-ui-layout adaptation requires/);
-    write('@deepseek-ai/dsh-client-ui-layout/package.json', '{"version":"0.1.7-alpha.2"}');
+    write('@deepseek-ai/dsh-client-ui-layout/package.json', '{"version":"0.2.0-rc.2"}');
     write('@deepseek-ai/dsh/package.json', '{"version":"0.1.5-rc.1"}');
-    assert.throws(() => applyBranding(root), /requires 0.1.7-alpha.2/);
+    assert.throws(() => applyBranding(root), /requires 0.2.0-rc.2/);
   } finally {fs.rmSync(root, {recursive: true, force: true});}
 });
 
