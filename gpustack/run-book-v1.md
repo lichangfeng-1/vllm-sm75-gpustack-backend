@@ -163,21 +163,21 @@ bash gpustack/lint-paste-v1.sh
 - `环境变量` 整块粘 `gpustack/env-paste-v1.txt`（**25 行**）。**第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM=120779177984` 是硬性项**：没有它，平台按启发式估出 204.5 GiB 需求，而本机八卡可分配只有 117.76 GiB，所以模型永久排队、界面不报错也不给原因。换机器按 `claim ＝ 实测逐卡驻留 MiB × 卡数 × 1048576` 重算。
 - 表单里会多出几条不是你粘的 env（`SAFETENSORS_FAST_GPU`、`RUNAI_STREAMER_*`、`VLLM_CACHE_ROOT`）——那是平台自己塞的默认值，别当成粘坏了。
 - 要开图输入：另加 `--limit-mm-per-prompt={"image":4}`（**紧贴等号**，JSON 里带空格会被拆成两个 token）＋删掉 `--language-model-only` ＋**重跑显存标定回填 claim**。开多模态后逐卡实测 15,372 MiB，已超 `0.92 × 16384 ＝ 15,073` 的可分配口径，所以诚实的 claim 过不了准入，本机这一档存在"准入靠低报、运行靠物理余量"的不体面形态，余量只剩约 1,012 MiB/卡。
-- 上面那句里只有 `--limit-mm-per-prompt` 是"要多张图"才需要的。真正卡住图输入的是 `--language-model-only`：删掉它之后不必显式设限额也能进图——这枚档在平台侧决议成 `Qwen4ExpForConditionalGeneration`（带视觉塔），默认限额 1 张。10-15 实测一张工作台截图进模型、正文准确描述了画面，硬指标 `usage.multimodal_tokens.image = 2040`、prompt 2117 token、`mm_cache_queries_total = 1.0`，引擎自报 `Multi-modal warmup completed`。**该次取证走的是引擎直连口（本机 40028），不是 8180 网关**，网关那条腿当时因无可用 API key 仍是 401，别把这条读成"网关侧图像已验"。
+- 上面那句里只有 `--limit-mm-per-prompt` 是"要控制张数"才需要的。真正卡住图输入的是 `--language-model-only`：删掉它之后不必显式设限额也能进图——这枚档在平台侧决议成 `Qwen4ExpForConditionalGeneration`（带视觉塔）。**不写限额时的引擎默认上限是 999，不是 1**（`vllm/config/multimodal.py:478-489`，注释原文 "Unspecified modality is set to 999 by default"）；10-15 那次"看起来只进 1 张"是请求里本来就只带了一张，不是引擎上限。10-15 实测一张工作台截图进模型、正文准确描述了画面，硬指标 `usage.multimodal_tokens.image = 2040`、prompt 2117 token、`mm_cache_queries_total = 1.0`，引擎自报 `Multi-modal warmup completed`。**该次取证走的是引擎直连口（本机 40028），不是 8180 网关**，网关那条腿当时因无可用 API key 仍是 401，别把这条读成"网关侧图像已验"。
 
 #### 多模态开关速查（图／视频）
 
 | 想要什么 | 参数块怎么改 |
 |---|---|
 | 纯文本（默认交付档） | 保留 `--language-model-only`，不加限额 |
-| 开图、每请求 1 张 | **删掉** `--language-model-only`（其余不动） |
+| 开图、不写限额 | **删掉** `--language-model-only`（引擎默认上限 999） |
 | 开图、每请求最多 32 张 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":32}` |
-| 图＋视频 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":32,"video":N}` |
+| 图＋视频（推荐默认） | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":32,"video":1}` |
 
 三条硬约束，改之前先看：
 
 1. **JSON 必须紧贴等号、内部不能有空格**（`--limit-mm-per-prompt={"image":32}`）。GPUStack 按空格切参数，写成 `{ "image": 32 }` 会被拆成多个 token，引擎直接报参数错误。
-2. **`N` 没有"官方推荐值"**：模型 `config.json` 里有 `video_token_id`（即模型侧支持视频），vLLM 侧不给限额时默认每请求 1 个；`N` 调多大只受显存约束，**本线视频输入未实测**（GPUStack 界面没有视频上传入口），先按 1 跑通再往上加。
+2. **默认值不是 1，是 999**：`vllm/config/multimodal.py:478-489` 对未指定模态直接返回 **999**（注释原文 "Unspecified modality is set to 999 by default"）⇒"只删 `--language-model-only`"等于几乎不设防。**推荐显式写 `{"image":32,"video":1}`**：视频每多一路按帧数吃 token，本线视频输入未实测（GPUStack 界面没有视频上传入口），先按 1 跑通再往上加。
 3. **每加一路模态都要重算 claim**：开多模态后逐卡实测 15,372 MiB，已超 `0.92 × 16384 ＝ 15,073` 的可分配口径 ⇒ 诚实的 claim 过不了准入，这一档在本机只能"低报过准入、靠物理余量跑"，余量约 1,012 MiB/卡。32 张图这种上限在**本机显存下不具备可跑性**，它只是"允许值"，不是"跑得动值"。
 
 ## 8 验收（四道，缺一不算过）
@@ -433,7 +433,7 @@ EP 下只加载本卡要用的专家权重，是省显存的关键一格。关�
 只加载语言塔，跳过视觉塔。省显存、少一段 warmup。要发图片或视频就把这一条删掉，并按多模态的实测驻留重算 `GPUSTACK_MODEL_VRAM_CLAIM`（见第 7 节的"多模态开关速查"）。注意：现役模型行上这一条缺失（见第 7 节末的提示）。
 
 **`--limit-mm-per-prompt={"image":32}`**（可选，只在多模态时需要）
-限制每个请求能带几张图／几个视频。不写时 vLLM 默认每模态 1 个；写 `{"image":32}` 就是把图的上限放开到 32。**JSON 必须紧贴等号和花括号、中间不能有空格**，否则会被 GPUStack 的空格切分拆坏。视频同理写 `{"video":N}`，但本线视频输入未实测，`N` 只受显存约束、没有"推荐值"——先按 1 跑通再往上加；32 张图在本机显存下只是"允许值"，不是"跑得动值"。
+限制每个请求能带几张图／几个视频。**不写时引擎对未指定模态返回 999**（`vllm/config/multimodal.py:478-489`，注释原文 "Unspecified modality is set to 999 by default"），等于几乎不设防；所以推荐显式写。**JSON 必须紧贴等号和花括号、中间不能有空格**，否则会被 GPUStack 的空格切分拆坏。本教程的推荐默认是 `{"image":32,"video":1}`：图按你要的上限 32，视频先给 1（每多一路按帧数吃 token，且本线视频未实测）。32 张图在本机显存下只是"允许值"，不是"跑得动值"。
 
 **`--max-model-len=262144`**
 最大上下文长度（256K）。调小会减少 KV 预留；调大要同时涨 `--kv-cache-memory-bytes` 或显存，否则起不来。
