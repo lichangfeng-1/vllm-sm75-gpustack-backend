@@ -32,7 +32,7 @@
 ## 1 拉仓
 
 ```bash
-git clone 你的仓地址 vllm-sm75-gpustack-backend
+git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
 ```
 
