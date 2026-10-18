@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Harness 0.1.7-alpha.2 watches a config file's parent before filtering change
+// Harness 0.2.0-rc.2 watches a config file's parent before filtering change
 // events. A protected unrelated sibling can then disable HMR and config edits.
 export function applyNativeConfigWatch(base) {
   const root=path.join(base,'@deepseek-ai/dsh-hmr');

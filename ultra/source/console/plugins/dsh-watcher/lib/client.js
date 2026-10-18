@@ -5623,7 +5623,7 @@ window.__ModuleLoader__.load({
 		}
 		function ReadyWatcher({ useSession, useSessionStatus, useProjection, sessionId, loadAllHistory, chat, views }) {
 			const sessionSnapshot = useSession((state) => state);
-			// DSH 0.1.7 unifies pending requests with the public per-session UI status.
+			// DSH 0.2 unifies pending requests with the public per-session UI status.
 			const pending = useSessionStatus((state) => state.get(sessionId)?.pendingInteraction);
 			const snapshot = (0, react.useMemo)(() => ({
 				views,

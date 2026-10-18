@@ -89,7 +89,7 @@ function nodes(tree) {
   return [tree, ...(Array.isArray(children) ? children : [children]).flatMap(nodes)];
 }
 
-test('shipped Watcher renders and opens using the complete 0.1.7 public hook contract', () => {
+test('shipped Watcher renders and opens using the complete 0.2.0-rc.2 public hook contract', () => {
   const f = fixture();
   assert.equal(f.client.clientContract.harnessVersion, '0.2.0-rc.2');
   assert.deepEqual(Array.from(f.client.clientContract.standardHooks), ['useConversation', 'useSession', 'useSessionStatus', 'useProjection']);

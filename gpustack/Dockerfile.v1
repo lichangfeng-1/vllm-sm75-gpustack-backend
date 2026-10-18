@@ -272,6 +272,8 @@ COPY ultra/source/vllm /opt/sm75-workbench/vllm
 # 安装 SM75 原生插件与品牌补丁到 DSH node_modules；必须在 console/plugins 就位之后。
 RUN node /opt/sm75-workbench/console/install-native-plugins.mjs \
       /opt/harness/node_modules /opt/sm75-workbench/console
+# 装完立刻校验自定义客户端 bundle 的身份与语法，坏件不进镜像。
+RUN node /opt/sm75-workbench/console/verify-client-bundles.mjs /opt/harness/node_modules
 # 两套测试资产随仓分发（manifest.json 的 original_ui=1 已在仓内），构建期不再访问 GitHub raw。
 COPY gpustack/layers/panel/extensions/speedtest /opt/sm75-workbench/extensions/speedtest
 COPY gpustack/layers/panel/extensions/sql /opt/sm75-workbench/extensions/sql
