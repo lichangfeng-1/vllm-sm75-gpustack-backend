@@ -1483,6 +1483,15 @@ const server = http.createServer(async (req, res) => {
       }
       if (action === "history")
         return json(res, { points: telemetry.read(p.id) });
+      if (action === "preview" && isExternalProfile(p))
+        return json(res, {
+          bin: "GPUStack",
+          args: [],
+          lmcache: null,
+          cache: null,
+          backend: "external",
+          note: "GPUStack 托管模型，启停命令请在平台查看",
+        });
       if (action === "preview" && standalone)
         return json(res, {
           bin: "vllm",

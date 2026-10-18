@@ -1,6 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import http from 'node:http';import {spawn} from 'node:child_process';import {fileURLToPath} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url));
 const frameBootstrap=fs.readFileSync(new URL('./public/frame-appearance.js',import.meta.url),'utf8');
+const credentialsScript='<script data-sm75-fetch-credentials>(function(){const f=window.fetch;window.fetch=function(input,init){init=init?{...init}:{};try{const u=new URL(input instanceof Request?input.url:String(input),location.href);if(u.origin===location.origin)init.credentials="include";}catch{}return f.call(this,input,init);};})();</script>';
 export function injectFrameAppearance(html){
  if(html.includes('data-sm75-frame-appearance'))return html;
  const script='<script data-sm75-frame-appearance>'+frameBootstrap.replace(/<\/script/gi,'<\\/script')+'</script>';
@@ -25,7 +26,7 @@ export class OriginalTests{
   const prefix='/bench-app/'+type;
   const up=http.request({host:'127.0.0.1',port:this.port(type),path:suffix,method:req.method,headers:{...req.headers,host:'127.0.0.1:'+this.port(type),'accept-encoding':'identity'}},r=>{
    const headers={...r.headers,'Cache-Control':'no-store'};delete headers['set-cookie'];
-   if((r.headers['content-type']||'').includes('text/html')){const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>{let html=injectFrameAppearance(Buffer.concat(chunks).toString('utf8'));const i=profile.args.indexOf('--served-model-name'),model=i>=0?profile.args[i+1]:profile.args[0];
+   if((r.headers['content-type']||'').includes('text/html')){const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>{let html=injectFrameAppearance(Buffer.concat(chunks).toString('utf8'));if(!html.includes('data-sm75-fetch-credentials'))html=html.replace(/<head\b[^>]*>/i,m=>m+credentialsScript);const i=profile.args.indexOf('--served-model-name'),model=i>=0?profile.args[i+1]:profile.args[0];
     if(type==='speedtest'){
      html=html.replace('</body>','<script>'+fs.readFileSync(path.join(here,'public','benchmark-sampling.js'),'utf8')+'</script></body>');
      html=html.replace('const savedMinLength =',"try{if(!localStorage.getItem('sm75-speed-defaults-v2')){for(const [k,v]of Object.entries({MinLength:512,MaxLength:131072,Step:128,StepMultiplier:2,OutputLength:512}))localStorage.setItem('llmPerfTest'+k,String(v));localStorage.setItem('sm75-speed-defaults-v2','1');}}catch{}const savedMinLength =");

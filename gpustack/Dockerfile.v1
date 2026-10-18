@@ -289,6 +289,10 @@ RUN --mount=type=bind,source=.bench-cache,target=/bench-cache \
     if [ -x /hermes-venv-cache/bin/python ] && [ ! -x /opt/hermes-venv/bin/python ]; then cp -a /hermes-venv-cache /opt/hermes-venv; fi; \
     SM75_BENCH_DOWNLOAD_CACHE=/bench-cache PIP_INDEX_URL=${PIP_INDEX_URL} \
     python3 /opt/sm75-workbench/benchlocal-verifiers/install-runtime.py
+# 控制台/工作台截图与 headless Chrome 需要中文字体；不装会出现整屏方框。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
 RUN chmod 0755 /opt/vllm-sm75/panel-sidecar.py
 # 入口包装：默认行为与基座完全相同（原样 exec runtime-entrypoint.py + GPUStack 给的命令）；
 # 只有模型行设了 SM75_PANEL_AUTOSTART=1 时，才先把面板拉到后台再 exec 引擎。
