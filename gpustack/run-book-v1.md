@@ -90,14 +90,14 @@ docker exec sm75-gpustack-server cat /var/lib/gpustack/initial_admin_password
 
 ## 5 起 worker
 
-同机部署**不需要 token**：worker 取 token 的路径是 `gpustack/config/config.py:312-313` 的 `read_registration_token(self.data_dir)`，读的是共享 data 目录里的文件，而本形制下 server 与 worker 挂的是同一份 `${GS_DATA_DIR}`。
+同机部署**不需要 token**：worker 取 token 的路径是 `gpustack/config/config.py:312-313` 的 `read_registration_token(self.data_dir)`，读的是**它自己 data_dir 里**那一份。不传 `--data-dir` 时 data_dir 是 OS 默认值，也就是容器内的 `/var/lib/gpustack`（`config.py:82`）⇒ **worker 必须把 `${GS_DATA_DIR}` 挂到 `/var/lib/gpustack`**（与 server 同一个目标路径），两边看到的才是同一份目录。本文件此前写作 target=${GS_DATA_DIR}，那样 worker 在自己那格空目录里找不到 token，只能退回 --token。现写法是 2026-10-18 在同一台机上实跑复验过的形制：该 worker 建的模型实例 `resolved_path=/var/lib/gpustack/cache/model_scope/…`，169 GiB 权重正常加载。
 
 ```bash
 docker create --name sm75-gpustack-worker --hostname sm75-gpustack-worker \
   --restart no --env TZ=Asia/Shanghai \
   --privileged --network host --runtime nvidia \
   --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
-  --mount type=bind,source=${GS_DATA_DIR},target=${GS_DATA_DIR} \
+  --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
   quay.io/gpustack/gpustack:v2.2.3 \
   --server-url http://${HOST_IP}:8180 \
   --advertise-address ${HOST_IP} \
