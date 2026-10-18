@@ -15,6 +15,8 @@ What you need: eight 16 GiB cards and 251 GiB of host RAM. The checkpoint we run
 168.7 GiB, more than the total VRAM, and part of it stays in host memory - too little RAM gets you
 an OOM kill during load, which looks like a broken image.
 
+Tested environment (**lower bound only; no upper-bound guarantee - test it yourself**): Ubuntu 24.04.5 LTS (kernel 6.8.0) x NVIDIA driver 580.178.04 (CUDA 13.0) x Docker 29.8.0 (cgroup v2) x NVIDIA Container Toolkit 1.20.0 x GPUStack v2.2.3. Details in run-book section 0.
+
 Follow `gpustack/run-book-v1.md` start to finish: build the image, start server and worker,
 register the backend version, deploy, then run the four acceptance gates. The two blocks you paste
 into the form are `gpustack/args-paste-v1.txt` (24 lines) and `gpustack/env-paste-v1.txt`

@@ -16,7 +16,18 @@
 | 网卡 | 记下宿主内网 IP，下面统一用 `HOST_IP` | worker 与浏览器都要能到达它。`export HOST_IP=192.0.2.10` 换成你的地址 |
 | 数据目录 | 下面统一用 `GS_DATA_DIR`（示例值 `/data/gpustack-data`），`export GS_DATA_DIR=/你的路径`；并且要在起容器**之前**先建好、容器要能写 | `--mount type=bind` 的源目录不存在时，失败发生在 `docker create` 而不是 `docker start`，原文 `invalid mount config for type "bind": bind source path does not exist`。另注意 GPUStack 会以 root 写这枚目录，事后普通账号删不掉 |
 
-驱动版本下限**我们没验过**（面板线撞过 NVAPI 与驱动版本不匹配，属另一条形制），此处不写成要求。
+**版本基线（2026-10-19 本机现读，当下限用、不保证上限）**
+
+| 件 | 本次实测通过的版本 | 说明 |
+|---|---|---|
+| 操作系统 | **Ubuntu 24.04.5 LTS**（内核 `6.8.0-146-generic`） | 其他发行版未验证 |
+| NVIDIA 驱动 | **580.178.04**（`nvidia-smi` 报 CUDA Version **13.0**） | 镜像里 torch 是 cu130 ⇒ 驱动 API 必须 ≥ 13.0；面板线撞过 NVAPI 与驱动版本不匹配，属另一条形制 |
+| Docker | **29.8.0**（storage `overlayfs`，cgroup **v2**） | cgroup v1 未验证 |
+| containerd | **2.3.5** | |
+| NVIDIA Container Toolkit | **1.20.0**（`libnvidia-container` 1.20.0-1） | `--runtime nvidia` 依赖它 |
+| GPUStack | **quay.io/gpustack/gpustack:v2.2.3** | 本仓所有 API/字段/行号取证都按 2.2.3 这一版 |
+
+**读法**：上表是"我们实际跑通的那一组"，**只作为下限**——低于它我们不保证、也未验证；高于它同样不保证（版本组合可能有行为差异），请使用者自行实测后再上生产。
 
 ## 1 拉仓
 

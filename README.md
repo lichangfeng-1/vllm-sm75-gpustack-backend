@@ -12,6 +12,8 @@ AutoRound 量化白名单（incple），又用一组环境变量把底座的 QSA
 前提：8 张 16 GiB 卡 ＋ 251 GiB 主机内存。要跑的档权重 168.7 GiB，比显存总和大，靠主机内存补，
 所以内存不够会在加载阶段被杀，现象看起来像镜像坏了。
 
+实测通过的运行环境（**只作下限，不保证兼容上限，请自行实测**）：Ubuntu 24.04.5 LTS（内核 6.8.0）× NVIDIA 驱动 580.178.04（CUDA 13.0）× Docker 29.8.0（cgroup v2）× NVIDIA Container Toolkit 1.20.0 × GPUStack v2.2.3。逐项说明见 run-book 第 0 节。
+
 操作看 `gpustack/run-book-v1.md`，从头做到尾：构建镜像 → 起 server 和 worker → 注册后端版本 →
 部署模型 → 四道验收。表单里要整块粘的两枚参数是 `gpustack/args-paste-v1.txt`（24 行）和
 `gpustack/env-paste-v1.txt`（25 行，第 25 行的显存配额是硬性项，漏了模型会一直排队且不报错）。
