@@ -165,6 +165,21 @@ bash gpustack/lint-paste-v1.sh
 - 要开图输入：另加 `--limit-mm-per-prompt={"image":4}`（**紧贴等号**，JSON 里带空格会被拆成两个 token）＋删掉 `--language-model-only` ＋**重跑显存标定回填 claim**。开多模态后逐卡实测 15,372 MiB，已超 `0.92 × 16384 ＝ 15,073` 的可分配口径，所以诚实的 claim 过不了准入，本机这一档存在"准入靠低报、运行靠物理余量"的不体面形态，余量只剩约 1,012 MiB/卡。
 - 上面那句里只有 `--limit-mm-per-prompt` 是"要多张图"才需要的。真正卡住图输入的是 `--language-model-only`：删掉它之后不必显式设限额也能进图——这枚档在平台侧决议成 `Qwen4ExpForConditionalGeneration`（带视觉塔），默认限额 1 张。10-15 实测一张工作台截图进模型、正文准确描述了画面，硬指标 `usage.multimodal_tokens.image = 2040`、prompt 2117 token、`mm_cache_queries_total = 1.0`，引擎自报 `Multi-modal warmup completed`。**该次取证走的是引擎直连口（本机 40028），不是 8180 网关**，网关那条腿当时因无可用 API key 仍是 401，别把这条读成"网关侧图像已验"。
 
+#### 多模态开关速查（图／视频）
+
+| 想要什么 | 参数块怎么改 |
+|---|---|
+| 纯文本（默认交付档） | 保留 `--language-model-only`，不加限额 |
+| 开图、每请求 1 张 | **删掉** `--language-model-only`（其余不动） |
+| 开图、每请求最多 32 张 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":32}` |
+| 图＋视频 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":32,"video":N}` |
+
+三条硬约束，改之前先看：
+
+1. **JSON 必须紧贴等号、内部不能有空格**（`--limit-mm-per-prompt={"image":32}`）。GPUStack 按空格切参数，写成 `{ "image": 32 }` 会被拆成多个 token，引擎直接报参数错误。
+2. **`N` 没有"官方推荐值"**：模型 `config.json` 里有 `video_token_id`（即模型侧支持视频），vLLM 侧不给限额时默认每请求 1 个；`N` 调多大只受显存约束，**本线视频输入未实测**（GPUStack 界面没有视频上传入口），先按 1 跑通再往上加。
+3. **每加一路模态都要重算 claim**：开多模态后逐卡实测 15,372 MiB，已超 `0.92 × 16384 ＝ 15,073` 的可分配口径 ⇒ 诚实的 claim 过不了准入，这一档在本机只能"低报过准入、靠物理余量跑"，余量约 1,012 MiB/卡。32 张图这种上限在**本机显存下不具备可跑性**，它只是"允许值"，不是"跑得动值"。
+
 ## 8 验收（四道，缺一不算过）
 
 ```bash
@@ -415,7 +430,10 @@ MoE 专家并行：专家权重按卡分片，而不是每卡一份。关掉它�
 EP 下只加载本卡要用的专家权重，是省显存的关键一格。关掉会把全量专家都加载进来，显存直接不够。
 
 **`--language-model-only`**
-只加载语言塔，跳过视觉塔。省显存、少一段 warmup。**要发图片就把这一条删掉**，并按多模态的实测驻留重算 `GPUSTACK_MODEL_VRAM_CLAIM`。注意：现役模型行上这一条缺失（见第 7 节末的提示）。
+只加载语言塔，跳过视觉塔。省显存、少一段 warmup。要发图片或视频就把这一条删掉，并按多模态的实测驻留重算 `GPUSTACK_MODEL_VRAM_CLAIM`（见第 7 节的"多模态开关速查"）。注意：现役模型行上这一条缺失（见第 7 节末的提示）。
+
+**`--limit-mm-per-prompt={"image":32}`**（可选，只在多模态时需要）
+限制每个请求能带几张图／几个视频。不写时 vLLM 默认每模态 1 个；写 `{"image":32}` 就是把图的上限放开到 32。**JSON 必须紧贴等号和花括号、中间不能有空格**，否则会被 GPUStack 的空格切分拆坏。视频同理写 `{"video":N}`，但本线视频输入未实测，`N` 只受显存约束、没有"推荐值"——先按 1 跑通再往上加；32 张图在本机显存下只是"允许值"，不是"跑得动值"。
 
 **`--max-model-len=262144`**
 最大上下文长度（256K）。调小会减少 KV 预留；调大要同时涨 `--kv-cache-memory-bytes` 或显存，否则起不来。
@@ -558,3 +576,92 @@ QSA 的 indexer 走 cuBLAS。
 
 **`entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`**
 GPUStack 用这一格整条覆盖镜像 ENTRYPOINT（字符串，`shlex.split` 后作为容器入口）。`panel-sidecar.py` 先按 `SM75_PANEL_AUTOSTART` 决定要不要拉面板，再把 `vllm serve <模型参数>` 原样 exec 掉。不设开关时与不加这一层完全一致。
+
+## 13 复制区（手动档：照着粘即可）
+
+给不想跑脚本、只想照着粘的人。**每条参数为什么这么设、怎么调，见第 12 节**；多模态四种组合见第 7 节"多模态开关速查"。
+
+### 13.1 后端参数（24 行，粘到模型"后端参数"）
+
+```
+--dtype=float16
+--hf-overrides={"dtype":"float16"}
+--tensor-parallel-size=8
+--enable-expert-parallel
+--enable-ep-weight-filter
+--language-model-only
+--max-model-len=262144
+--max-num-seqs=4
+--max-num-batched-tokens=4096
+--gpu-memory-utilization=0.92
+--kv-cache-dtype=fp8_e4m3
+--kv-cache-memory-bytes=2415919104
+--enable-prefix-caching
+--engram-config={"cpu_offload":true}
+--gdn-prefill-backend=flashqla_sm75
+--generation-config=vllm
+--enable-prompt-tokens-details
+--compilation-config={"mode":0,"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4,8,16]}
+--block-size=16
+--scheduler-cls=vllm.v1.core.sched.scheduler_sm75.SM75Scheduler
+--enable-auto-tool-choice
+--tool-call-parser=qwen3_xml
+--reasoning-parser=qwen3
+--chat-template=/opt/vllm-sm75/templates/qwen38-next-high-compat.jinja
+```
+
+### 13.2 环境变量（25 行，粘到模型"环境变量"）
+
+```
+NCCL_P2P_LEVEL=SYS
+VLLM_USE_MODELSCOPE=false
+VLLM_FIREFLY=auto
+HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1
+NCCL_DEBUG=WARN
+NCCL_IB_DISABLE=1
+NCCL_P2P_DISABLE=0
+OMP_NUM_THREADS=1
+VLLM_SM75_QWEN38_HC_GEMV=0
+VLLM_FLASHINFER_WORKSPACE_BUFFER_SIZE=134217728
+VLLM_USE_BREAKABLE_CUDAGRAPH=1
+VLLM_WORKER_MULTIPROC_METHOD=spawn
+VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=16
+VLLM_SM75_QSA_FLASHINFER_PREFILL=1
+VLLM_SM75_QSA_SHARED_TARGET_SCRATCH=1
+VLLM_SM75_QSA_FP8_MAIN_KV=1
+VLLM_SM75_QSA_CUBLAS_INDEXER=1
+VLLM_SM75_QSA_SELECTED_PAGES_PREFILL=1
+VLLM_ENFORCE_STRICT_TOOL_CALLING=1
+VLLM_SM75_QSA_MIXED_PREFILL=1
+VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC=1
+TZ=Asia/Shanghai
+GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64
+GPUSTACK_MODEL_VRAM_CLAIM=120779177984
+```
+
+### 13.3 面板扩展（可选，追加到同一个 env 块）
+
+```
+SM75_PANEL_AUTOSTART=1
+SM75_CONSOLE_HOST=0.0.0.0
+SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
+```
+
+### 13.4 后端版本入口（一格，写在后端版本里，不在模型行）
+
+```
+entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
+```
+
+### 13.5 想少点手工？仓库里现成的脚本
+
+| 脚本 | 干什么 |
+|---|---|
+| `gpustack/preflight-sources-v1.sh` | 构建前只读探活（镜像源、轮子索引、两枚下载件） |
+| `gpustack/build-gpustack-v1.sh --build` | 第一段构建（补丁门五道＋docker build） |
+| `docker build --file gpustack/Dockerfile.v1 --target panel-layer …` | 第二段构建（四层全上） |
+| `gpustack/lint-paste-v1.sh` | 自检两块粘贴块（末行 `LINT_PASTE_OK env=25 args=24`） |
+| `gpustack/set-panel-autostart-v1.sh` | 一次性把后端 entrypoint ＋ 面板三 env 写进平台（默认 dry-run，`--apply` 才改） |
+| `docker/benchlocal.sh start/status/stop/connect` | 三枚校验容器 |
+| `gpustack/verify-gpustack-form-v1.sh` | GPUStack 形态的只读验收（按需） |

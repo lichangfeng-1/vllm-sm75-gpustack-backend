@@ -22,7 +22,9 @@ into the form are `gpustack/args-paste-v1.txt` (24 lines) and `gpustack/env-past
 After pasting, run `bash gpustack/lint-paste-v1.sh`; the last line must read `LINT_PASTE_OK env=25 args=24`.
 
 Why each parameter is set that way, and how to re-derive it for other hardware:
-`gpustack/backend-version-card-v1.md` and `gpustack/compat-matrix-v1.md`.
+`gpustack/backend-version-card-v1.md` and `gpustack/compat-matrix-v1.md`. **Per-parameter explanations
+are in run-book section 12; the copy-paste board is section 13.** The console autostart can also be
+wired with one command: `gpustack/set-panel-autostart-v1.sh` (dry-run by default, `--apply` to write).
 
 **Optional web console, baked into the same image (no second container)**: the backend image built in
 step 2 already carries the console (node v22.23.2 + `/opt/sm75-workbench`). To start the console

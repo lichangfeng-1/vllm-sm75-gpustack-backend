@@ -18,7 +18,8 @@ AutoRound 量化白名单（incple），又用一组环境变量把底座的 QSA
 粘完跑一次 `bash gpustack/lint-paste-v1.sh`，末行出现 `LINT_PASTE_OK env=25 args=24` 才算粘齐。
 
 每条参数为什么这么设、换硬件怎么重算，看 `gpustack/backend-version-card-v1.md` 和
-`gpustack/compat-matrix-v1.md`。
+`gpustack/compat-matrix-v1.md`。**逐条讲解见 run-book 第 12 节，纯复制用的参数区见第 13 节**；
+面板自启也可以一条命令接好：`gpustack/set-panel-autostart-v1.sh`（默认 dry-run，`--apply` 才改）。
 
 **镜像自带控制面板（可选，不用再起第二个容器）**：第 2 步建出的后端镜像里已经带了面板负载
 （node v22.23.2 ＋ `/opt/sm75-workbench`）。要让面板和模型一起起来，把后端版本的入口指到包装上、

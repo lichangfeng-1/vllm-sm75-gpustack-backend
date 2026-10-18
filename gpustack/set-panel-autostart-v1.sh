@@ -1,0 +1,80 @@
+#!/bin/bash
+# set-panel-autostart-v1.sh —— 一次把"面板随模型自启"接好（默认 dry-run，只打印不改）
+#
+# 做两件事：
+#   ① 后端版本 0.1.7-sm75.1-custom 的 entrypoint 指到 panel-sidecar 包装；
+#   ② 模型行 env 追加 SM75_PANEL_AUTOSTART=1 / SM75_CONSOLE_HOST=0.0.0.0 / SM75_CONSOLE_ROOT=/var/lib/gpustack/panel。
+#
+# 用法：
+#   GS_KEY=<API key> HOST=<ip:8180> MODEL_ID=<模型 id> bash gpustack/set-panel-autostart-v1.sh          # 只看将改什么
+#   GS_KEY=<API key> HOST=<ip:8180> MODEL_ID=<模型 id> bash gpustack/set-panel-autostart-v1.sh --apply  # 真改
+#
+# 依赖：curl、python3。改完要重启实例（平台按 replicas 重建），或用 UI 停/起一次。
+set -eu
+: "${GS_KEY:?需要 GS_KEY（平台 API key，别写进脚本）}"
+: "${HOST:?需要 HOST，形如 172.17.100.10:8180}"
+MODEL_ID="${MODEL_ID:-4}"
+BACKEND_ID="${BACKEND_ID:-1}"
+VERSION_NAME="${VERSION_NAME:-0.1.7-sm75.1-custom}"
+ENTRYPOINT="${ENTRYPOINT:-python3 /opt/vllm-sm75/panel-sidecar.py vllm serve}"
+APPLY=0
+[ "${1:-}" = "--apply" ] && APPLY=1
+
+api() { curl -sS -m 20 -H "X-API-Key: ${GS_KEY}" "$@"; }
+
+echo "== 读后端版本 =="
+api "http://${HOST}/v2/inference-backends/${BACKEND_ID}" -o /tmp/spa-backend.json
+echo "== 读模型行 =="
+api "http://${HOST}/v2/models/${MODEL_ID}" -o /tmp/spa-model.json
+
+python3 - "$VERSION_NAME" "$ENTRYPOINT" <<'PY'
+import json, sys
+ver, ep = sys.argv[1], sys.argv[2]
+b = json.load(open("/tmp/spa-backend.json", encoding="utf-8"))
+if "code" in b:
+    sys.exit("读后端失败: %s" % b)
+vc = dict(b.get("version_configs") or {})
+if ver not in vc:
+    sys.exit("版本 %s 不在该后端里（现有：%s）" % (ver, list(vc)))
+cfg = dict(vc[ver])
+print("  entrypoint: %r -> %r" % (cfg.get("entrypoint"), ep))
+cfg["entrypoint"] = ep
+json.dump({"backend_name": b.get("backend_name"), "version_configs": {ver: cfg}},
+          open("/tmp/spa-backend-put.json", "w"), ensure_ascii=False)
+
+m = json.load(open("/tmp/spa-model.json", encoding="utf-8"))
+if "code" in m:
+    sys.exit("读模型失败: %s" % m)
+env = dict(m.get("env") or {})
+want = {"SM75_PANEL_AUTOSTART": "1", "SM75_CONSOLE_HOST": "0.0.0.0",
+        "SM75_CONSOLE_ROOT": "/var/lib/gpustack/panel"}
+for k, v in want.items():
+    print("  env %-22s %r -> %r" % (k, env.get(k), v))
+    env[k] = v
+body = {"name": m.get("name"), "source": m.get("source"), "env": env}
+for k in ("model_scope_model_id", "huggingface_repo_id", "local_path"):
+    if m.get(k):
+        body[k] = m[k]
+json.dump(body, open("/tmp/spa-model-put.json", "w"), ensure_ascii=False)
+print("  两份 PUT body 已写好：/tmp/spa-backend-put.json、/tmp/spa-model-put.json")
+PY
+
+if [ "$APPLY" != "1" ]; then
+  echo "DRY_RUN 未提交。加 --apply 才会 PUT。"
+  exit 0
+fi
+
+echo "== 提交后端版本 =="
+api -X PUT -H "Content-Type: application/json" --data @/tmp/spa-backend-put.json \
+  "http://${HOST}/v2/inference-backends/${BACKEND_ID}" -o /tmp/spa-backend-out.json
+echo "== 提交模型行 =="
+api -X PUT -H "Content-Type: application/json" --data @/tmp/spa-model-put.json \
+  "http://${HOST}/v2/models/${MODEL_ID}" -o /tmp/spa-model-out.json
+python3 - <<'PY'
+import json
+for name in ("backend", "model"):
+    d = json.load(open("/tmp/spa-%s-out.json" % name, encoding="utf-8"))
+    if "code" in d:
+        raise SystemExit("%s PUT 被拒: %s" % (name, str(d)[:300]))
+print("APPLIED 后端 entrypoint 与模型 env 已写入；重启实例后生效（面板默认 :1616）")
+PY
