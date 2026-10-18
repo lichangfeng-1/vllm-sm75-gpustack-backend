@@ -17,7 +17,8 @@ function workspaceHarness(load) {
   };
   const sandbox = {
     $, AbortSignal, console, disposed: false, authTask: null, authGeneration: 0, authEpoch: 0,
-    authState: 'checking', accountConfigured: true, abort: null,
+    authState: 'checking', accountConfigured: true, abort: null, externalEngineMode: false,
+    applyEngineMode() {},
     workspaceLoaded: false, workspaceLoadTask: null,
     shell: {dataset: {}, querySelectorAll: () => []},
     document: {querySelector: () => $('aside')},

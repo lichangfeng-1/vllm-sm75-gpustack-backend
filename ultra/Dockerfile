@@ -2,7 +2,7 @@ ARG VLLM_IMAGE=vllm-sm75:standard-image-required
 ARG NODE_IMAGE=node:22.23.2-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
 FROM ${NODE_IMAGE} AS harness
 WORKDIR /opt/harness
-COPY harness/package.json harness/package-lock.json ./
+COPY harness/legacy-0.1.7/package.json harness/legacy-0.1.7/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 FROM ${VLLM_IMAGE}

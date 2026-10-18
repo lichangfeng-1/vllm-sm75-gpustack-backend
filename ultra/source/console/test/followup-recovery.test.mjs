@@ -118,7 +118,7 @@ test('engine credential file follows actual start and exit transitions after key
   });
   try {
     fs.writeFileSync(savedFile, JSON.stringify({key: 'synthetic-first-engine-key'}));
-    const keyContext = vm.createContext({fs, path, root, key: 'synthetic-web-login', standalone: null});
+    const keyContext = vm.createContext({fs, path, root, key: 'synthetic-web-login', standalone: null, externalEngine: null});
     vm.runInContext(
       sourceBetween(serverSource, 'const configuredEngineKey = () => {', 'const originalTests = ') +
       '\nglobalThis.syncKey = syncEngineKeyFile;', keyContext,
