@@ -686,3 +686,30 @@ entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
 | `gpustack/set-panel-autostart-v1.sh` | 一次性把后端 entrypoint ＋ 面板三 env 写进平台（默认 dry-run，`--apply` 才改） |
 | `docker/benchlocal.sh start/status/stop/connect` | 三枚校验容器 |
 | `gpustack/verify-gpustack-form-v1.sh` | GPUStack 形态的只读验收（按需） |
+
+### 11b 如何更新 DSH（工作台）版本
+
+DSH 的版本钉在仓内 `ultra/harness/package.json`（当前 `0.1.7-alpha.2`）。它还没进后端镜像（见 11 节的"已知边界"），等扩展开关落地后，更新流程就是这四步：
+
+```bash
+# 1) 改版本号（只改这一处）
+#    ultra/harness/package.json -> "@deepseek-ai/dsh": "<新版本>"
+#    并用同一 Node 镜像重生成锁文件（锁文件与 package.json 必须同步，否则 npm ci 会拒绝）
+docker run --rm -v "$PWD/ultra/harness:/w" -w /w \
+  docker.m.daocloud.io/library/node:22.23.2-bookworm-slim \
+  npm install --package-lock-only --registry=https://registry.npmmirror.com
+
+# 2) 重建层 4（只重跑第二段，第一段缓存复用）
+docker build --file gpustack/Dockerfile.v1 --target panel-layer \
+  --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v1 .
+
+# 3) 起一个临时面板容器，确认 DSH 能起来（不挂卡）
+docker run --rm --entrypoint node vllm-sm75-gpustack:v0.1.7-beta2-v1 \
+  /opt/harness/node_modules/@deepseek-ai/dsh/lib/bin.js --version
+
+# 4) 面板里点开"工作台/使用统计"，能出页面才算过；出不来就回退版本号重来
+```
+
+**版本参考（2026-10-19 npm 国内镜像现读）**：`latest=0.2.0-rc.2`、`alpha=0.2.1-alpha.5`、`next=0.2.1-rc.2`；现装 `0.1.7-alpha.2`。
+**跨 minor 升级要当心**：DSH 的 `settings.yaml` 与插件补丁格式可能变，先升一个 rc 验证、别直接跟 `alpha`。
