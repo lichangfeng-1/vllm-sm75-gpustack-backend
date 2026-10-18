@@ -165,7 +165,12 @@ bash docker/benchlocal.sh connect    # 面板容器不在 bench 那张网上时�
 
 **一条不匹配要先解决**：`docker/benchlocal.sh` 默认认 **Ultra 面板镜像**（`vllm-sm75:v…-ultra-beta…`）并有一道 label 门 `io.sm75.benchlocal.unified=1`。本 GPUStack 线的测速台另有 `gpustack/Dockerfile.bench-v1`（产物 tag `vllm-sm75-gpustack-bench:v1`）。走这条线时要么 `IMAGE=… bash docker/benchlocal.sh start` 覆盖并满足 label 门，要么先另建 Ultra 镜像。
 
-这条覆盖路径的两个前置条件里，**label 门这一条已实测满足**：10-15 现读本机那枚 bench 镜像（ID `992df1afbdc2`）的 `io.sm75.benchlocal.unified` 值为 `1`。剩下的那一半——`benchlocal.sh` 接受 `IMAGE=` 覆盖之后整条链路真跑得通——**我们还没实跑** `【待实跑复核】`。
+这条覆盖路径**已实跑通**（2026-10-18，本机 8×T10）：
+
+- label 门满足：本机那枚 bench 镜像（ID `992df1afbdc2`，现读 tag `vllm-sm75-gpustack-bench:v0.1.7-beta2-v1`）的 `io.sm75.benchlocal.unified` 值为 `1`。
+- 执行形态：`ULTRA_DATA_ROOT=<你的绝对目录> BENCHLOCAL_ENV_FILE=$ULTRA_DATA_ROOT/benchlocal.env IMAGE=vllm-sm75-gpustack-bench:v0.1.7-beta2-v1 bash docker/benchlocal.sh start`，三枚容器（bugfind／cli／hermes）起来后 `status` 逐枚 running，容器内 `GET 127.0.0.1:4200/health` 逐枚回 `{"ok":true,"busy":false,"managed":true}`。
+- **一个会绊人的点**：`IMAGE` 不给时脚本按 `vllm-sm75:v${VERSION/-beta/-ultra-beta}` 拼默认值（本仓 VERSION 下得到 `vllm-sm75:v0.1.7-ultra-beta2`），而实际发版的面板镜像 tag 带后缀，这枚裸 tag 在盘上通常**不存在**，脚本会在 label 门上退 2 并报 `Build the beta2 Ultra image first`。所以走这条路必须显式给 `IMAGE=`。
+- 三枚容器的名字是固定的：若盘上已有同名的别线容器，脚本会先 `stop` 再 `rm` 重建（`docker/benchlocal.sh:46-47`）。跑前先 `docker inspect` 留证、跑完按原镜像重建并 `stop` 回原状态，别线在用时先跟使用者对齐。
 
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
