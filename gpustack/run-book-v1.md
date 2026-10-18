@@ -352,6 +352,18 @@ curl -s -X PUT -H "X-API-Key: ${GS_KEY}" -H 'Content-Type: application/json' \
 - 面板口默认 **1616**（`server.mjs` 的 `SM75_CONSOLE_PORT`），不是 1615。
 - 面板进程独立会话启动，崩了不影响引擎；日志在 `$SM75_CONSOLE_ROOT/panel.log`，启动成功会打一行 `PANEL_STARTED root=… log=…`。
 
+**端口与其它可调项**（全是 env，写进模型行即可，改完重启实例生效）：
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `SM75_CONSOLE_HOST` | `127.0.0.1` | 面板监听地址；要从别的机器打开必须设 `0.0.0.0` |
+| `SM75_CONSOLE_PORT` | `1616` | 面板端口；换口只改这一格（实测 `1626` 生效，日志会打 `SM75 console http://0.0.0.0:1626`） |
+| `SM75_CONSOLE_PUBLIC_HOST` | 取请求的 Host | 只影响页面里拼出来的对外链接，不改变监听 |
+| `SM75_HARNESS_PORT` / `SM75_HARNESS_PROXY_PORT` | `3085` / `1617` | BenchLocal 的本地 harness 与桥接口 |
+
+换口时注意三件事：① 不能与引擎口（GPUStack 分配的 `400xx`）冲突；② 同一台机上跑多个面板实例时要各给各的口；③ 这两个 harness 口也要避开。
+**另有一条必须守**：面板自己的"开机自启模型"（`settings.autoStart`）在这个形态里要保持**关闭**——否则面板会在同一容器里再拉起一个引擎，与 GPUStack 拉起的那个抢卡。
+
 **只想单独起面板（不跑模型）**：用同一个镜像，把入口切到 Ultra 分支（不给命令行参数即可）：
 
 ```bash

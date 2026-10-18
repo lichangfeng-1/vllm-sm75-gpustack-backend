@@ -31,7 +31,7 @@ to the model row:
 
 - backend version `0.1.7-sm75.1-custom` `entrypoint`: `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
 - model env: `SM75_PANEL_AUTOSTART=1`, `SM75_CONSOLE_HOST=0.0.0.0`, `SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`
-- the console listens on **1616**; the login token is `$SM75_CONSOLE_ROOT/key`, the log is `panel.log`, and state lives under the worker data dir, so it survives restarts.
+- the console listens on **1616** (override with `SM75_CONSOLE_PORT`; bind address with `SM75_CONSOLE_HOST`); the login token is `$SM75_CONSOLE_ROOT/key`, the log is `panel.log`, and state lives under the worker data dir, so it survives restarts.
 - without `SM75_PANEL_AUTOSTART` the wrapper is a transparent passthrough; engine behaviour is unchanged.
 
 The standalone console command, the three BenchLocal verifier containers and the radar-chart steps

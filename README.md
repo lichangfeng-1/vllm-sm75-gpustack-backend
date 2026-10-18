@@ -26,7 +26,7 @@ AutoRound 量化白名单（incple），又用一组环境变量把底座的 QSA
 
 - 后端版本 `0.1.7-sm75.1-custom` 的 `entrypoint`：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
 - 模型环境变量：`SM75_PANEL_AUTOSTART=1`、`SM75_CONSOLE_HOST=0.0.0.0`、`SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`
-- 面板口 **1616**；登录令牌在 `$SM75_CONSOLE_ROOT/key`，面板日志 `panel.log`，数据落在 worker 数据目录、重启不丢。
+- 面板口 **1616**（可用 `SM75_CONSOLE_PORT` 改，监听地址用 `SM75_CONSOLE_HOST`）；登录令牌在 `$SM75_CONSOLE_ROOT/key`，面板日志 `panel.log`，数据落在 worker 数据目录、重启不丢。
 - 不设 `SM75_PANEL_AUTOSTART` 时包装纯透传，引擎行为与不带这一层完全一致。
 
 单独起面板（不跑模型）的命令、三枚 BenchLocal 校验容器与雷达图的步骤，见 run-book 第 11 节。

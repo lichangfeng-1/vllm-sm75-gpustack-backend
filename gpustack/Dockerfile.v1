@@ -247,13 +247,15 @@ ARG BASE_TAG
 ARG NODE_IMAGE
 LABEL sm75.gpustack.layer="4-panel" \
       sm75.gpustack.node-image="${NODE_IMAGE}" \
-      sm75.gpustack.panel-root="/opt/sm75-workbench"
+      sm75.gpustack.panel-root="/opt/sm75-workbench" \
+      io.sm75.benchlocal.unified="1"
 COPY --from=nodebin /usr/local/bin/node /usr/local/bin/node
 COPY ultra/source/console /opt/sm75-workbench/console
 COPY ultra/source/profiles /opt/sm75-workbench/profiles
 COPY ultra/source/lmcache /opt/sm75-workbench/lmcache
 COPY ultra/source/benchlocal-native /opt/sm75-workbench/benchlocal-native
 COPY ultra/source/benchlocal-verifiers /opt/sm75-workbench/benchlocal-verifiers
+COPY gpustack/layers/panel/benchlocal-runtime-lock.json /opt/sm75-workbench/benchlocal-verifiers/runtime-lock.json
 COPY ultra/source/vllm /opt/sm75-workbench/vllm
 COPY gpustack/layers/panel/panel-sidecar.py /opt/vllm-sm75/panel-sidecar.py
 RUN chmod 0755 /opt/vllm-sm75/panel-sidecar.py
@@ -266,4 +268,5 @@ RUN set -eu; \
     test -f /opt/sm75-workbench/console/public/index.html || { echo "红 19：面板前端 public/index.html 缺失"; exit 19; }; \
     test -f /opt/vllm-sm75/runtime-entrypoint.py || { echo "红 19：入口 runtime-entrypoint.py 缺失"; exit 19; }; \
     test -x /opt/vllm-sm75/panel-sidecar.py || { echo "红 19：面板包装 panel-sidecar.py 缺失或不可执行"; exit 19; }; \
+    test -f /opt/sm75-workbench/benchlocal-verifiers/runtime-lock.json || { echo "红 19：benchlocal runtime-lock.json 缺失（校验容器会退 2）"; exit 19; }; \
     echo "面板层断言全绿：node=$(node -v)，server.mjs/public/index.html/runtime-entrypoint.py 均在位"
