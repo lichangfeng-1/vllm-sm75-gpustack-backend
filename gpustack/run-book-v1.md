@@ -111,11 +111,43 @@ docker start sm75-gpustack-worker
 - worker 走 host 网，所以模型实例端口（如 40014）**直接开在宿主上且引擎侧不带鉴权**。"仅内网可达"是硬约束，不是建议。
 - 这里**不设 `--shm-size`**：模型实例容器的 `/dev/shm` 由模型环境变量 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB` 决定（见第 7 步），设 worker 的没用。
 
+### 5a 跨机部署时，worker 的启动参数可以问 server 要（不用点界面）
+
+```bash
+curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/clusters/1/registration-token
+```
+
+返回五格 `token / server_url / image / env / args`。本机 2026-10-18 现读：`server_url` ＝ `http://172.17.100.10:8180`，`image` ＝ `quay.io/gpustack/gpustack:v2.2.3`，`env` 里一条 `GPUSTACK_TOKEN`（58 字符），`args` 是空数组。这一格的结构体注释逐字写着它是"The arguments of docker run command to register a worker"（`gpustack/schemas/clusters.py:696-706`），所以 `-e GPUSTACK_TOKEN=…` 与命令行 `--token …` 两种写法都算照用途用。
+
+两条注意：
+
+- **这条 token 是写凭据**，拿到它的人能往这个集群里注册 worker（`gpustack/routes/clusters.py:733-734` 的注释就是这么定性的，接口因此按"可写"权限把关）。它会出现在 `ps` 和 shell 历史里，跨机跑完就轮换。
+- **别用 `GET /v2/clusters/{id}/manifests` 拿启动命令**。那条只给 Kubernetes 集群渲染 DaemonSet，非 K8s 集群直接报错（判据 `clusters.py:761-764`）。本机 `provider=Docker`，实测退 **422**，原文 `Cannot get manifests for cluster sm75-stage2(id: 1) with provider ClusterProvider.Docker`。
+
 ## 6 注册后端版本（一次即可）
 
 UI 后端页新建：后端 **vLLM**｜版本 `0.1.7-sm75.1-custom`｜自定义 CUDA 可见性｜镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v1`。
 
 注意两处大小写：表单里框架标签显示 `CUDA`，提交值是小写 `cuda`；列表页显示的是落库值。这是两个字段，不是矛盾。
+
+### 6a 同一件事的 API 形态
+
+```bash
+curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/inference-backends
+```
+
+`version_configs` 是**以版本名为键的字典**。本机现读 vLLM 那一行（`id=1`、`backend_source=built_in`、`built_in_version_configs` 30 格、`version_configs` 只有我们这一格）：
+
+```json
+{"0.1.7-sm75.1-custom": {"image_name": "vllm-sm75-gpustack:v0.1.7-beta2-v1", "run_command": null, "entrypoint": null, "built_in_frameworks": null, "custom_framework": "cuda", "env": null}}
+```
+
+写入用 `PUT /v2/inference-backends/{id}`（路由 `routes/inference_backend.py:1138`）。四条规矩，踩了就是 400：
+
+- **版本名必须以 `-custom` 结尾**。凡是"用户自定义版本"（`built_in_frameworks` 为空、`custom_framework` 有值）都强制校验这个后缀（`inference_backend.py:1583-1608`）——上面那个版本号里的 `-custom` 不是装饰，删掉就被拒。
+- **内置后端不许设 `default_version`**（`inference_backend.py:1172-1175`）。vLLM 属内置后端，它的默认版本由平台自己管。
+- `backend_name` 不可改（`inference_backend.py:1166-1169`）。
+- **PUT 按整行提交**：`version_configs` 里少写一格，等于请求删除那一格，会先过一道删除校验（`inference_backend.py:1178` 的 `_validate_version_removal`）。所以正确做法是**先 GET 拿整行、只在那本字典上加改、再整行 PUT**，别手写一份最小 body。
 
 ## 7 部署模型
 
@@ -172,6 +204,42 @@ bash docker/benchlocal.sh connect    # 面板容器不在 bench 那张网上时�
 - **一个会绊人的点**：`IMAGE` 不给时脚本按 `vllm-sm75:v${VERSION/-beta/-ultra-beta}` 拼默认值（本仓 VERSION 下得到 `vllm-sm75:v0.1.7-ultra-beta2`），而实际发版的面板镜像 tag 带后缀，这枚裸 tag 在盘上通常**不存在**，脚本会在 label 门上退 2 并报 `Build the beta2 Ultra image first`。所以走这条路必须显式给 `IMAGE=`。
 - 三枚容器的名字是固定的：若盘上已有同名的别线容器，脚本会先 `stop` 再 `rm` 重建（`docker/benchlocal.sh:46-47`）。跑前先 `docker inspect` 留证、跑完按原镜像重建并 `stop` 回原状态，别线在用时先跟使用者对齐。
 
+### 9a 这三枚不是测速台，而且不接受你手填的 base_url
+
+2026-10-18 读镜像内实物（`vllm-sm75-gpustack-bench:v0.1.7-beta2-v1`）确认，三条都有行号：
+
+- 它们是**评测校验器**，只放行五个口：`/run-scenario`、`/verify-answer`、`/verify-canonical`、`/verify-oneshot`、`/verify-multiround`（`/opt/sm75-workbench/benchlocal-verifiers/gateway.mjs:12`），每个口都要带 `Authorization: Bearer $SM75_BENCH_VERIFIER_KEY`（同文件 `:6-7`，键短于 32 字符直接拒绝启动）。
+- **请求体里一旦带 `model`，它的 `inferenceBaseUrl` 必须逐字等于 `<SM75_BENCH_PROXY_ORIGIN>/benchlocal-inference/v1`**，否则 400 `Invalid managed model endpoint`（`:78-81`）。那个 origin 默认是 `http://sm75-bench-controller:1615`，也就是**控制端（面板／桌面客户端）自己开的那一跳代理**。⇒ "把 base_url 直接填成 GPUStack 网关 `http://<宿主>:8180/v1`" 这条路走不通；要走，得让控制端在 1615 上做反代。
+- **速度测试与雷达图不在这三枚里**，在镜像内的面板工作集：无头入口 `/opt/sm75-workbench/console/benchmark-runner.py`，雷达图前端是 `public/benchlocal-native-ui.js`（108–136 行那段 Radar）与 `public/index.html:751`。
+
+### 9b 单独手动起一枚（与脚本等价）
+
+```bash
+NETWORK=sm75-benchlocal-native
+KEY_FILE=/srv/vllm-sm75/ultra/benchlocal.env   # 首启由脚本生成的那份，内容一行 SM75_BENCH_VERIFIER_KEY=<64 位十六进制>
+docker network inspect "$NETWORK" >/dev/null 2>&1 || \
+  docker network create --internal --driver bridge --label io.sm75.benchlocal.role=network "$NETWORK"
+docker run -d --name sm75-bench-cli \
+  --network "$NETWORK" --runtime runc --restart unless-stopped \
+  --init --read-only --pids-limit 512 --memory 4g --cpus 2 \
+  --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --security-opt no-new-privileges \
+  --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g,mode=1777 \
+  --tmpfs /home/verifier:rw,nosuid,nodev,size=256m,uid=10001,gid=10001,mode=700 \
+  --tmpfs /workspace:rw,exec,nosuid,nodev,size=512m,uid=10001,gid=10001,mode=700 \
+  --env NVIDIA_VISIBLE_DEVICES=void --env CUDA_VISIBLE_DEVICES= \
+  --env SM75_BENCHLOCAL_ROLE=cli-40 --env-file "$KEY_FILE" \
+  --env SM75_BENCH_PROXY_ORIGIN=http://sm75-bench-controller:1615 \
+  --label io.sm75.benchlocal.role=verifier --label io.sm75.benchlocal.unified=1 \
+  --entrypoint python3 vllm-sm75-gpustack-bench:v0.1.7-beta2-v1 \
+  /opt/vllm-sm75/benchlocal-entrypoint.py
+```
+
+逐条来自 `docker/benchlocal.sh:50-62`，两处有意不抄：脚本还打了两枚只给 Unraid 界面看的 label（`:60`），手动版用不上；`--env-file` 那本键文件要满足 `^SM75_BENCH_VERIFIER_KEY=[a-fA-F0-9]{64}$`（`:34`），没有就先 `bash docker/benchlocal.sh start` 让脚本生成一份再复用。
+
+三枚之间只差两处——`--name` 与 `SM75_BENCHLOCAL_ROLE`（角色对应关系写在 `benchlocal.sh:37`：`bugfind:bugfind-15 / cli:cli-40 / hermes:hermesagent-20`）。角色决定内层端口：`bugfind-15`→4010、`cli-40`→4040、`hermesagent-20`→4010，外层统一 4200（`docker/helpers/benchlocal-entrypoint.py:5`、`gateway.mjs:11`）。
+
+三枚的前置门，都是"不起就直接退 2"那种：镜像内要有 `/opt/sm75-workbench/benchlocal-verifiers/runtime-lock.json`（`benchlocal-entrypoint.py:10`）；容器内一看见 `/dev/nvidia0` 就拒绝启动（`:11`）——**这三枚是 CPU 校验器，不许挂卡**；那张网是 `--internal`，容器没有对外网络，所以只有挂在同一张网上的控制端能驱动它们（`benchlocal.sh:35`，补接线用 `benchlocal.sh connect`）。
+
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
 仓根 `README.md` 的性能节挂着三张测速表：基线档 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出）。
@@ -180,19 +248,76 @@ bash docker/benchlocal.sh connect    # 面板容器不在 bench 那张网上时�
 是在镜像自带的 Ultra／面板形态上、用"大模型 Prefill & Decode 性能测试工具 v3（chao 魔改版）"跑出来的。
 **照本文件起完 GPUStack 之后，不要拿 57.73 当验收线**，否则你会以为自己配错了。
 
-要在 GPUStack 形态上量同一把尺的数，两条路：
+要在 GPUStack 形态上量同一把尺的数，用**镜像自带的测速核心**，不是第 9a 节那三枚校验容器（它们的入口只认控制端代理那一跳）。
 
-1. 用第 9 步那三枚 bench 容器，把它们的 base_url 指向 GPUStack 网关（`http://` ＋ `HOST_IP` ＋ `:8180`，带 API key），
-   参数照 README 那张配置表逐格填：并发 1／请求超时 30000 ms／期望输出长度 **1024**／
-   最小 512／最大 131072／步长 128／步长倍数 2／Temperature 1／Top P 0.95／Presence 0／Frequency 0。
-   第 9 步那条 `IMAGE=` 覆盖路径已于 2026-10-18 实跑通（见第 9 节），但它只证明三枚容器起得来、health 通；**用它们量出九档数这一步仍未做**，要量请先按第 9 节留证与复原。
-2. 或者只认第 8 步那四道防假绿断言（实例 `running` ＋ 一次真实推理非空 ＋ 逐卡 ≤15500 MiB ＋ 零 OOM），
-   速度另开窗口测。
+第一步，把尺子装到一个宿主目录里（核心是第三方 `gengchaogit/llm_speedtest` 的一个固定 commit，脚本按 commit 取字节并把 sha256 写进 `manifest.json`，我们不另存副本）：
+
+```bash
+docker run --rm -v "$PWD/bench-seed:/seed" --entrypoint python3 \
+  vllm-sm75-gpustack-bench:v0.1.7-beta2-v1 \
+  /opt/sm75-workbench/console/install-benchmark.py /seed
+```
+
+钉的是 commit `eb19940368f0d811ef7b14f77f61d1c7e8676c7a`、产物 sha256 前缀 `18b7b1d39900a8cb`，**与仓根三张表同一份字节**（`install-benchmark.py` 全文只做三件事：取 `llm_test_backend.py`、装 `slowapi==0.1.9` 到 `deps/`、写 `manifest.json`）。这一步要能访问 `raw.githubusercontent.com`；本机走的是仓内配的国内镜像优先路由，官方直连只兜底。
+
+第二步，无头复跑（每完成一格增量落 `<cfg>.results.json`，文件 mtime 就是取证时刻）：
+
+```bash
+docker run --rm --network host \
+  -v "$PWD/bench-seed:/speedtest:ro" -v "$PWD/cfg.json:/work/cfg.json:ro" \
+  -v "$KEY_FILE:/run/secrets/gs_apikey:ro" -v "$PWD/out:/work/out" \
+  --entrypoint python3 vllm-sm75-gpustack-bench:v0.1.7-beta2-v1 \
+  /opt/sm75-workbench/console/benchmark-runner.py /speedtest /work/cfg.json
+```
+
+`cfg.json` 的字段与本机结案那批用的值（`url` 换成你的网关口，`key_file` 指到第 4 步落盘的那份键文件，**键值不进命令行也不进日志**）：
+
+```json
+{
+  "tag": "gpustack-form-v1",
+  "url": "http://172.17.100.10:8180/v1/chat/completions",
+  "model": "qwen3.8-flash-next-w4a16-autoround",
+  "key_file": "/run/secrets/gs_apikey",
+  "lengths": [512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072],
+  "output": 1024,
+  "concurrency": 1,
+  "timeout": 30000,
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "presence_penalty": 0.0,
+  "frequency_penalty": 0.0,
+  "out_prefix": "/work/gpustack-form-v1"
+}
+```
+
+`lengths` 就是 README 那张表的九档（步长 128、倍数 2 展开即 512→131072），`output` **必须是 1024**——这把尺子的历史数字全在这一格上，填 16 就不是同一把尺了。`out_prefix` 决定结果落盘位置：加 `.json` 后即为产物文件，挂出来的宿主目录里就是取证件。
+
+**一处未逐字核对**：本节下面那组读数用的驱动另外复刻了测速台自己 `/ws/test` 的调用序（预热、两次网络时延采样、每档估提示词长度并算**动态超时**）。`benchmark-runner.py` 是否也走动态超时这一步没核对过；131072 那档最容易受它影响，复跑对不上数时先查这一处。
+
+另一条更省事的路：只认第 8 步那四道防假绿断言（实例 `running` ＋ 一次真实推理非空 ＋ 逐卡 ≤15500 MiB ＋ 零 OOM），速度另开窗口测。
 
 **跨形态比较的三条硬规矩**（都是踩过才写下的）：
 - 只跟**同一把尺的同一字段**比——面板/GPUStack 各自那个"平均总输出"字段，不要拿手算的九格算术均值去对它的均值。
 - 长度集合必须**逐格对齐**（九档就是九档，少一格直减不成立），且单格差落在 **±4.6%** 以内不得当结论。
 - **首格（512）常是冷启动离群点**，跨批比要么固定剔第一格，要么先补一档不计数的预热。
 
-本线目前有一枚 GPUStack 形态的读数，**未进对外表**：维护者判断疑因当时开着视频输入所致，**未归因**，
-所以这里不给数字，也不许拿它去算"GPUStack 比面板慢百分之几"。
+### 10a GPUStack 形态的九档读数（2026-10-18 20:10 北京结案）
+
+被测对象＝GPUStack 平台拉起的实例（镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v1`），经 8180 网关；尺子＝上一节那份 pinned 核心，与仓根三张表同一份字节；参数逐格同上；九档 512→131072；两批配对。
+
+| 口径 | 平均总输出 tokens/s | 平均总预填充 tokens/s |
+|---|---|---|
+| 面板字段（含首格，末格双计那式） | **52.81** | **2488.03** |
+| 九格算术均值 | 52.85 | — |
+| 九格中位 | 52.73 | — |
+| 剔首格算术 | 52.89 | 2738.77 |
+
+逐格输出（512→131072）：52.53／52.11／52.64／53.28／53.55／52.95／52.73／53.41／52.46。
+
+三条结论，**推导链在报告里，别只引这三句**：
+
+1. 比同权重的面板参照 57.04 低 **7.4%**，逐格 −4.26%～−9.22%、八格同向、多格超 ±4.6% 噪声门 ⇒ 是真差，不是批次噪声。
+2. **这一刀不在网关**。同尺改指引擎直连口 40015（同实例、同档，另两批）得 52.57，与走网关的 52.81 差 **+0.46%**（噪声带内），逐格 −2.71%～+3.61% 全在门内 ⇒ 差在被平台拉起的那个**引擎档**（镜像层／参数档），不在 Higress 路由与鉴权那一跳。**归因一项没做**，报告第八节列了五条候选（含 10-18 并档那笔、args 24 条与 0a7 档的差集）。
+3. **512 首格罚是本形态多出来的一笔**。四批全离群（预填充 586～700 对次格 2391～2657；首 token 延迟 837～889 ms 对 413～444 ms），但与省电档无关（起跑 8～10 秒八卡已进 P0/1590，每 10 秒采样器留痕）、与网关无关（直连路同样离群），而面板参照的 512 格不离群 ⇒ **机制未查**。跨形态比数一律**同时报含首格与剔首格两套**。
+
+**口径边界**：这组数属 GPUStack 形态，**不替换也不回填**仓根那三张面板形态表（43.31／57.73／57.04）；两形态相减得到的 7.4% 不得记到任何单一机制名下。10-14 那枚 55.34 的读数仍然作废在案（疑因当时开着视频输入，未归因），它不是本节的对照——本节四批都是纯文本档。
