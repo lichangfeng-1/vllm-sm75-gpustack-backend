@@ -22,3 +22,11 @@ __pycache__/
 # Generated dependencies and local test caches
 node_modules/
 .pytest_cache/
+
+# Optional build accelerators: only the .keep placeholders are tracked.
+.bench-cache/*
+!.bench-cache/.keep
+.hermes-cache/*
+!.hermes-cache/.keep
+.hermes-venv-cache/*
+!.hermes-venv-cache/.keep

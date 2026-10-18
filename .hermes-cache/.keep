@@ -1,0 +1,4 @@
+# Placeholder so the BuildKit bind mount in gpustack/Dockerfile.v1 always has a
+# source directory. Put the pinned Hermes checkout (commit in
+# ultra/source/benchlocal-verifiers/install-runtime.py) here to skip the GitHub
+# fetch; install-runtime.py still verifies HEAD.

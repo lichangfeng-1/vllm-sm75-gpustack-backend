@@ -42,8 +42,20 @@ const exec = promisify(execFile),
 const root = path.resolve(
   process.env.SM75_CONSOLE_ROOT || path.join(here, "data"),
 );
+const dshRoot = process.env.SM75_DSH_ROOT || "/dsh";
 fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 const store = new Store(root);
+// SM75_EXTENSIONS enables baked test extensions on first boot; users can still
+// toggle them in the panel afterwards.
+const requestedExtensions = new Set(
+  String(process.env.SM75_EXTENSIONS || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean),
+);
+for (const type of ["speedtest", "sql"])
+  if (requestedExtensions.has(type) && !store.get("extension", type))
+    store.put("extension", type, { enabled: true });
 const secretPath = path.join(root, "key");
 const existingInstall = fs.existsSync(secretPath);
 const auth = new Auth(root, {
@@ -71,9 +83,53 @@ if (process.env.VLLM_API_KEY) {
   fs.writeFileSync(accessFile + '.tmp', JSON.stringify({key:suppliedKey}), {mode:0o600});
   fs.renameSync(accessFile + '.tmp', accessFile);
 }
+// GPUStack owns the engine process: the panel started by panel-sidecar.py must
+// observe that engine instead of launching one of its own.
+const externalEngine = (() => {
+  const url = String(process.env.SM75_ENGINE_URL || "").trim().replace(/\/+$/, "");
+  if (!url) return null;
+  let args = [];
+  try { args = JSON.parse(process.env.SM75_ENGINE_ARGS || "[]"); } catch {}
+  if (!Array.isArray(args)) args = [];
+  args = args.filter((a) => typeof a === "string");
+  const modelPath = String(process.env.SM75_ENGINE_MODEL_PATH || "");
+  if (!args.length && modelPath)
+    args = [modelPath, ...(process.env.SM75_ENGINE_MODEL
+      ? ["--served-model-name", process.env.SM75_ENGINE_MODEL] : [])];
+  let parsed;
+  try { parsed = new URL(url); } catch { return null; }
+  const model = String(
+    process.env.SM75_ENGINE_MODEL || (args[0] ? path.basename(args[0]) : "model"),
+  );
+  return {
+    id: "gpustack-external",
+    url,
+    model,
+    port: Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80)),
+    key: String(process.env.SM75_ENGINE_KEY || ""),
+    args,
+    profile: {
+      id: "gpustack-external",
+      name: "GPUStack 托管 · " + model,
+      backend: "native",
+      port: Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80)),
+      args,
+      image: String(process.env.SM75_ENGINE_IMAGE || ""),
+      power: { mode: "off" },
+      managed: "gpustack",
+    },
+  };
+})();
+const isExternalProfile = (p) => !!externalEngine && p?.id === externalEngine.id;
 const standalone =
   process.env.SM75_SINGLE_CONTAINER === "1"
-    ? new Standalone(root, key, {onEngineChange: () => syncEngineKeyFile()}) : null;
+    ? new Standalone(root, key, {onEngineChange: () => syncEngineKeyFile()})
+    : externalEngine
+      ? new Standalone(root, key, {
+          externalEngine,
+          onEngineChange: () => syncEngineKeyFile(),
+        })
+      : null;
 const configuredEngineKey = () => {
   try {
     const k = JSON.parse(
@@ -84,7 +140,7 @@ const configuredEngineKey = () => {
     return key;
   }
 };
-const engineKey = () => standalone?.engine?.apiKey || configuredEngineKey();
+const engineKey = () => externalEngine?.key || standalone?.engine?.apiKey || configuredEngineKey();
 const syncEngineKeyFile = () => {
   try {
     const file = path.join(root, "engine-key.current");
@@ -93,13 +149,22 @@ const syncEngineKeyFile = () => {
   } catch {}
 };
 syncEngineKeyFile();
-const originalTests = new OriginalTests(root, store, engineKey);
+const originalTests = new OriginalTests(root, store, engineKey, {
+  engineUrl: externalEngine?.url || "http://127.0.0.1:8000",
+  external: !!externalEngine,
+});
 const benchLocal = new BenchLocal(root);
 const attachments = new Attachments(root);
 const profilesPath = path.join(root, "profiles.json");
 let profiles = fs.existsSync(profilesPath)
   ? JSON.parse(fs.readFileSync(profilesPath))
   : [];
+if (externalEngine)
+  profiles = [externalEngine.profile, ...profiles.filter((p) => p.id !== externalEngine.id)];
+const withExternal = (list) =>
+  externalEngine
+    ? [externalEngine.profile, ...list.filter((p) => p.id !== externalEngine.id)]
+    : list;
 const ledger = new JobLedger(store),
   jobs = ledger.jobs;
 let locks = new Set(),
@@ -165,7 +230,9 @@ const equal = equalSecret;
 function logged(req) {
   return !!auth.principal(req);
 }
-function save(next=profiles) {persistProfiles(profilesPath,next);}
+function save(next=profiles) {
+  persistProfiles(profilesPath, next.filter((p) => !isExternalProfile(p)));
+}
 function profile(id) {
   const p = profiles.find((p) => p.id === id);
   if (!p) throw Error("配置不存在");
@@ -335,7 +402,25 @@ async function gpu() {
     return [];
   }
 }
+async function externalEngineStatus() {
+  try {
+    const r = await fetch(externalEngine.url + "/health", {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (r.ok) return { running: true, phase: "ready", state: "running" };
+    if (r.status === 503) return { running: true, phase: "loading", state: "starting" };
+  } catch {}
+  let alive = false;
+  try {
+    const cmd = fs.readFileSync("/proc/1/cmdline", "utf8").replace(/\0/g, " ");
+    alive = /(^|[\/ ])vllm( |$)/.test(cmd);
+  } catch {}
+  return alive
+    ? { running: true, phase: "loading", state: "starting" }
+    : { running: false, phase: "stopped", state: "stopped" };
+}
 async function status(p) {
+  if (isExternalProfile(p)) return externalEngineStatus();
   if (standalone) return standalone.status(p);
   if (p.backend === "native")
     return { running: native.has(p.id), name: makeCommand(p, key).name };
@@ -347,7 +432,7 @@ async function status(p) {
   };
 }
 function endpoint(p) {
-  return `http://127.0.0.1:${p.port}`;
+  return isExternalProfile(p) ? externalEngine.url : `http://127.0.0.1:${p.port}`;
 }
 const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 async function waitHarnessReady() {
@@ -644,7 +729,7 @@ async function proxy(req, res, p, suffix, payload) {
 }
 async function benchModelContext(requireReady=false) {
   const engine=standalone?.engine;
-  const p=engine?.profile||profiles.find(x=>x.id===engine?.id)||profiles.find(x=>x.id===store.settings().defaultProfile)||profiles[0];
+  const p=engine?.profile||externalEngine?.profile||profiles.find(x=>x.id===engine?.id)||profiles.find(x=>x.id===store.settings().defaultProfile)||profiles[0];
   if(!p){if(requireReady)throw Error('请先启动模型');return {running:false,capabilities:{toggle:false,budget:false,reason:'请先启动模型'}};}
   const engineState=await status(p);
   const loading=!!engineState.running&&!!engineState.phase&&engineState.phase!=='ready';
@@ -744,7 +829,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (u.pathname === "/api/session" && req.method === "GET") {
       const principal = auth.principal(req);
-      return json(res, { authenticated: !!principal, principal, accountConfigured: !!auth.policy.account });
+      return json(res, { authenticated: !!principal, principal, accountConfigured: !!auth.policy.account,
+        externalEngine: !!externalEngine, engineModel: externalEngine?.model || null });
     }
     if (u.pathname === "/api/logout" && req.method === "POST") {
       if (!auth.originAllowed(req))
@@ -838,7 +924,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === "/api/workspace-file" && req.method === "GET") {
       const raw = (u.search.match(/[?&]path=([^&]*)/) || [])[1];
       const rel = raw ? decodeURIComponent(raw) : "";
-      const roots = ["/dsh/workspace/", "/dsh/home/"];
+      const roots = [path.join(dshRoot, "workspace") + "/", path.join(dshRoot, "home") + "/"];
       const abs = fs.realpathSync(
         path.normalize(rel.startsWith("/") ? rel : path.join(roots[0], rel)),
       );
@@ -1131,8 +1217,11 @@ const server = http.createServer(async (req, res) => {
         } else throw Error("无效操作");
         store.put("sampling", "main", data);
         if (standalone) {
-          fs.mkdirSync("/dsh/home", { recursive: true });
-          writeHarnessFile("/dsh/home/sm75-sampling.json", JSON.stringify(data));
+          fs.mkdirSync(path.join(dshRoot, "home"), { recursive: true });
+          writeHarnessFile(
+            path.join(dshRoot, "home", "sm75-sampling.json"),
+            JSON.stringify(data),
+          );
         }
       }
       let configured = [];
@@ -1204,6 +1293,10 @@ const server = http.createServer(async (req, res) => {
       return json(res,{ok:true});
     }
     if (u.pathname === '/api/runtime' && req.method === 'GET') {
+      if (externalEngine) {
+        const st = await externalEngineStatus();
+        return json(res,{profile:externalEngine.id,phase:st.phase,error:null,external:true});
+      }
       const id = standalone?.engine?.id || null;
       return json(res,{profile:id,phase:standalone?.engine?.phase || 'stopped',error:standalone?.lastStartError || null});
     }
@@ -1231,6 +1324,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (u.pathname === "/api/profiles") {
       if (req.method === "POST") {
+        if (externalEngine && b.id === externalEngine.id)
+          throw Error("GPUStack 托管模型由 GPUStack 管理，不能在面板修改配置");
         const p = validateProfile(unifiedProfile(b));
         if(shuttingDown||locks.has('model-switch')||locks.has('model-delete')||locks.has(p.id))throw Error('配置操作进行中，请稍后重试');
         locks.add(p.id);locks.add('model-switch');
@@ -1247,7 +1342,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === "/api/live-summary" && req.method === "GET") {
       const requested = u.searchParams.get("profile");
       const id =
-        requested || standalone?.engine?.id || store.settings().defaultProfile;
+        requested || standalone?.engine?.id || externalEngine?.id || store.settings().defaultProfile;
       const p = id ? profiles.find((p) => p.id === id) : null;
       if (requested && !p) return json(res, { error: "运行配置不存在" }, 404);
       const hw = await hardware().catch(() => null);
@@ -1273,9 +1368,13 @@ const server = http.createServer(async (req, res) => {
         gpus: await gpu(),
         root,
         version: JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8")).version,
-        scope: standalone
-          ? "单容器内模型与工作区进程"
-          : "仅管理 sm75-v015-test-* 候选容器",
+        external: !!externalEngine,
+        engineModel: externalEngine?.model || null,
+        scope: externalEngine
+          ? "GPUStack 托管的模型；启停与模型连接由 GPUStack 管理"
+          : standalone
+            ? "单容器内模型与工作区进程"
+            : "仅管理 sm75-v015-test-* 候选容器",
       });
     if (u.pathname === "/api/jobs") {
       if (req.method === "POST" && b.cancel) {
@@ -1354,6 +1453,15 @@ const server = http.createServer(async (req, res) => {
     if (match) {
       const p = profile(match[1]),
         action = match[2];
+      if (isExternalProfile(p) && ["start", "stop", "delete"].includes(action))
+        throw Error("GPUStack 托管模型请在其模型实例页启停或删除，面板不接管引擎");
+      if (isExternalProfile(p) && action === "logs")
+        return json(res, {
+          text: "GPUStack 托管模型的日志请在 GPUStack 的模型实例日志中查看。",
+          offset: 0,
+          size: 0,
+          reset: true,
+        });
       if (action === "status") return json(res, await status(p));
       if(action==='delete'&&req.method==='POST'){
         if(shuttingDown)throw Error('管理服务正在关闭');
@@ -1370,7 +1478,7 @@ const server = http.createServer(async (req, res) => {
           }
         };
         const result=await deleteRuntimeProfile({id:p.id,profiles,profilesPath,store,status:checkedStatus,locks});
-        profiles=result.profiles;
+        profiles=withExternal(result.profiles);
         return json(res,{ok:true,deleted:result.deleted});
       }
       if (action === "history")

@@ -34,7 +34,15 @@ export class Standalone {
     this.onEngineChange = options.onEngineChange || (() => {});
     this.root = root;
     this.key = key;
-    this.engine = null;
+    this.external = options.externalEngine || null;
+    this.engine = this.external
+      ? {
+          id: this.external.id,
+          profile: this.external.profile,
+          apiKey: this.external.key || key,
+          phase: "ready",
+        }
+      : null;
     this.harness = null;
     this.supervisor = null;
     this.lmcache = new ManagedLMCache({launch: (...args) => this.launch(...args), terminate: child => this.terminate(child), logRoot: root});
@@ -132,6 +140,7 @@ export class Standalone {
     };
   }
   async start(p) {
+    if (this.external) throw Error("GPUStack 托管模型由平台启停");
     if (this.closing) throw Error("管理服务正在关闭");
     if (this.starting) throw Error("模型启动进行中");
     if (this.engine) {
@@ -260,6 +269,7 @@ export class Standalone {
     }
   }
   async stop(p) {
+    if (this.external) return;
     if (this.starting) throw Error("模型启动进行中");
     if (this.engine?.id !== p.id) return;
     if (this.supervisor) {
@@ -306,10 +316,11 @@ export class Standalone {
       if (this.harness.id !== p.id && this.engine?.phase === 'ready') await this.updateHarnessModel(p);
       return;
     }
-    const home = "/dsh/home",
-      work = "/dsh/workspace";
-    fs.mkdirSync("/dsh", {recursive:true,mode:0o755});
-    fs.chmodSync("/dsh",0o755);
+    const home = path.join(process.env.SM75_DSH_ROOT || "/dsh", "home"),
+      work = path.join(process.env.SM75_DSH_ROOT || "/dsh", "workspace");
+    const dshHome = process.env.SM75_DSH_ROOT || "/dsh";
+    fs.mkdirSync(dshHome, {recursive:true,mode:0o755});
+    fs.chmodSync(dshHome,0o755);
     for (const dir of [home, work]) {
       fs.mkdirSync(dir, { recursive: true });
       fs.chownSync(dir, 1000, 1000);

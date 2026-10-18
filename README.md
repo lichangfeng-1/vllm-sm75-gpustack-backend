@@ -41,42 +41,44 @@ docker pull quay.io/gpustack/gpustack:v2.2.3
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
 
-# 2) 两段构建：第一段（补丁门＋基座）→ 第二段（四层：pcieipc／incple／时区／面板）
+# 2) 一条命令：vLLM 基座 → 自定义后端（基座是内部构建缓存；--rebuild-base 强制重建，
+#    --drop-base 构建成功后删掉基座 tag。手动两段等价命令见 run-book §2）
 bash gpustack/preflight-sources-v1.sh
-bash gpustack/build-gpustack-v1.sh --build
-docker build --file gpustack/Dockerfile.v1 --target panel-layer \
-  --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
-  -t vllm-sm75-gpustack:v0.1.7-beta2-v1 .
+bash gpustack/build-backend-v1.sh
 
 # 3) 起 GPUStack（server 与 worker 的具体命令见 run-book §3／§5）
 #    同机部署 worker 不需要 token；跨机用 GET /v2/clusters/1/registration-token 取
 
 # 4) 注册后端版本：版本名 0.1.7-sm75.1-custom，镜像填上面那枚 tag，
 #    入口覆盖填：python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
-#    （也可以用 gpustack/set-panel-autostart-v1.sh 一次写好后端入口与面板三 env）
+#    （也可以用 gpustack/set-panel-autostart-v1.sh 一次写好后端入口、面板三 env 与 SM75_EXTENSIONS）
 
 # 5) 部署模型：表单里整块粘
 #    gpustack/args-paste-v1.txt（24 行）＋ gpustack/env-paste-v1.txt（25 行）
+#    要面板与三种测试，再粘 gpustack/env-paste-panel-v1.txt（4 行）
 bash gpustack/lint-paste-v1.sh      # 末行必须是 LINT_PASTE_OK env=25 args=24
 ```
 
-**第二段必须取 `--target panel-layer`**：它是超集，含前三层＋面板负载＋BenchLocal 校验器运行时，一枚镜像同时承担"跑模型／起面板／起校验容器"三种角色。
+**链条末端必须取 `--target panel-layer`**：它是超集，含前三层＋面板负载＋BenchLocal 校验器运行时＋随仓测试资产，一枚镜像同时承担"跑模型／起面板／起校验容器"三种角色。
 
 ## 4 控制面板（可选，与模型同一个镜像、同一个模型行）
 
-镜像里已带面板（node v22.23.2 ＋ `/opt/sm75-workbench`）。要让面板随模型一起起来，在模型行加三格：
+镜像里已带面板（node v22.23.2 ＋ `/opt/sm75-workbench`）。要让面板和扩展随模型一起起来，在 **GPUStack 模型部署表单的“环境变量”** 里加下面四格（与 25 行 env 块同一处，整块粘贴；这不是宿主 shell 的 `export`）：
 
 ```
 SM75_PANEL_AUTOSTART=1
 SM75_CONSOLE_HOST=0.0.0.0
 SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
+SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 ```
 
+- `SM75_EXTENSIONS` 是扩展开关：`panel`（面板）、`harness`（Ultra 工作台 DSH）、`benchlocal`（三枚校验器）、`speedtest`／`sql`（测试资产启用）；只想要面板就写 `panel`。
+- 后端版本的入口覆盖仍要填：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`（`gpustack/set-panel-autostart-v1.sh --apply` 会连同上面四格一起写好）。
 - 面板口 **1616**（`SM75_CONSOLE_PORT` 可改）；登录令牌在 `$SM75_CONSOLE_ROOT/key`；数据落在 worker 数据目录，重启不丢。
 - 不设 `SM75_PANEL_AUTOSTART` 时入口包装纯透传，引擎行为与不带这一层完全一致。
-- 单独起面板、三枚 BenchLocal 校验容器与雷达图步骤，见 run-book 第 11 节。
+- **GPUStack 形态下面板自动进入外部引擎模式**：隐藏“模型库／运行配置／设置”，启停与模型连接交给 GPUStack；速度/SQL 测试、BenchLocal、监控照常使用。
 
-> 已知边界：面板里的 **使用统计／工作台／插件** 三个 native 页与 **BenchLocal 的 harness** 依赖 DSH 工作台（`/opt/harness`，585 MB）。该组件目前只在 Ultra 工作台形态下可用；本仓正在做"扩展开关随模型起"的版本，完成前请按 run-book 第 11 节以独立容器方式使用。
+> Ultra 工作台形态（使用统计／工作台／插件）由扩展模块在模型容器内启动 DSH；DSH 的 `/dsh/home`、`/dsh/workspace` 落在 worker 数据目录，重启保留。DSH 的独立容器用法见 run-book 第 11 节。
 
 ## 5 参数与文档
 

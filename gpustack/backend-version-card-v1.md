@@ -10,7 +10,7 @@
 |---|---|---|
 | 后端类型 type | 自定义（custom） | 不走内置镜像目录，镜像由这个仓构建 |
 | 版本名 backend_version | `0.1.7-sm75.1-custom` | 数字形态＋`-custom` 后缀。GPUStack 用 `should_default_to_ray`（`gpustack/utils/command.py:416-433`，阈值常量 `:413`＝`0.18.0`）选分布式执行器：版本名不含 `-custom` 一律回落 Ray，而标准镜像不带 Ray；解析抛异常也回落 Ray（`except Exception: return True`）。加 `-custom` 就是把"镜像里没有 Ray"告诉平台。单 worker 部署不进该分支（`gpustack/worker/backends/vllm.py:261/280` 需要 distributed_follower／distributed_leader 才触发），所以本卡只承诺单机 |
-| 镜像名称 image_name | `vllm-sm75-gpustack:v0.1.7-beta2-v1` | 完整 tag 写进这一个字段，不拆成"仓库＋标签"两处。**自 2026-10-19 起这枚镜像含层 4 面板负载**（node v22.23.2 ＋ `/opt/sm75-workbench` ＋ benchlocal `runtime-lock.json`），同一枚镜像可承担"跑模型／起面板／起三枚校验容器"三种角色 |
+| 镜像名称 image_name | `vllm-sm75-gpustack:v0.1.7-beta2-v1` | 完整 tag 写进这一个字段，不拆成"仓库＋标签"两处。**自 2026-10-19 起这枚镜像含层 4 面板负载与扩展模块**（node v22.23.2 ＋ `/opt/sm75-workbench` ＋ `/opt/harness` DSH ＋ `runtime-lock.json` ＋ 随仓速度/SQL 资产），同一枚镜像可承担"跑模型／起面板／起三枚校验容器／Ultra 工作台"四种角色 |
 | 框架 custom_framework | `CUDA` | 该字段用于部署与兼容性检查（`gpustack/schemas/inference_backend.py:41`，字段声明 `:49`） |
 | 入口覆盖 entrypoint | 推荐 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve` | GPUStack 用这一格**整条覆盖**镜像 ENTRYPOINT（`gpustack/worker/backends/vllm.py:171-177`，字符串经 `shlex.split`；见 `schemas/inference_backend.py:277-281`）。包装只在模型行设了 `SM75_PANEL_AUTOSTART=1` 时先把面板拉到后台，其余时候原样 exec `vllm serve`，所以不设开关时行为与"留空"完全一致。**留空**仍是合法形态（只有模型、没有面板） |
 | 执行命令 run_command | 留空 | 留空＝沿用 GPUStack 内置默认命令与版本门参数；填了才进替换分支（`gpustack/worker/backends/base.py:817-821`），内置拼装被顶掉 |

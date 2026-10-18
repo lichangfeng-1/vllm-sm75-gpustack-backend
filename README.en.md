@@ -45,25 +45,27 @@ docker pull quay.io/gpustack/gpustack:v2.2.3
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
 
-# 2) Two-stage build: stage 1 (patch gates + base) -> stage 2 (pcieipc / incple / timezone / panel)
+# 2) One command: vLLM base -> custom backend (the SM75 base is an internal cache;
+#    --rebuild-base forces a rebuild, --drop-base removes the base tag afterwards.
+#    Manual two-step path: run-book section 2)
 bash gpustack/preflight-sources-v1.sh
-bash gpustack/build-gpustack-v1.sh --build
-docker build --file gpustack/Dockerfile.v1 --target panel-layer \
-  --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
-  -t vllm-sm75-gpustack:v0.1.7-beta2-v1 .
+bash gpustack/build-backend-v1.sh
 
 # 3) Start GPUStack (server/worker commands: run-book sections 3 and 5)
 
 # 4) Register the backend version: 0.1.7-sm75.1-custom, image = the tag above,
 #    entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
+#    (set-panel-autostart-v1.sh also writes the panel trio and SM75_EXTENSIONS)
 
-# 5) Deploy the model: paste the two blocks
+# 5) Deploy the model: paste the blocks
 #    gpustack/args-paste-v1.txt (24 lines) + gpustack/env-paste-v1.txt (25 lines)
+#    add gpustack/env-paste-panel-v1.txt (4 lines) for the console and the three test suites
 bash gpustack/lint-paste-v1.sh      # last line must read LINT_PASTE_OK env=25 args=24
 ```
 
-**Stage 2 must target `panel-layer`**: it is a superset (three layers + console payload + BenchLocal
-verifier runtime), so one image serves as model backend, console host and verifier host.
+**The chain end must target `panel-layer`**: it is a superset (three layers + console payload +
+BenchLocal verifier runtime + vendored test assets), so one image serves as model backend, console
+host and verifier host.
 
 ## 4 Optional web console (same image, same model row)
 

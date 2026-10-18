@@ -1,0 +1,4 @@
+# Placeholder so the BuildKit bind mount in gpustack/Dockerfile.v1 always has a
+# source directory. Put the four pinned archives here (go/rust/chrome/agent-browser)
+# to build without re-downloading; every file is still sha256-verified by
+# ultra/source/benchlocal-verifiers/install-runtime.py.

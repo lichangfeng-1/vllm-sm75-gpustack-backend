@@ -52,7 +52,29 @@ cd vllm-sm75-gpustack-backend
 
 ## 2 探活并构建后端镜像
 
-镜像分两段构建。**两段都跑完，第 6 节注册时才有的可填**：第一段产出基座层 `vllm-sm75:v0.1.7-beta2`，第二段在它上面追加我们的四层（层1 pcieipc／层2 incple／层3 时区／层4 面板负载），产出后端镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v1`。
+**从上游 vLLM 基座到自定义后端是一条链，不是两个产品。** 基座是 `vllm/vllm-openai:v0.30.0-cu129`（钉在 `docker/Dockerfile:3`），推荐用一条 `build-backend-v1.sh` 命令把它推到末端；下面的两段命令只是排错时的手动等价路径：
+
+```text
+vllm/vllm-openai:v0.30.0-cu129
+  ↓ bash gpustack/build-gpustack-v1.sh --build
+vllm-sm75:v0.1.7-beta2                     （SM75 基座：补丁门＋上游树零改动）
+  ↓ docker build -f gpustack/Dockerfile.v1 --target panel-layer …
+vllm-sm75-gpustack:v0.1.7-beta2-v1         （自定义后端：四层全上，可直接注册）
+```
+
+`vllm-sm75` 只是链条中间产物，**不是后端镜像**；第 6 节注册时必须用链条末端那枚 `vllm-sm75-gpustack`。两段都跑完，注册时才有的可填。
+
+**推荐只跑一条命令**（基座是内部构建缓存；已在本地就复用）：
+
+```bash
+bash gpustack/preflight-sources-v1.sh
+bash gpustack/build-backend-v1.sh            # 基座缺失时才重建；--rebuild-base 强制重来
+docker images vllm-sm75-gpustack             # 期望 v0.1.7-beta2-v1
+```
+
+`--drop-base` 会在后端构建成功后删掉 `vllm-sm75:v0.1.7-beta2` 这个中间 tag（省盘，但下次要重建基座）。Docker 本身没有“无中间层”的构建，能去掉的是**中间产物 tag**，不是构建层。
+
+等价的手动两段（排错或分步跟日志时用）：
 
 ```bash
 bash gpustack/preflight-sources-v1.sh          # 只读 HEAD 探测，红就别往下走
@@ -81,12 +103,14 @@ docker images vllm-sm75-gpustack               # 期望 tag v0.1.7-beta2-v1
 
 ```bash
 docker create --name sm75-gpustack-server --hostname sm75-gpustack-server \
-  --network bridge --restart no --env TZ=Asia/Shanghai \
+  --network bridge --restart unless-stopped --env TZ=Asia/Shanghai \
   -p ${HOST_IP}:8180:80 \
   --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
   quay.io/gpustack/gpustack:v2.2.3
 docker start sm75-gpustack-server
 ```
+
+`unless-stopped` 的含义：进程崩了或宿主机重启会自动拉起；只有你显式 `docker stop` 之后才保持停止。要临时停机维护就用 `docker stop`，别用 `docker update` 改成 `no`（后者会让一次宿主重启后整套平台不再自启）。
 
 **两个坑，都是实跑撞过的**：
 
@@ -115,7 +139,7 @@ docker exec sm75-gpustack-server cat /var/lib/gpustack/initial_admin_password
 
 ```bash
 docker create --name sm75-gpustack-worker --hostname sm75-gpustack-worker \
-  --restart no --env TZ=Asia/Shanghai \
+  --restart unless-stopped --env TZ=Asia/Shanghai \
   --privileged --network host --runtime nvidia \
   --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
   --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
@@ -403,7 +427,7 @@ curl -s -X PUT -H "X-API-Key: ${GS_KEY}" -H 'Content-Type: application/json' \
 **只想单独起面板（不跑模型）**：用同一个镜像，把入口切到 Ultra 分支（不给命令行参数即可）：
 
 ```bash
-docker run -d --name sm75-panel --restart no --runtime nvidia \
+docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
   --shm-size 64g -p 1616:1616 -p 18001:8000 \
   -e SM75_EDITION=ultra -e SM75_CONSOLE_ROOT=/data \
   -e SM75_CONSOLE_HOST=0.0.0.0 \
@@ -689,27 +713,29 @@ entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
 
 ### 11b 如何更新 DSH（工作台）版本
 
-DSH 的版本钉在仓内 `ultra/harness/package.json`（当前 `0.1.7-alpha.2`）。它还没进后端镜像（见 11 节的"已知边界"），等扩展开关落地后，更新流程就是这四步：
+DSH 已进后端镜像：`/opt/harness/node_modules` 由 `Dockerfile.v1` 的 `harness` stage 用仓内 `ultra/harness/package.json`＋锁文件构建；层 4 再运行 `install-native-plugins.mjs` 装入 SM75 插件与品牌补丁。版本钉在仓内 `ultra/harness/package.json`（当前 `0.1.7-alpha.2`）。模型容器里打开“工作台/使用统计/插件”时，console 按需启动 DSH；`DSH_HOME`／`HOME` 落在 `/var/lib/gpustack/dsh/{home,workspace}`，随 worker 数据目录持久化。
 
 ```bash
-# 1) 改版本号（只改这一处）
+# 1) 改版本号（只改这一处）并重生成锁文件（锁与 package.json 必须同步）
 #    ultra/harness/package.json -> "@deepseek-ai/dsh": "<新版本>"
-#    并用同一 Node 镜像重生成锁文件（锁文件与 package.json 必须同步，否则 npm ci 会拒绝）
 docker run --rm -v "$PWD/ultra/harness:/w" -w /w \
   docker.m.daocloud.io/library/node:22.23.2-bookworm-slim \
   npm install --package-lock-only --registry=https://registry.npmmirror.com
 
-# 2) 重建层 4（只重跑第二段，第一段缓存复用）
+# 2) 兼容性门（必须先过）：品牌补丁与插件安装器会校验 DSH 版本和包锚点
+#    - ultra/source/console/apply-branding.mjs 的 supportedHarnessVersion
+#    - dsh-client-ui-layout / dsh-llm-pi-ai / dsh-web-frontend 是否仍是被依赖的直接包
+#    - install-native-plugins.mjs 能否在临时容器里成功跑完
+#    任一失锚 ⇒ 先改补丁，不要直接重建镜像。
+
+# 3) 重建层 4（第一段缓存复用）
 docker build --file gpustack/Dockerfile.v1 --target panel-layer \
   --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
   -t vllm-sm75-gpustack:v0.1.7-beta2-v1 .
 
-# 3) 起一个临时面板容器，确认 DSH 能起来（不挂卡）
-docker run --rm --entrypoint node vllm-sm75-gpustack:v0.1.7-beta2-v1 \
-  /opt/harness/node_modules/@deepseek-ai/dsh/lib/bin.js --version
-
-# 4) 面板里点开"工作台/使用统计"，能出页面才算过；出不来就回退版本号重来
+# 4) 起面板，点开“工作台/使用统计/插件”能出页面才算过；失败看
+#    $SM75_CONSOLE_ROOT/harness-process.log，并回退版本号。
 ```
 
 **版本参考（2026-10-19 npm 国内镜像现读）**：`latest=0.2.0-rc.2`、`alpha=0.2.1-alpha.5`、`next=0.2.1-rc.2`；现装 `0.1.7-alpha.2`。
-**跨 minor 升级要当心**：DSH 的 `settings.yaml` 与插件补丁格式可能变，先升一个 rc 验证、别直接跟 `alpha`。
+**0.2.0-rc.2 不是 drop-in**：它的客户端包结构已变（`dsh-client-ui-layout`／`dsh-llm-pi-ai`／`dsh-web-frontend` 不再以直接依赖出现），品牌与插件补丁需要重做；候选 `package.json`／锁文件已存 `K:\sm75\调度\dsh-0.2.0-rc.2-candidate\`。跨 minor 升级先升 rc 验证，别直接跟 `alpha`。

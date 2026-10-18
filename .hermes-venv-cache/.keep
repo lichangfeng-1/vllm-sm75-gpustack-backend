@@ -1,0 +1,3 @@
+# Placeholder so the BuildKit bind mount in gpustack/Dockerfile.v1 always has a
+# source directory. A prebuilt /opt/hermes-venv can be placed here to skip pip
+# downloads; install-runtime.py still runs pip check and the package checks.

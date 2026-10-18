@@ -11,7 +11,7 @@
 | 省电常驻/自动休眠（pstate 包装脚本） | 需改启动入口＋宿主 libnvidia-api | 待服务器盘点 | **用不了。** 2026-10-11 在服务器上查过：宿主的三个标准路径里都没有这个库，只有一份私有副本，靠挂载喂给正在跑的引擎。而 GPUStack 自己起的 runner 容器没有挂东西的口子，所以"用宿主自带的库进 P8"这条路走不通，GPUStack 方案不含省电。查的过程见本文第一节。 |
 | CPU KV 卸载预检 | 需改启动入口 | 跟省电项一起用不了 | 它得先能改启动入口，而下一节会说到这个口子一直是默认的。**这一条是推出来的，没有实测**；它到底能省多少、要付多少，见第三节那一行。 |
 | 档位模板展开（profile） | 需入口包装 | GPUStack 场景不做 | 维持不做；档位由参数粘贴块整块表达，展开器不进 GPUStack 链路 |
-| 控制面板（可选，含 BenchLocal 与雷达图） | 后端版本 `entrypoint` 串 ＋ 模型 env 三格 | 需改启动入口 | **能用**（2026-10-19 实测）：入口指到 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`，模型行设 `SM75_PANEL_AUTOSTART=1`/`SM75_CONSOLE_HOST=0.0.0.0`/`SM75_CONSOLE_ROOT=/var/lib/gpustack/panel` 即随模型起（默认 1616，可用 `SM75_CONSOLE_PORT` 改）；不设开关时纯透传。三枚校验容器也用同一枚镜像（层 4 带 `runtime-lock.json` 与 `unified=1` 标签） |
+| 控制面板（可选，含 BenchLocal、速度/SQL 与 Ultra 工作台） | 后端版本 `entrypoint` 串 ＋ 模型 env 四格（面板三格＋`SM75_EXTENSIONS`） | 需改启动入口 | **能用**（2026-10-19 实测）：入口指到 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`，模型行设 `SM75_PANEL_AUTOSTART=1`/`SM75_CONSOLE_HOST=0.0.0.0`/`SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`/`SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql` 即随模型起（默认 1616，可用 `SM75_CONSOLE_PORT` 改）；不设开关时纯透传。**GPUStack 形态自动进入外部引擎模式**：隐藏模型库/运行配置/设置，测试与工作台接平台引擎；DSH 工作台随模型容器启动，`/dsh` 落在 `/var/lib/gpustack/dsh`。 |
 
 **入口覆盖自 2026-10-19 起不再是"默认留空"**：面板形态必须覆写它（`gpustack/worker/backends/vllm.py:171-177` 会用后端版本的 `entrypoint` 整条替换镜像 ENTRYPOINT）；不用面板时可以留空，两者都合法。
 

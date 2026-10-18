@@ -874,6 +874,7 @@ export function mountConsole(document = globalThis.document, options = {}) {
     featureBackup = {};
   let profiles = [],
     active = "",
+    externalEngineMode = false,
     current =
       options.initialPage ||
       new URLSearchParams(location.search).get("page") ||
@@ -1164,6 +1165,8 @@ export function mountConsole(document = globalThis.document, options = {}) {
         if (!r.ok) throw Error("登录状态暂不可用");
         const d = await r.json();
         if (disposed || generation !== authGeneration) return;
+        externalEngineMode = !!d.externalEngine;
+        applyEngineMode();
         syncLoginMode(d.accountConfigured);
         if (!d.authenticated) setAuth("anonymous");
         else if (authState !== "authenticated" || !workspaceLoaded) await enterWorkspace();
@@ -1214,9 +1217,18 @@ export function mountConsole(document = globalThis.document, options = {}) {
     if (!active) throw Error("请先选择运行配置");
     return "/console-api/profiles/" + active + "/" + action;
   }
+  function applyEngineMode() {
+    if (!externalEngineMode) return;
+    document.documentElement.dataset.externalEngine = "1";
+    for (const el of document.querySelectorAll("[data-page]"))
+      if (["models", "profiles", "settings"].includes(el.dataset.page)) el.hidden = true;
+    $("active").disabled = true;
+    $("active").title = "GPUStack 托管模型（启停由 GPUStack 管理）";
+  }
   async function page(id, { record = true } = {}) {
     if (id === "overview") id = "monitor";
     if (id === "benchmarks") id = "tests";
+    if (externalEngineMode && ["models", "profiles", "settings"].includes(id)) id = "tests";
     if (!Object.hasOwn(routeTitles, id)) id = "profiles";
     const navigation = ++navigationGeneration;
     pendingNavigation = navigation;

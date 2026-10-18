@@ -2,6 +2,8 @@ import {argValue, parseTokenCount} from './public/context-config.js';
 import fs from 'node:fs';
 import {chatConfig, harnessThinking, thinkingBudgets} from './chat-config.mjs';
 
+const DSH_ROOT = process.env.SM75_DSH_ROOT || '/dsh';
+
 export function harnessPath(url) {
   return url.replace(/^\/(?:dsh|harness-ui)(?=\/|\?|$)/, '') || '/';
 }
@@ -10,10 +12,11 @@ export function managedHarnessConfig(profile) {
   const args = profile.args;
   const model = argValue(args, '--served-model-name', args[0]);
   const contextWindow = parseTokenCount(argValue(args, '--max-model-len'), {auto: true});
+  const baseURL = (process.env.SM75_ENGINE_URL || `http://127.0.0.1:${profile.port}`).replace(/\/+$/, '') + '/v1';
   return {
     provider: {
       apiKeyEnv: 'SM75_ENGINE_KEY', api: 'openai-completions', thinkingBudgets,
-      baseURL: `http://127.0.0.1:${profile.port}/v1`,
+      baseURL,
       compat: {supportsDeveloperRole: false, maxTokensField: 'max_tokens'},
       models: [{id: model, input: chatConfig(profile).input, ...harnessThinking(profile),
         ...(contextWindow > 0 ? {contextWindow} : {})}],
@@ -29,9 +32,9 @@ export function harnessPatch(config) {
     // The container has no desktop XDG directory service. This config is only
     // the native first-use directory policy, not a Workspace registry edit.
     // Native initializeDefault reuses existing workspaces without renaming them.
-    {id: 'workspace-controller', config: {documentsDirectory: '/dsh/workspace'}},
+    {id: 'workspace-controller', config: {documentsDirectory: DSH_ROOT + '/workspace'}},
     // The upstream web profile disables its query index while exposing search.
-    {id: 'session-query-sqlite', config: {path: '/dsh/home/indexes/session-search.sqlite', openAt: 'first-search'}},
+    {id: 'session-query-sqlite', config: {path: DSH_ROOT + '/home/indexes/session-search.sqlite', openAt: 'first-search'}},
     {insert: [
       {id: 'sm75-workbench', name: 'sm75-workbench', config},
       {id: 'sm75-brand', name: 'sm75-brand'},

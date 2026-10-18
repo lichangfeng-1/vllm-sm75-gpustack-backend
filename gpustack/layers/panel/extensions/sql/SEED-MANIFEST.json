@@ -1,0 +1,284 @@
+{
+ "project": "wangxian001/SQL_LLM_benchmark",
+ "commit": "2aa49062f411928acd02d90ac8dddffe1b77a00e",
+ "files": {
+  "manifest.json": {
+   "sha256": "fa99ca71efdde3e688a5d1061d0fe15a3d3661d6fbd7f50e8b143192f9968a1c",
+   "bytes": 935
+  },
+  "run_server.py": {
+   "sha256": "bb2a833aef4af439942c18401da5305c5150a336442684a99b1da41261e33af2",
+   "bytes": 12768
+  },
+  "schema.json": {
+   "sha256": "947fcf7dc51d9d814ed24940e686b786a3822b19add7882fec8daa62b7466379",
+   "bytes": 2390
+  },
+  "sql_benchmark.html": {
+   "sha256": "f8209c2dd5421070be58ffac7b6bf4b0cd6c713f51ed4fec7f3ef4bf4abcf3fc",
+   "bytes": 194452
+  },
+  "deps/_duckdb.cpython-312-x86_64-linux-gnu.so": {
+   "sha256": "1dc14d9f59acaf3e22da3863261b967e02868e22da8ebeaced3188c2943676fa",
+   "bytes": 57691640
+  },
+  "deps/duckdb/__init__.py": {
+   "sha256": "2b20aa68f219791777a195cfec5f87fff610299d26bfbc1e6ef7692476c704a1",
+   "bytes": 7507
+  },
+  "deps/duckdb/_dbapi_type_object.py": {
+   "sha256": "356fa6dd8729270c29438502f658faf1e8a8501d4d6dd9a069a4080fabfd79c5",
+   "bytes": 6980
+  },
+  "deps/duckdb/_version.py": {
+   "sha256": "6040f40d403aed1dd8421cf7858ff4400fe0a136962b61c4d9ea68a710f1ac87",
+   "bytes": 844
+  },
+  "deps/duckdb/bytes_io_wrapper.py": {
+   "sha256": "ca66802e9d502508216f5771f23feb2ea196cf7a19ea084ade3b76b23a231102",
+   "bytes": 3081
+  },
+  "deps/duckdb/filesystem.py": {
+   "sha256": "1a3297f24359ac64d5b59911aeeea93ceebe039a163f50ddf108bcf49eb64ea0",
+   "bytes": 1299
+  },
+  "deps/duckdb/polars_io.py": {
+   "sha256": "9d1d6b3f050664bff639b919463d2c5533a5fb5c488ac43b91fcd75d4054c07f",
+   "bytes": 11057
+  },
+  "deps/duckdb/py.typed": {
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "bytes": 0
+  },
+  "deps/duckdb/udf.py": {
+   "sha256": "274b8d4f99c0cb17acb915bf3853a926822e7032234586e66a8821e0af39d7d2",
+   "bytes": 773
+  },
+  "deps/duckdb/experimental/__init__.py": {
+   "sha256": "42e84870dc8a9da9212423d343fcba88ee4c2ac5ea327caab04ee93e9bb924a4",
+   "bytes": 62
+  },
+  "deps/duckdb/experimental/spark/LICENSE": {
+   "sha256": "ff5aa49c52e9830627582e9854fa76827d19c3b040b856162d172d72a9e95067",
+   "bytes": 13387
+  },
+  "deps/duckdb/experimental/spark/__init__.py": {
+   "sha256": "9fcf20ed45ae92c8449eac61a98288c6ea9ea8104820f252abfd0b300ab792f0",
+   "bytes": 267
+  },
+  "deps/duckdb/experimental/spark/_globals.py": {
+   "sha256": "70e663ced86d6d8f69ae2b24be9c3e549238a10449a6d78b72d875bae9d9986b",
+   "bytes": 2485
+  },
+  "deps/duckdb/experimental/spark/_typing.py": {
+   "sha256": "b9cb03eb7c92a8066b9b15e36ebb94951708fc1fcdd75624680b9b1c4f6b3384",
+   "bytes": 1528
+  },
+  "deps/duckdb/experimental/spark/conf.py": {
+   "sha256": "4e06ebb6e67cb75848438ab001027537d4011aa6d1b5b1d16106b2cb1bef9dea",
+   "bytes": 1590
+  },
+  "deps/duckdb/experimental/spark/context.py": {
+   "sha256": "10e379724429f60d5880c54d06f1e53aa00d9adecdbfcea2c16ae1e28dd78a61",
+   "bytes": 6803
+  },
+  "deps/duckdb/experimental/spark/exception.py": {
+   "sha256": "9725a91cb3cfc0094152b262714fc5edf960351dab3baaeb864777f9b68c6871",
+   "bytes": 633
+  },
+  "deps/duckdb/experimental/spark/sql/__init__.py": {
+   "sha256": "0ec6b1ee72e8c329f21ff6ec641ed9845b2d3b0dfce82f4582043632692130c0",
+   "bytes": 270
+  },
+  "deps/duckdb/experimental/spark/sql/_typing.py": {
+   "sha256": "1671a0ce3f2e545ed34eb2765fde08068ed75bf7b3610f03614c19f303fe3c84",
+   "bytes": 2293
+  },
+  "deps/duckdb/experimental/spark/sql/catalog.py": {
+   "sha256": "027d610c5848edec9fda29dd9f46e92458c4139416170f85983faed3724c1535",
+   "bytes": 2508
+  },
+  "deps/duckdb/experimental/spark/sql/column.py": {
+   "sha256": "edb4d95a59c2a92d1abe83fb3e0d74668a7570d8effbf325ceedf2f98e17f05b",
+   "bytes": 11093
+  },
+  "deps/duckdb/experimental/spark/sql/conf.py": {
+   "sha256": "0d0d3866826eec8417f39e69db679264b301cfb696866f3260c58d3e2e94e546",
+   "bytes": 763
+  },
+  "deps/duckdb/experimental/spark/sql/dataframe.py": {
+   "sha256": "82d15c605062385f545ccb156817127b5fd11592a059648c08f82af1c6e67968",
+   "bytes": 47518
+  },
+  "deps/duckdb/experimental/spark/sql/functions.py": {
+   "sha256": "1f9fd9bac54397849a969e742670d1dd62f3ee909f91b41d8158bc603391e8e4",
+   "bytes": 175955
+  },
+  "deps/duckdb/experimental/spark/sql/group.py": {
+   "sha256": "5072822b05c1d8ce7d2a2feda6c682e6cd74131a9574c2c55619dc639711e9da",
+   "bytes": 13528
+  },
+  "deps/duckdb/experimental/spark/sql/readwriter.py": {
+   "sha256": "60d5ed1fce9d5054a23c25be4d8bd9b7dfa8efcd5da1ee71352181d0747586dd",
+   "bytes": 17479
+  },
+  "deps/duckdb/experimental/spark/sql/session.py": {
+   "sha256": "60a478da6f76a6e140fada9f9a16cf2d2ea9624ca16e5eb5b31c08f42f586ded",
+   "bytes": 9561
+  },
+  "deps/duckdb/experimental/spark/sql/streaming.py": {
+   "sha256": "45ed6fdcf3042bddc96a5557004d2838c64ce3b9be60eef9aa59f09c98b4f82e",
+   "bytes": 1068
+  },
+  "deps/duckdb/experimental/spark/sql/type_utils.py": {
+   "sha256": "c66fe074701c4fbbbefdf20c167fe0dede569b82c615b0f33fece9207351bb1f",
+   "bytes": 3262
+  },
+  "deps/duckdb/experimental/spark/sql/types.py": {
+   "sha256": "8a31018df6fb5fddef675d962bca23e5c11b06588c408ccf7708f0a592340943",
+   "bytes": 44325
+  },
+  "deps/duckdb/experimental/spark/sql/udf.py": {
+   "sha256": "e08f87c8b21978c2446336ac0b6df1543b52d0535d3c3597200cd04d60b1ee1b",
+   "bytes": 1173
+  },
+  "deps/duckdb/experimental/spark/errors/__init__.py": {
+   "sha256": "6d9b877a67a94569465974ec312fa1d47fc82381a734b417d34161c726f1245f",
+   "bytes": 2130
+  },
+  "deps/duckdb/experimental/spark/errors/error_classes.py": {
+   "sha256": "bf18c78ee956ac5cb9cb21d5d956f89912eb37a832a039d31f941f82d9ae55d7",
+   "bytes": 27272
+  },
+  "deps/duckdb/experimental/spark/errors/utils.py": {
+   "sha256": "c46193aeda28fd18f8bd8bbd92718b3749f1abba1fd86f22c13f8bbfdaac9412",
+   "bytes": 4437
+  },
+  "deps/duckdb/experimental/spark/errors/exceptions/__init__.py": {
+   "sha256": "a6d474a901ac0b7035c6a80d0e3e3300c69d70d1c20aabae933415d32b5ecbdc",
+   "bytes": 798
+  },
+  "deps/duckdb/experimental/spark/errors/exceptions/base.py": {
+   "sha256": "b6da2ee0bfa208f61262074d321d2ff2ab5ba3bb30cf773f6edbdafbdfa31717",
+   "bytes": 5146
+  },
+  "deps/duckdb/func/__init__.py": {
+   "sha256": "a22b176a70e92988c11beb52d4030656da1d0c6a8a66ca586c22d7e5895b58b4",
+   "bytes": 203
+  },
+  "deps/duckdb/functional/__init__.py": {
+   "sha256": "f9600fc09be8c5d936c508a9cfaba7afc3303326a59d0d9a3947cc2e100f070d",
+   "bytes": 470
+  },
+  "deps/duckdb/query_graph/__main__.py": {
+   "sha256": "1cf8884486aceb7b359ba206406c0caa2f6de2aafef76db3dc44990f33c52db7",
+   "bytes": 11476
+  },
+  "deps/duckdb/value/__init__.py": {
+   "sha256": "d1e5457d57766995d364715770b667164f0c7ed208e1c321441058b771e6dcb2",
+   "bytes": 13
+  },
+  "deps/duckdb/value/constant/__init__.py": {
+   "sha256": "6a705253ce3b09e5a6b67b2373956d33407dbab064a3c4d69c18820775cf5ace",
+   "bytes": 5823
+  },
+  "deps/duckdb/typing/__init__.py": {
+   "sha256": "5e699151356040c3a86c399eafb1a669b9ee159f2deeb55f6eda0974ae6e0fa6",
+   "bytes": 1127
+  },
+  "deps/duckdb/sqltypes/__init__.py": {
+   "sha256": "d3ba60f18929f74e4c7fe2aa26d09f1810a12cf8ade675bab7b284a40cfd2d1f",
+   "bytes": 886
+  },
+  "deps/duckdb-1.4.4.dist-info/INSTALLER": {
+   "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508",
+   "bytes": 4
+  },
+  "deps/duckdb-1.4.4.dist-info/METADATA": {
+   "sha256": "097c9d03bc92bc447abf0e7caa9fd98a10a483a632c726ac49b0424ab6e7dace",
+   "bytes": 4294
+  },
+  "deps/duckdb-1.4.4.dist-info/RECORD": {
+   "sha256": "759476af5cda95b3beb18828a3e3ceb029c003f8b445323fb80a914a53095d7e",
+   "bytes": 7520
+  },
+  "deps/duckdb-1.4.4.dist-info/REQUESTED": {
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "bytes": 0
+  },
+  "deps/duckdb-1.4.4.dist-info/WHEEL": {
+   "sha256": "98b3f4c143ad031cb18a1ebe4f9cd9226016eb9c39b05915af2654e8a549a558",
+   "bytes": 157
+  },
+  "deps/duckdb-1.4.4.dist-info/licenses/LICENSE": {
+   "sha256": "7e17fd31249fa875cb3b1c5e05c6c3e99b75509f6a2804ca176c217834de1dcb",
+   "bytes": 1072
+  },
+  "deps/_duckdb-stubs/__init__.pyi": {
+   "sha256": "a90f8621fbf90c5098ee85f5d1432bd79ad042d5a48aa0c4fe952b284b33a36e",
+   "bytes": 64888
+  },
+  "deps/_duckdb-stubs/_func.pyi": {
+   "sha256": "d7fdfdbe64d56597a9fef48d5565510702e5cf7614938db241e02f7d94179353",
+   "bytes": 2086
+  },
+  "deps/_duckdb-stubs/_sqltypes.pyi": {
+   "sha256": "cc90fe7eb065b841363eb65c72c1ebf538e44ee59c0902cf7bd1681b462928c2",
+   "bytes": 2165
+  },
+  "deps/adbc_driver_duckdb/__init__.py": {
+   "sha256": "56b605124379123d6f1bb4258e8859b5c940c03e102be72d521ce71537edbe09",
+   "bytes": 1846
+  },
+  "deps/adbc_driver_duckdb/dbapi.py": {
+   "sha256": "260e895a9cb6594a1ec3c5cdf8b539056eff4450c940a9a168e603eee3d8eb1a",
+   "bytes": 3461
+  },
+  "wasm/duckdb-browser-eh.worker.js": {
+   "sha256": "f8ab72b6b90b3ad83077d47426d4a99d5d9a4c7e07cba1a2be37d655adc7c1ab",
+   "bytes": 772759
+  },
+  "wasm/duckdb-browser-mvp.worker.js": {
+   "sha256": "b0387027f174e2b60c2d5cfa31cecca9b89d8a9762346b6449a784cd1c4dde3c",
+   "bytes": 844644
+  },
+  "wasm/duckdb-eh.wasm": {
+   "sha256": "4c221bfa59c11f24dbd750e70c90b9252eca6eec5633936e6a2ec766e55fd879",
+   "bytes": 34242586
+  },
+  "wasm/duckdb-mvp.wasm": {
+   "sha256": "45d72a81fba8e57693d890da837c7041310e385e75619a8559839b15388dfe97",
+   "bytes": 39362651
+  },
+  "tables/Customer.csv": {
+   "sha256": "53099af90e55216a5751b5f1e5805ce417b0fe73425c35d671b94283234ffeaa",
+   "bytes": 1277179
+  },
+  "tables/Date.csv": {
+   "sha256": "724c0eb0afa91acc3d5e7f2e32276215bc8ac8f3a18ebcdf8ce73d3b7636a4ef",
+   "bytes": 103795
+  },
+  "tables/Product.csv": {
+   "sha256": "f2a822d22767ca21555f90fe43c2db5db86b3d2acc45de105661faca6b8ec78b",
+   "bytes": 38313
+  },
+  "tables/Reseller.csv": {
+   "sha256": "3b4795ec41491a82f7bc3fcb3ca83097ce62f62c4b69bc9cfea09348195f8c68",
+   "bytes": 63546
+  },
+  "tables/Sales.csv": {
+   "sha256": "93e25bb53371b4a538f21671c2b46818c9611c0645bae90ba873d04fd05d621e",
+   "bytes": 11094970
+  },
+  "tables/Sales_Order.csv": {
+   "sha256": "2fc6ad355dca2b0b62f26e1c839e4195ff61b45edfa95a49313caf7b3d6b9fb9",
+   "bytes": 4728921
+  },
+  "tables/Sales_Territory.csv": {
+   "sha256": "beb2d08171cdd7bcae09cefee28a4d99092ae4e1de1604ea6bc98fc010f5cb1c",
+   "bytes": 426
+  }
+ },
+ "deps_tree_sha256": "4ba2b6d3f96a560ed5334fd3083b293c9c593d18c45c85602ed2f9019e47d949",
+ "note": "assembled 2026-10-08 from a verified install; deps tree hash is recomputed after copy"
+}

@@ -1,0 +1,4 @@
+SM75_PANEL_AUTOSTART=1
+SM75_CONSOLE_HOST=0.0.0.0
+SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
+SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
