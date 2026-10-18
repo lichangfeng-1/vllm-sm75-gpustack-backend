@@ -392,3 +392,169 @@ docker run -d --name sm75-panel --restart no --runtime nvidia \
 4. 跑完在结果页看雷达图；导出用 `/benchlocal/export`，逐题原始结果在 `$SM75_CONSOLE_ROOT/metrics/` 下。
 
 **这一小节标【部分实跑】**:面板启动与端口已验，三枚容器已验，**"一次完整题包跑完→雷达出图"这一步尚未在本机实跑**；第一次跑撞错按报错回来补这里。
+
+## 12 参数逐个说明（24 条后端参数 ＋ 28 条环境变量 ＋ 3 条面板变量）
+
+读法：每条先写"它管什么"，再写"想改怎么改、代价是什么"。凡是本仓没有逐条读上游实现的（QSA 一族），按变量名与实测行为描述，不假装知道内部细节。
+
+### 12.1 后端参数（24 条）
+
+**`--dtype=float16`**
+权重与激活的数值类型。T10（Turing）没有 bfloat16，所以这一格只能是 float16；想换精度只能换量化档，不能改成 bf16。
+
+**`--hf-overrides={"dtype":"float16"}`**
+覆盖模型 `config.json` 里声明的 dtype。权重来自 AutoRound，config 里可能写的是 bfloat16，不改会被引擎按 bf16 加载而报错。**它和上一条必须同步改**。
+
+**`--tensor-parallel-size=8`**
+把模型按 8 卡切开。本机八卡是硬约束；改小要先算显存是否够，同时卡间 allreduce 的参与卡数也跟着变。
+
+**`--enable-expert-parallel`**
+MoE 专家并行：专家权重按卡分片，而不是每卡一份。关掉它就要求每卡放得下全部专家，本机显存不够，所以这一档不能关。
+
+**`--enable-ep-weight-filter`**
+EP 下只加载本卡要用的专家权重，是省显存的关键一格。关掉会把全量专家都加载进来，显存直接不够。
+
+**`--language-model-only`**
+只加载语言塔，跳过视觉塔。省显存、少一段 warmup。**要发图片就把这一条删掉**，并按多模态的实测驻留重算 `GPUSTACK_MODEL_VRAM_CLAIM`。注意：现役模型行上这一条缺失（见第 7 节末的提示）。
+
+**`--max-model-len=262144`**
+最大上下文长度（256K）。调小会减少 KV 预留；调大要同时涨 `--kv-cache-memory-bytes` 或显存，否则起不来。
+
+**`--max-num-seqs=4`**
+最大并发序列数。测速尺子是并发 1，不受它影响；调大能提吞吐，但每路都要 KV，显存与单流延迟都会变差。
+
+**`--max-num-batched-tokens=4096`**
+单批最多多少个 token（预填充分块粒度）。调大能减少分块次数、提吞吐，但需要更多激活显存；调小更省显存、更慢。
+
+**`--gpu-memory-utilization=0.92`**
+显存使用比例。**注意：一旦同时给了 `--kv-cache-memory-bytes`，引擎会跳过按比例的 profiling**（日志里有明说），这一格实际不再主导分配。0.92 更多是给平台准入与调度看的习惯值。
+
+**`--kv-cache-dtype=fp8_e4m3`**
+KV cache 用 FP8 存。省一半 KV 显存，前提是 QSA 的 FP8 路径可用；改成 `auto` 会让 KV 翻倍、大概率起不来。
+
+**`--kv-cache-memory-bytes=2415919104`**
+手工指定每卡 KV 的大小（2.25 GiB）。给了它，引擎就不再按 `--gpu-memory-utilization` 做 profiling。**换机或换档要按实测逐卡驻留重算**，别照抄。
+
+**`--enable-prefix-caching`**
+前缀缓存。本机历史实测命中恒 0（prefix cache hits 一直是 0），开着不亏；如果确认你的场景也无重复前缀，关掉能省一点管理开销。
+
+**`--engram-config={"cpu_offload":true}`**
+把 embedding 表放 CPU、用到再查。省显存，代价是每步多一次 CPU 查表。显存宽裕时可以关掉换一点速度（需重测）。
+
+**`--gdn-prefill-backend=flashqla_sm75`**
+GDN 的预填充走我们编的 SM75 核（`flash_qla_sm75_gdn.so`）。这一格就是"为什么必须重编我们自己那枚 `.so`"的挂载点；改成 triton 会明显变慢。
+
+**`--generation-config=vllm`**
+用 vLLM 自己的 generation config，而不是模型目录里那份。避免模型自带的采样默认值（temperature 等）盖掉请求里的设置。
+
+**`--enable-prompt-tokens-details`**
+在响应 `usage` 里返回 prompt token 明细。验收与计量要用；对速度没有影响，不需要可以关。
+
+**`--compilation-config={"mode":0,"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4,8,16]}`
+`mode:0`＝不做 torch.compile（Turing 上收益低、易炸）；cudagraph 用 PIECEWISE，只对 1/2/4/8/16 这几个批大小捕获。改 `mode` 或加捕获尺寸都要重测启动时间与稳定性。
+
+**`--block-size=16`**
+KV cache 的分页大小。16 与这套模型的注意力实现匹配；改成 32 会改变 KV 粒度与命中行为，需要重测。
+
+**`--scheduler-cls=vllm.v1.core.sched.scheduler_sm75.SM75Scheduler`**
+用上游 VLLM-SM75 的自建调度器。换回默认调度器会丢掉 SM75 定制调度行为，不建议。
+
+**`--enable-auto-tool-choice`**
+允许模型自动选择工具调用。不开的话工具调用要客户端显式指定。
+
+**`--tool-call-parser=qwen3_xml`**
+工具调用的解析器，必须与模型输出格式匹配（这一档是 `qwen3_xml`）。换模型要换解析器。
+
+**`--reasoning-parser=qwen3`**
+把思考链与正文分开解析。它决定 `usage.completion_tokens_details.reasoning_tokens` 的统计方式；**也意味着 `max_tokens` 给小了会被思链吃满、正文为空**。
+
+**`--chat-template=/opt/vllm-sm75/templates/qwen38-next-high-compat.jinja`**
+聊天模板文件。镜像里带的那份与这一档配套；换模型/换模板要一起换。
+
+### 12.2 环境变量（28 条 ＝ 契约 25 ＋ 面板 3）
+
+**`NCCL_P2P_LEVEL=SYS`**
+NCCL 的 P2P 路径层级，本机无 NVLink，走 PCIe 交换（SYS 级）。改成别的层级会让 NCCL 绕开 P2P。
+
+**`VLLM_USE_MODELSCOPE=false`**
+不用 ModelScope 的网络加载路径（权重已在本地缓存）。
+
+**`VLLM_FIREFLY=auto`**
+上游 VLLM-SM75 的运行时开关，保持 `auto`；具体分支由上游代码决定。
+
+**`HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`**
+禁止 HuggingFace 联网。模型文件全在盘上，开着能避免启动时联网卡住。
+
+**`NCCL_DEBUG=WARN`**
+NCCL 日志级别。排查通信问题临时改 `INFO`，会打出拓扑与通道选择。
+
+**`NCCL_IB_DISABLE=1`**
+禁用 InfiniBand（本机没有 IB 设备）。
+
+**`NCCL_P2P_DISABLE=0`**
+允许 GPU 间 P2P 直连。改成 1 会退化成经主机中转（实测 P2P 13.16 GB/s 对 host-staged 6.50 GB/s）。
+
+**`OMP_NUM_THREADS=1`**
+每个进程只用 1 个 OpenMP 线程，避免八进程把 CPU 线程超订。
+
+**`VLLM_SM75_QWEN38_HC_GEMV=0`**
+上游的 HC GEMV 路径开关。本档取 0（与测速基准同口径）；改成 1 属另一档，需单独测。
+
+**`VLLM_FLASHINFER_WORKSPACE_BUFFER_SIZE=134217728`**
+flashinfer 的 workspace 大小（128 MiB）。调小省显存但可能触发回退；调大更宽裕、占显存。
+
+**`VLLM_USE_BREAKABLE_CUDAGRAPH=1`**
+允许打断 CUDA graph，避免长图把中断/休眠卡死。
+
+**`VLLM_WORKER_MULTIPROC_METHOD=spawn`**
+多进程启动方式用 spawn（比 fork 稳，尤其配合 CUDA）。
+
+**`VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=16`**
+稀疏 indexer 的 logits 缓冲上限（16 MB）。调大更少溢出、更占显存。
+
+**`VLLM_SM75_QSA_FLASHINFER_PREFILL=1`**
+QSA 预填充走 flashinfer 路径。
+
+**`VLLM_SM75_QSA_SHARED_TARGET_SCRATCH=1`**
+QSA 各层共享 target scratch，省显存。
+
+**`VLLM_SM75_QSA_FP8_MAIN_KV=1`**
+主 KV 用 FP8（与 `--kv-cache-dtype=fp8_e4m3` 配套）。
+
+**`VLLM_SM75_QSA_CUBLAS_INDEXER=1`**
+QSA 的 indexer 走 cuBLAS。
+
+**`VLLM_SM75_QSA_SELECTED_PAGES_PREFILL=1`**
+按选中页做预填充（启动日志里的 `SM75 QSA direct FP8 selected-page Prefill startup warmup complete` 就是它）。
+
+**`VLLM_SM75_QSA_MIXED_PREFILL=1`**
+混合预填充路径。
+
+**`VLLM_ENFORCE_STRICT_TOOL_CALLING=1`**
+严格工具调用校验：模型输出不合规时报错，而不是静默降级。
+
+**`VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC=1`**
+用 FlashInfer 的 PCIe-IPC allreduce——就是我们层 1 回填的那条路。设 0 会退回 NCCL。
+
+**`TZ=Asia/Shanghai`**
+容器时区，主要影响日志与时间戳。
+
+**`GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64`**
+平台读取这一格来决定实例容器的 `/dev/shm` 大小。**漏了就是平台默认 10 G**（实测过：容器里 `df -h /dev/shm` 只剩 10G）。
+
+**`GPUSTACK_MODEL_VRAM_CLAIM=120779177984`**
+申报给调度器的显存（约 112.5 GiB）。**这是准入判据、不是估算**：低于真实占用就是"假绿"——调度器放行、运行期靠物理余量硬撑。换机器按 `实测逐卡驻留 MiB × 卡数 × 1048576` 重算。
+
+**`SM75_PANEL_AUTOSTART=1`**
+面板自启开关（面板扩展）。设 1 才会在引擎前拉起面板；不设＝纯透传。
+
+**`SM75_CONSOLE_HOST=0.0.0.0`**
+面板监听地址。默认 `127.0.0.1`，只能本机访问；跨机必须 `0.0.0.0`。
+
+**`SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`**
+面板状态目录（登录令牌 `key`、`panel.log`、会话）。指到 worker 数据目录才随重启保留。
+
+### 12.3 后端版本入口（一格，不在模型行）
+
+**`entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`**
+GPUStack 用这一格整条覆盖镜像 ENTRYPOINT（字符串，`shlex.split` 后作为容器入口）。`panel-sidecar.py` 先按 `SM75_PANEL_AUTOSTART` 决定要不要拉面板，再把 `vllm serve <模型参数>` 原样 exec 掉。不设开关时与不加这一层完全一致。
