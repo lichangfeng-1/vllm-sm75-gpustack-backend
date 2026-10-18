@@ -32,7 +32,7 @@ cd vllm-sm75-gpustack-backend
 
 ## 2 探活并构建后端镜像
 
-镜像分两段构建。**两段都跑完，第 6 节注册时才有的可填**：第一段产出基座层 `vllm-sm75:v0.1.7-beta2`，第二段在它上面追加我们的三层，产出后端镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v1`。
+镜像分两段构建。**两段都跑完，第 6 节注册时才有的可填**：第一段产出基座层 `vllm-sm75:v0.1.7-beta2`，第二段在它上面追加我们的四层（层1 pcieipc／层2 incple／层3 时区／层4 面板负载），产出后端镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v1`。
 
 ```bash
 bash gpustack/preflight-sources-v1.sh          # 只读 HEAD 探测，红就别往下走
@@ -40,9 +40,9 @@ bash gpustack/build-gpustack-v1.sh             # 补丁门五道，不执行 doc
 bash gpustack/build-gpustack-v1.sh --build     # 第一段，产出 vllm-sm75:v0.1.7-beta2
 docker images vllm-sm75                        # 期望这一枚在（十 GB 量级，首次很慢，建议后台跑并跟看日志）
 
-docker build --file gpustack/Dockerfile.v1 --target timezone-layer \
+docker build --file gpustack/Dockerfile.v1 --target panel-layer \
   --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
-  -t vllm-sm75-gpustack:v0.1.7-beta2-v1 .      # 第二段：层1 pcieipc ＋ 层2 incple ＋ 层3 时区
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v1 .      # 第二段：层1 pcieipc ＋ 层2 incple ＋ 层3 时区 ＋ 层4 面板负载
 
 docker images vllm-sm75-gpustack               # 期望 tag v0.1.7-beta2-v1
 ```
@@ -322,32 +322,61 @@ docker run --rm --network host \
 
 **口径边界**：这组数属 GPUStack 形态，**不替换也不回填**仓根那三张面板形态表（43.31／57.73／57.04）；两形态相减得到的 7.4% 不得记到任何单一机制名下。10-14 那枚 55.34 的读数仍然作废在案（疑因当时开着视频输入，未归因），它不是本节的对照——本节四批都是纯文本档。
 
-## 11 同一条构建线上的三枚产物（面板形态怎么起）
+## 11 带面板的容器：与模型同一个镜像、同一个模型行
 
-先把一件事说清楚：**第 2 步建出来的后端镜像里起不了面板**。2026-10-18 逐字节查过成品 `vllm-sm75-gpustack:v0.1.7-beta2-v1`——里面有 `/opt/vllm-sm75/`（`console` 目录只剩 `lmcache_probe.py` 一支探针脚本）、有 `runtime-entrypoint.py`、有 `profiles/*.json`，**但没有 node 可执行文件、也没有面板服务端 `server.mjs` 那套负载**。面板要跑的是 `runtime-entrypoint.py:69` 那句 `node /opt/sm75-workbench/console/server.mjs`，这两个前提在这枚镜像里都不成立。
+第 2 步建出来的后端镜像**已经带面板负载**（`Dockerfile.v1` 层 4：node v22.23.2 ＋ `/opt/sm75-workbench` 全套，node 取自已钉 digest 的官方镜像，面板源码取自仓内 `ultra/source`，不拉 63.9 GB 的 console 镜像）。所以不需要第二枚镜像、也不需要第二条 docker 命令。
 
-这不是漏装，是形态分工。同一份基座（`docker/Dockerfile` 的第一段产物）在仓里派生三枚，各管一件事：
+**推荐用法：模型行 env 里加三行，面板随模型一起起**（`gpustack/Dockerfile.v1` 的入口包装 `panel-sidecar.py` 负责先把面板拉到后台，再原样 exec 引擎；**不设 `SM75_PANEL_AUTOSTART` 时行为与不加这一层完全一致**）：
 
-| 产物 | 建法 | 用途 |
-|---|---|---|
-| `vllm-sm75-gpustack:v0.1.7-beta2-v1` | 第 2 步两条命令 | GPUStack 拉起来跑模型的**后端镜像**，面板负载不进它 |
-| `vllm-sm75-gpustack-bench:v0.1.7-beta2-v1` | `gpustack/Dockerfile.bench-v1`（`ARG STAGE1_TAG` 指上面那枚） | 第 9 节三枚校验容器 ＋ 第 10 节那把测速尺子的载体，**带 node**（v22.23.2） |
-| `vllm-sm75-console:v0.1.7-beta2-20261013-sharedbase-v1` | 仓内 `docker/Dockerfile.ultra-full` 那条线 | **面板形态**，node ＋ `/opt/sm75-workbench/console` 全在 |
+```
+SM75_PANEL_AUTOSTART=1
+SM75_CONSOLE_HOST=0.0.0.0
+SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
+```
 
-三枚的 `ai.vllm.*` 标签逐字相同（`build.commit=ced6857a…`、`image.tag=vllm/vllm-openai:v0.30.0-cu129`、`sm75.release=vllm-sm75-v0.1.7-beta2`），所以"我们改的东西"只在共用第一段里存在一次，后面三枚都继承它——**该进镜像的补丁确实全进镜像了**，宿主侧没有 hack 脚本。
+**但只有 env 不够，还要把后端版本的入口指到包装上**——GPUStack 会用**后端版本配置里的 `entrypoint`** 整条覆盖镜像自带的 ENTRYPOINT（`gpustack/worker/backends/vllm.py:171-177`，字符串经 `shlex.split` 后再追加模型参数）。这一步做一次即可：
 
-面板那条命令，按现役那台机上跑过的容器参数现读还原（`--shm-size` 是 64 GiB 不是默认 10、两枚端口 1615 面板／18001 引擎、`--restart no`）：
+```bash
+curl -s -X PUT -H "X-API-Key: ${GS_KEY}" -H 'Content-Type: application/json' \
+  -d '{"backend_name":"vLLM","version_configs":{"0.1.7-sm75.1-custom":{
+       "image_name":"vllm-sm75-gpustack:v0.1.7-beta2-v1",
+       "custom_framework":"cuda",
+       "entrypoint":"python3 /opt/vllm-sm75/panel-sidecar.py vllm serve"}}}' \
+  http://${HOST_IP}:8180/v2/inference-backends/1
+```
+
+- 入口串里保留 `vllm serve`：包装会原样 exec 它，所以引擎行为不变；面板只是在它前面被拉到后台。
+- 这一步对所有用该后端版本的模型生效；**没有 `SM75_PANEL_AUTOSTART=1` 的模型走的是纯透传**，行为与改前一致。
+- `SM75_CONSOLE_HOST=0.0.0.0` 才允许从别的机器打开；默认只绑 `127.0.0.1`。
+- `SM75_CONSOLE_ROOT` 要指到**持久目录**：`/var/lib/gpustack` 就是 worker 数据目录（宿主上的 `${GS_DATA_DIR}`），面板的登录令牌 `key`、面板日志、会话都在里面，重启不丢。
+- 面板口默认 **1616**（`server.mjs` 的 `SM75_CONSOLE_PORT`），不是 1615。
+- 面板进程独立会话启动，崩了不影响引擎；日志在 `$SM75_CONSOLE_ROOT/panel.log`，启动成功会打一行 `PANEL_STARTED root=… log=…`。
+
+**只想单独起面板（不跑模型）**：用同一个镜像，把入口切到 Ultra 分支（不给命令行参数即可）：
 
 ```bash
 docker run -d --name sm75-panel --restart no --runtime nvidia \
-  --shm-size 64g -p 1615:1615 -p 18001:8000 \
-  -v "$PANEL_DATA:/console-data" \
-  --entrypoint python3 vllm-sm75-console:v0.1.7-beta2-20261013-sharedbase-v1 \
+  --shm-size 64g -p 1616:1616 -p 18001:8000 \
+  -e SM75_EDITION=ultra -e SM75_CONSOLE_ROOT=/data \
+  -e SM75_CONSOLE_HOST=0.0.0.0 \
+  -v "$PANEL_DATA:/data" \
+  --entrypoint python3 vllm-sm75-gpustack:v0.1.7-beta2-v1 \
   /opt/vllm-sm75/runtime-entrypoint.py
 ```
 
-**这一条标 【未实跑复验】**：本机实跑过的是它的上一代 tag（`vllm-sm75:v0.1.7-ultra-beta2-consolefix-log-to20s-pcieipc-incple-benchseed`），那枚容器还挂了 `/dsh`、`/models`、四个缓存目录和一枚 `libnvidia-api.so.1` 私有副本；上面这条只保留了"面板起得来"必需的那几格，其余按你自己的机器加。**撞了错就按报错回来补这一节，别当成教程已验。**
+**三条验证（都实测过）**：① `curl -s -o /dev/null -w '%{http_code}' http://<宿主>:1616/` 回 **200**；② 容器里 PID 1 之外能看到 `node /opt/sm75-workbench/console/server.mjs`；③ `$SM75_CONSOLE_ROOT/key`（43 B）在；面板 API 未登录时回 `{"error":"请先登录 SM75 控制台"}` 属正常。
 
-"预置复刻我们测好的配置"这件事在面板形态里的载体是 `/opt/vllm-sm75/profiles/*.json`（镜像内已有 `flash-next-tp8-256k-mtp3.json`、`flash-next-tp8-256k-nomtp.json` 等）。**但有一条实测过的风险要先知道**：面板会**静默重写**档位 argv——本机实测过 53 项被改写成 37 项、丢掉 `--engram-config` 等 10 个 SM75 定制项，非人为触发。所以用面板跑之前，把档位 JSON 与 `gpustack/args-paste-v1.txt` 逐字 diff 一次，改完再看一眼落盘的那份，别看界面显示。
+**"预置复刻我们测好的配置"**：面板侧档位在 `/opt/sm75-workbench/profiles/`（`flash-next-tp8-256k-mtp3.json`、`flash-next-tp8-256k-nomtp.json` 等）。**先知道一条实测风险**：面板会**静默重写**档位 argv——本机实测过 53 项被改写成 37 项、丢掉 `--engram-config` 等 10 个 SM75 定制项，非人为触发。用面板跑之前，把档位 JSON 与 `gpustack/args-paste-v1.txt` 逐字 diff 一次，改完再看一眼落盘那份，别看界面显示。GPUStack 主流程（第 7 步粘贴块）不吃这个风险：平台原样把参数传给引擎，没有中间重写者。
 
-GPUStack 这条线**不吃这个风险**：它的参数来自第 7 步那两块粘贴块，平台原样传给 `vllm` 命令行，没有中间重写者。这也是这一节放在第 11 节而不是放进主流程的原因。
+### 11a 三枚测速/校验容器与雷达图（扩展二）
+
+三枚容器是**宿主侧**容器（`bugfind`／`cli`／`hermes`），**不能由模型容器拉起**——模型实例没有 `docker.sock`，平台也不会为一个模型起 sidecar。起法就是第 9 节 `docker/benchlocal.sh start` 或 9b 那条手动命令。
+
+雷达图在**面板**里（BenchLocal 页面，`public/benchlocal-native-ui.js:108-136` 的 `drawRadar`），数据来自一次 BenchLocal 评测的逐题包结果。可执行步骤：
+
+1. 起来面板（本节任一方式），记下 `SM75_CONSOLE_ROOT/key` 里的登录令牌，用浏览器打开 `http://<宿主>:1616/`。
+2. 宿主侧起三枚校验容器（第 9 节）。
+3. 面板 → BenchLocal → 选题包（一次 **1–9 个**，多选有校验上限）→ 运行。
+4. 跑完在结果页看雷达图；导出用 `/benchlocal/export`，逐题原始结果在 `$SM75_CONSOLE_ROOT/metrics/` 下。
+
+**这一小节标【部分实跑】**:面板启动与端口已验，三枚容器已验，**"一次完整题包跑完→雷达出图"这一步尚未在本机实跑**；第一次跑撞错按报错回来补这里。

@@ -42,6 +42,9 @@
 
 ARG BASE_TAG=vllm-sm75:v0.1.7-beta2
 
+# 层 4 用的 node 源：必须是全局 ARG（写在第一个 FROM 之前），否则 FROM ${NODE_IMAGE} 解析为空。
+ARG NODE_IMAGE=docker.m.daocloud.io/library/node:22.23.2-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
+
 # ===================== 层 1：pcieipc（八卡 PCIe 直连通信提速） =====================
 FROM ${BASE_TAG} AS pcieipc-layer
 
@@ -227,3 +230,40 @@ RUN set -eu; \
 # 层 3 只在容器内落 tzdata 与两处接线文件，仓内零新增件；本段即最终层，
 # 成品镜像的时区默认值由镜像 ENV TZ 承载，运行期可由 GPUStack 模型 env 的 TZ 覆盖（见上方注释）。
 # ===================== 层 3 结束（文件末段） =====================
+
+# ===================== 层 4：面板负载（目标 panel-layer） =====================
+# 目的：一枚后端镜像同时满足两条用法——
+#   ① GPUStack 拉去跑模型：默认入口不变；
+#   ② 带面板的容器：SM75_EDITION=ultra 时，入口 /opt/vllm-sm75/runtime-entrypoint.py
+#      直接 exec node /opt/sm75-workbench/console/server.mjs（该入口文件基座里已有，
+#      与面板镜像内那份逐字节相同：sha256 59a2fa36…）。
+# 面板负载取自仓内 ultra/source（console 1.8 MB＋其余工作集），node 取自已钉 digest 的官方镜像；
+# 不拉 63.9 GB 的 console 镜像，也不在本仓分发第三方件。
+ARG NODE_IMAGE=docker.m.daocloud.io/library/node:22.23.2-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
+FROM ${NODE_IMAGE} AS nodebin
+
+FROM timezone-layer AS panel-layer
+ARG BASE_TAG
+ARG NODE_IMAGE
+LABEL sm75.gpustack.layer="4-panel" \
+      sm75.gpustack.node-image="${NODE_IMAGE}" \
+      sm75.gpustack.panel-root="/opt/sm75-workbench"
+COPY --from=nodebin /usr/local/bin/node /usr/local/bin/node
+COPY ultra/source/console /opt/sm75-workbench/console
+COPY ultra/source/profiles /opt/sm75-workbench/profiles
+COPY ultra/source/lmcache /opt/sm75-workbench/lmcache
+COPY ultra/source/benchlocal-native /opt/sm75-workbench/benchlocal-native
+COPY ultra/source/benchlocal-verifiers /opt/sm75-workbench/benchlocal-verifiers
+COPY ultra/source/vllm /opt/sm75-workbench/vllm
+COPY gpustack/layers/panel/panel-sidecar.py /opt/vllm-sm75/panel-sidecar.py
+RUN chmod 0755 /opt/vllm-sm75/panel-sidecar.py
+# 入口包装：默认行为与基座完全相同（原样 exec runtime-entrypoint.py + GPUStack 给的命令）；
+# 只有模型行设了 SM75_PANEL_AUTOSTART=1 时，才先把面板拉到后台再 exec 引擎。
+ENTRYPOINT ["python3","/opt/vllm-sm75/panel-sidecar.py","python3","/opt/vllm-sm75/runtime-entrypoint.py"]
+RUN set -eu; \
+    command -v node >/dev/null 2>&1 || { echo "红 19：node 不在 PATH"; exit 19; }; \
+    test -f /opt/sm75-workbench/console/server.mjs || { echo "红 19：面板服务端 server.mjs 缺失"; exit 19; }; \
+    test -f /opt/sm75-workbench/console/public/index.html || { echo "红 19：面板前端 public/index.html 缺失"; exit 19; }; \
+    test -f /opt/vllm-sm75/runtime-entrypoint.py || { echo "红 19：入口 runtime-entrypoint.py 缺失"; exit 19; }; \
+    test -x /opt/vllm-sm75/panel-sidecar.py || { echo "红 19：面板包装 panel-sidecar.py 缺失或不可执行"; exit 19; }; \
+    echo "面板层断言全绿：node=$(node -v)，server.mjs/public/index.html/runtime-entrypoint.py 均在位"
