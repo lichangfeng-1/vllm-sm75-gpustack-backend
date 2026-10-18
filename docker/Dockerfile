@@ -49,8 +49,9 @@ RUN python3 /opt/flashqla-build/source/build_extension.py \
 FROM sm75-base AS runtime
 ENV NCCL_P2P_LEVEL=SYS
 
-# Match the reviewed startup fixes rather than resolving a moving latest release.
-RUN uv pip install --system transformers==5.15.1
+# ORIG-KEEP: transformers stays at the base image original (5.17.0, tokenizers 0.23.2).
+# The 5.15.1 pin existed only so the docstring patch below matched that exact text;
+# on 5.17.0 those docstrings are fixed upstream, so the pin and the patch both go.
 
 # Keep the production image's proven SM75 FlashInfer runtime.  In particular,
 # flashinfer-jit-cache 0.6.18 contains AOT cubins without an SM75 image and
@@ -133,16 +134,13 @@ COPY vllm/third_party/flash_qla_sm75 \
     /tmp/sm75-overlay/third_party/flash_qla_sm75
 COPY docker/helpers/install_sm75_overlay.py /tmp/install_sm75_overlay.py
 COPY docker/helpers/patch_request_usage.py /tmp/patch_request_usage.py
-COPY docker/helpers/patch_transformers_startup.py /tmp/patch_transformers_startup.py
 COPY docker/helpers/verify_sm75_image.py /tmp/verify_sm75_image.py
 RUN mkdir -p /opt/vllm-sm75/source /opt/vllm-sm75/extensions && \
-    python3 /tmp/patch_transformers_startup.py && \
     python3 /tmp/install_sm75_overlay.py /tmp/sm75-overlay \
         --source-copy /opt/vllm-sm75/source/vllm && \
     cp -a /tmp/sm75-overlay/third_party/flash_qla_sm75 \
         /opt/vllm-sm75/source/ && \
-    rm -rf /tmp/sm75-overlay /tmp/install_sm75_overlay.py \
-        /tmp/patch_transformers_startup.py
+    rm -rf /tmp/sm75-overlay /tmp/install_sm75_overlay.py
 
 COPY requirements/cuda.txt /opt/vllm-sm75/source/
 COPY tests/model_executor/test_sm75_gdn_selection.py \
