@@ -1,108 +1,129 @@
-# vLLM-SM75 v0.1.7 beta2
+# vLLM-SM75 x GPUStack custom backend (v0.1.7-beta2 line)
 
+Turns SM75 vLLM into a GPUStack custom backend so Turing cards (T4 / T10) can serve large models
+inside GPUStack. This repo covers that line only; the upstream standalone Ultra / workbench
+deployment is out of scope here (see "Relationship to upstream" at the end).
 
-## 0. Using this repo as a GPUStack backend
+---
 
-This repo wires the SM75 build of vLLM into **GPUStack** as a custom backend, so older Turing
-cards (T4 / T10) can serve large models from inside GPUStack. Upstream vLLM has no accelerated
-path for Turing: Marlin and FP8 W8A8 are unsupported, and 7.5 is only the lowest compute capability
-it will run on. VLLM-SM75 does the SM75 adaptation. On top of it we ship two code layers - PCIe
-direct all-reduce across the eight cards (pcieipc) and the AutoRound quantization whitelist
-(incple) - and we turn on the base image's QSA, FlashQLA and custom scheduler through environment
-variables. Section 0.5 measures what that whole set is worth.
+## 1 What this is, and what we add
 
-What you need: eight 16 GiB cards and 251 GiB of host RAM. The checkpoint we run weighs
-168.7 GiB, more than the total VRAM, and part of it stays in host memory - too little RAM gets you
-an OOM kill during load, which looks like a broken image.
+Official vLLM has no acceleration path on Turing (Marlin and FP8 W8A8 are unsupported; 7.5 is merely
+the minimum compute capability it will run on). Upstream VLLM-SM75 did the SM75 adaptation. We add
+two layers on top:
 
-Tested environment (**lower bound only; no upper-bound guarantee - test it yourself**): Ubuntu 24.04.5 LTS (kernel 6.8.0) x NVIDIA driver 580.178.04 (CUDA 13.0) x Docker 29.8.0 (cgroup v2) x NVIDIA Container Toolkit 1.20.0 x GPUStack v2.2.3. Details in run-book section 0.
+- **pcieipc**: 8-GPU PCIe direct allreduce (backports FlashInfer 0.7.0's PCIe-IPC into the bundled 0.6.18);
+- **incple**: AutoRound / INC quantization whitelist patch.
 
-Follow `gpustack/run-book-v1.md` start to finish: build the image, start server and worker,
-register the backend version, deploy, then run the four acceptance gates. The two blocks you paste
-into the form are `gpustack/args-paste-v1.txt` (24 lines) and `gpustack/env-paste-v1.txt`
-(25 lines; line 25, the VRAM claim, is mandatory - without it the model queues forever and says nothing).
-After pasting, run `bash gpustack/lint-paste-v1.sh`; the last line must read `LINT_PASTE_OK env=25 args=24`.
+A group of environment variables switches on capabilities the base already has (QSA, FlashQLA, the
+custom scheduler) - that is *enabling*, not our implementation.
 
-Why each parameter is set that way, and how to re-derive it for other hardware:
-`gpustack/backend-version-card-v1.md` and `gpustack/compat-matrix-v1.md`. **Per-parameter explanations
-are in run-book section 12; the copy-paste board is section 13.** The console autostart can also be
-wired with one command: `gpustack/set-panel-autostart-v1.sh` (dry-run by default, `--apply` to write).
+## 2 Runtime environment (tested lower bound, no upper-bound guarantee)
 
-**Optional web console, baked into the same image (no second container)**: the backend image built in
-step 2 already carries the console (node v22.23.2 + `/opt/sm75-workbench`). To start the console
-together with the model, point the backend version entrypoint at the wrapper and add three env vars
-to the model row:
+| Item | Version we tested |
+|---|---|
+| OS | Ubuntu 24.04.5 LTS (kernel 6.8.0-146-generic) |
+| NVIDIA driver | 580.178.04 (CUDA 13.0) |
+| Docker | 29.8.0 (storage `overlayfs`, cgroup v2) |
+| containerd | 2.3.5 |
+| NVIDIA Container Toolkit | 1.20.0 |
+| GPUStack | quay.io/gpustack/gpustack:v2.2.3 |
+| Hardware | 8x Tesla T10 16 GiB + 251 GiB host RAM |
 
-- backend version `0.1.7-sm75.1-custom` `entrypoint`: `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
-- model env: `SM75_PANEL_AUTOSTART=1`, `SM75_CONSOLE_HOST=0.0.0.0`, `SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`
-- the console listens on **1616** (override with `SM75_CONSOLE_PORT`; bind address with `SM75_CONSOLE_HOST`); the login token is `$SM75_CONSOLE_ROOT/key`, the log is `panel.log`, and state lives under the worker data dir, so it survives restarts.
-- without `SM75_PANEL_AUTOSTART` the wrapper is a transparent passthrough; engine behaviour is unchanged.
+Below this we do not guarantee (and have not tested); above it we do not guarantee either. Test your own combination.
 
-The standalone console command, the three BenchLocal verifier containers and the radar-chart steps
-are in run-book section 11.
+## 3 Quick start
 
-[中文](README.md) · [Release notes](docs/releases/v0.1.7-beta2.md) · [Model profiles](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
-
-## 0.5 Speed
-
-One 8xT10 machine, one setup: the harness is the Prefill & Decode benchmark v3 (chao mod), run
-on the image's own Ultra/panel form, concurrency 1, nine prompt lengths from 512 to 131072,
-every cell 1/1 success:
-
-| Configuration | Mean output | Mean prefill |
-|---|---|---|
-| VLLM-SM75 v0.1.7-beta2 (baseline, already SM75-adapted) | 43.31 tok/s | 2742.54 |
-| same weights, with the set above applied - FP8PLE | 57.73 tok/s | 2749.96 |
-| with the set above applied - W4A16-AutoRound | 57.04 tok/s | 2762.51 |
-
-Output is +33.3%, prefill barely moves: the gain is on decode. How to read these three runs,
-which numbers must not be compared, and why none of them is a GPUStack acceptance line -
-see the last section of `gpustack/compat-matrix-v1.md`.
-
-
-
-## 1. Overview
-
-vLLM 0.30.0 adapted for NVIDIA Turing / SM75, including Tesla T4 and T10. Supports Qwen3.8 27B FP8 / AWQ / NVFP4 and Flash Next W4A16, with GDN, FP8 KV, MTP, DFlash2, DSpark, Firefly, CPU KV, power management and monitoring.
-
-Use one image: **`vllm-sm75:v0.1.7-ultra-beta2`**. Ultra includes the console, chat workspace and model tests. Set `SM75_EDITION=standard` to run only the inference API using the same model profiles and engine.
-
-QQ community: **878924874**.
-
-## 2. Updates
-
-- DSpark k5 profiles for 27B FP8 / NVFP4, draft KV grouping and graph capture support.
-- Prefix cache configuration, CPU KV shared-memory checks and LMCache configuration hints.
-- Nine native BenchLocal suites, all execution dependencies in the Ultra image, generation settings, per-case results, radar charts and portable reports.
-- Model/profile launch improvements, profile deletion, API address/key copying, monitoring and UI fixes.
-
-## 3. Standard mode and Ultra
-
-Both use the same inference engine, model profiles, KV settings and power controls. Standard mode exposes port 8000; Ultra adds the management UI on port 1615, Harness workspace, Watcher usage insights and integrated model tests.
-
-## 4. Performance reference
-
-Existing measurements and conditions are available for [27B](docs/validation/v0.1.6-full-images.md) and [Flash Next](docs/flash-next-performance.md). The overview table in the [Chinese README](README.md#4-性能参考) identifies the measured versions.
-
-## 5. Build and start
-
-Requires Linux x86_64, Docker / BuildKit, Git, and an NVIDIA driver plus NVIDIA Container Toolkit on the runtime host. Allow access to the pinned upstream package/download services and about 200 GiB of build storage.
+Full steps and troubleshooting: **`gpustack/run-book-v1.md`**. Minimal sequence:
 
 ```bash
-git clone --branch v0.1.7-beta2 --single-branch https://github.com/fishensw/VLLM-SM75.git
-cd VLLM-SM75
-EDITION=ultra MAX_JOBS=1 bash docker/build.sh
+# 0) Pull the two base images first (otherwise stage 1 stalls on a 60 GB download)
+docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688
+docker pull quay.io/gpustack/gpustack:v2.2.3
 
-export ULTRA_DATA_ROOT=/srv/vllm-sm75/ultra
-export MODEL_ROOT=/srv/models
-export VLLM_API_KEY='replace-with-your-own-long-random-key'
-export PSTATE_NVAPI_LIB=/usr/lib64/libnvidia-api.so.1  # actual host path
-EDITION=ultra bash docker/run.sh
-docker exec vllm-sm75-ultra node /opt/sm75-workbench/console/auth-cli.mjs show
+# 1) Clone this repo
+git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
+cd vllm-sm75-gpustack-backend
+
+# 2) Two-stage build: stage 1 (patch gates + base) -> stage 2 (pcieipc / incple / timezone / panel)
+bash gpustack/preflight-sources-v1.sh
+bash gpustack/build-gpustack-v1.sh --build
+docker build --file gpustack/Dockerfile.v1 --target panel-layer \
+  --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v1 .
+
+# 3) Start GPUStack (server/worker commands: run-book sections 3 and 5)
+
+# 4) Register the backend version: 0.1.7-sm75.1-custom, image = the tag above,
+#    entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
+
+# 5) Deploy the model: paste the two blocks
+#    gpustack/args-paste-v1.txt (24 lines) + gpustack/env-paste-v1.txt (25 lines)
+bash gpustack/lint-paste-v1.sh      # last line must read LINT_PASTE_OK env=25 args=24
 ```
 
-The full build produces one Ultra image containing all nine BenchLocal suites. The startup script reuses that image for resource-limited CPU execution containers; no additional verifier images are needed.
+**Stage 2 must target `panel-layer`**: it is a superset (three layers + console payload + BenchLocal
+verifier runtime), so one image serves as model backend, console host and verifier host.
 
-Open `http://<server>:1615`, register a model and select its profile. For 27B FP8 with DSpark, use `SM75_PROFILE=qwen38-27b-fp8-dspark5` and set `MODEL` / `DRAFT_MODEL`. CPU KV 16 GiB uses `CPU_KV_GIB=16` and `SHM_SIZE=32g`.
+## 4 Optional web console (same image, same model row)
 
-Keep existing `/data`, cache, `/dsh/home` and `/dsh/workspace` mounts when upgrading. See [build details](docker/BUILD.md), [model profiles](docs/configuration-v0.1.7.md) and [BenchLocal setup](docs/benchlocal.md).
+The image already carries the console (node v22.23.2 + `/opt/sm75-workbench`). To start it together
+with the model, add three env vars to the model row:
+
+```
+SM75_PANEL_AUTOSTART=1
+SM75_CONSOLE_HOST=0.0.0.0
+SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
+```
+
+- Console listens on **1616** (override with `SM75_CONSOLE_PORT`); login token at `$SM75_CONSOLE_ROOT/key`; state lives under the worker data dir, so it survives restarts.
+- Without `SM75_PANEL_AUTOSTART` the wrapper is a transparent passthrough.
+- Standalone console, the three BenchLocal verifier containers and the radar steps: run-book section 11.
+
+> Known limit: the **usage / workbench / plugins** native pages and the BenchLocal **harness** depend on
+> the DSH workbench (`/opt/harness`, 585 MB), which today only runs in the Ultra workbench form. An
+> "extension switch" that starts it with the model is in progress; until then use the standalone
+> container path in run-book section 11.
+
+## 5 Docs map
+
+| Question | Where |
+|---|---|
+| Step-by-step from zero to inference | `gpustack/run-book-v1.md` |
+| What every parameter does and how to tune it | run-book **section 12** |
+| Just copy-paste | run-book **section 13** + the two `.txt` blocks |
+| Backend registration form, field by field | `gpustack/backend-version-card-v1.md` |
+| Capability mapping and why these numbers are not an acceptance line | `gpustack/compat-matrix-v1.md` |
+| One-command console autostart | `gpustack/set-panel-autostart-v1.sh` (dry-run by default, `--apply` to write) |
+
+## 6 Speed reference (panel form, not a GPUStack acceptance line)
+
+Same 8xT10, same ruler (Prefill & Decode benchmark v3, concurrency 1, nine tiers 512 to 131072):
+
+| Configuration | Avg output | Avg prefill |
+|---|---|---|
+| VLLM-SM75 v0.1.7-beta2 (baseline, SM75 adaptation only) | 43.31 tok/s | 2742.54 |
+| Same weights + full optimization set, FP8PLE | 57.73 tok/s | 2749.96 |
+| Full optimization set, W4A16-AutoRound | 57.04 tok/s | 2762.51 |
+
++33.3% on the output side, prefill essentially unchanged. **These were measured in the panel form**,
+not in GPUStack form; for the GPUStack-form nine-tier numbers see run-book section 10a (52.81, with a
+different configuration window). How to read the tables: `gpustack/compat-matrix-v1.md`, last section.
+
+## 7 Repo layout
+
+```
+gpustack/        everything this line delivers: run-book, paste blocks, Dockerfile.v1, gates, scripts
+docker/          upstream build assets (base Dockerfile, helpers) - protected by the freeze gate
+ultra/source/    console + BenchLocal sources (layer 4 copies from here)
+vllm/            upstream SM75 adaptation and our attention overlay
+```
+
+## 8 Relationship to upstream, license
+
+- Base: `vllm/vllm-openai:v0.30.0-cu129` (tag + digest pinned).
+- New deliverables live in `gpustack/`; upstream files are protected by the 551-file freeze gate
+  (`gpustack/gate-tree-unchanged-v1.sh`); exceptions are recorded in `NOTICE`.
+- License: Apache-2.0 (see `LICENSE`); third-party notices in `NOTICE` and `gpustack/backend-version-card-v1.md`.
+
+[中文](README.md)
