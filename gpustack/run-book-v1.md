@@ -321,3 +321,33 @@ docker run --rm --network host \
 3. **512 首格罚是本形态多出来的一笔**。四批全离群（预填充 586～700 对次格 2391～2657；首 token 延迟 837～889 ms 对 413～444 ms），但与省电档无关（起跑 8～10 秒八卡已进 P0/1590，每 10 秒采样器留痕）、与网关无关（直连路同样离群），而面板参照的 512 格不离群 ⇒ **机制未查**。跨形态比数一律**同时报含首格与剔首格两套**。
 
 **口径边界**：这组数属 GPUStack 形态，**不替换也不回填**仓根那三张面板形态表（43.31／57.73／57.04）；两形态相减得到的 7.4% 不得记到任何单一机制名下。10-14 那枚 55.34 的读数仍然作废在案（疑因当时开着视频输入，未归因），它不是本节的对照——本节四批都是纯文本档。
+
+## 11 同一条构建线上的三枚产物（面板形态怎么起）
+
+先把一件事说清楚：**第 2 步建出来的后端镜像里起不了面板**。2026-10-18 逐字节查过成品 `vllm-sm75-gpustack:v0.1.7-beta2-v1`——里面有 `/opt/vllm-sm75/`（`console` 目录只剩 `lmcache_probe.py` 一支探针脚本）、有 `runtime-entrypoint.py`、有 `profiles/*.json`，**但没有 node 可执行文件、也没有面板服务端 `server.mjs` 那套负载**。面板要跑的是 `runtime-entrypoint.py:69` 那句 `node /opt/sm75-workbench/console/server.mjs`，这两个前提在这枚镜像里都不成立。
+
+这不是漏装，是形态分工。同一份基座（`docker/Dockerfile` 的第一段产物）在仓里派生三枚，各管一件事：
+
+| 产物 | 建法 | 用途 |
+|---|---|---|
+| `vllm-sm75-gpustack:v0.1.7-beta2-v1` | 第 2 步两条命令 | GPUStack 拉起来跑模型的**后端镜像**，面板负载不进它 |
+| `vllm-sm75-gpustack-bench:v0.1.7-beta2-v1` | `gpustack/Dockerfile.bench-v1`（`ARG STAGE1_TAG` 指上面那枚） | 第 9 节三枚校验容器 ＋ 第 10 节那把测速尺子的载体，**带 node**（v22.23.2） |
+| `vllm-sm75-console:v0.1.7-beta2-20261013-sharedbase-v1` | 仓内 `docker/Dockerfile.ultra-full` 那条线 | **面板形态**，node ＋ `/opt/sm75-workbench/console` 全在 |
+
+三枚的 `ai.vllm.*` 标签逐字相同（`build.commit=ced6857a…`、`image.tag=vllm/vllm-openai:v0.30.0-cu129`、`sm75.release=vllm-sm75-v0.1.7-beta2`），所以"我们改的东西"只在共用第一段里存在一次，后面三枚都继承它——**该进镜像的补丁确实全进镜像了**，宿主侧没有 hack 脚本。
+
+面板那条命令，按现役那台机上跑过的容器参数现读还原（`--shm-size` 是 64 GiB 不是默认 10、两枚端口 1615 面板／18001 引擎、`--restart no`）：
+
+```bash
+docker run -d --name sm75-panel --restart no --runtime nvidia \
+  --shm-size 64g -p 1615:1615 -p 18001:8000 \
+  -v "$PANEL_DATA:/console-data" \
+  --entrypoint python3 vllm-sm75-console:v0.1.7-beta2-20261013-sharedbase-v1 \
+  /opt/vllm-sm75/runtime-entrypoint.py
+```
+
+**这一条标 【未实跑复验】**：本机实跑过的是它的上一代 tag（`vllm-sm75:v0.1.7-ultra-beta2-consolefix-log-to20s-pcieipc-incple-benchseed`），那枚容器还挂了 `/dsh`、`/models`、四个缓存目录和一枚 `libnvidia-api.so.1` 私有副本；上面这条只保留了"面板起得来"必需的那几格，其余按你自己的机器加。**撞了错就按报错回来补这一节，别当成教程已验。**
+
+"预置复刻我们测好的配置"这件事在面板形态里的载体是 `/opt/vllm-sm75/profiles/*.json`（镜像内已有 `flash-next-tp8-256k-mtp3.json`、`flash-next-tp8-256k-nomtp.json` 等）。**但有一条实测过的风险要先知道**：面板会**静默重写**档位 argv——本机实测过 53 项被改写成 37 项、丢掉 `--engram-config` 等 10 个 SM75 定制项，非人为触发。所以用面板跑之前，把档位 JSON 与 `gpustack/args-paste-v1.txt` 逐字 diff 一次，改完再看一眼落盘的那份，别看界面显示。
+
+GPUStack 这条线**不吃这个风险**：它的参数来自第 7 步那两块粘贴块，平台原样传给 `vllm` 命令行，没有中间重写者。这也是这一节放在第 11 节而不是放进主流程的原因。
