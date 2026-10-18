@@ -24,6 +24,19 @@ After pasting, run `bash gpustack/lint-paste-v1.sh`; the last line must read `LI
 Why each parameter is set that way, and how to re-derive it for other hardware:
 `gpustack/backend-version-card-v1.md` and `gpustack/compat-matrix-v1.md`.
 
+**Optional web console, baked into the same image (no second container)**: the backend image built in
+step 2 already carries the console (node v22.23.2 + `/opt/sm75-workbench`). To start the console
+together with the model, point the backend version entrypoint at the wrapper and add three env vars
+to the model row:
+
+- backend version `0.1.7-sm75.1-custom` `entrypoint`: `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
+- model env: `SM75_PANEL_AUTOSTART=1`, `SM75_CONSOLE_HOST=0.0.0.0`, `SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`
+- the console listens on **1616**; the login token is `$SM75_CONSOLE_ROOT/key`, the log is `panel.log`, and state lives under the worker data dir, so it survives restarts.
+- without `SM75_PANEL_AUTOSTART` the wrapper is a transparent passthrough; engine behaviour is unchanged.
+
+The standalone console command, the three BenchLocal verifier containers and the radar-chart steps
+are in run-book section 11.
+
 [中文](README.md) · [Release notes](docs/releases/v0.1.7-beta2.md) · [Model profiles](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
 
 ## 0.5 Speed

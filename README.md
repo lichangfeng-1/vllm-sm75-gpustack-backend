@@ -20,6 +20,17 @@ AutoRound 量化白名单（incple），又用一组环境变量把底座的 QSA
 每条参数为什么这么设、换硬件怎么重算，看 `gpustack/backend-version-card-v1.md` 和
 `gpustack/compat-matrix-v1.md`。
 
+**镜像自带控制面板（可选，不用再起第二个容器）**：第 2 步建出的后端镜像里已经带了面板负载
+（node v22.23.2 ＋ `/opt/sm75-workbench`）。要让面板和模型一起起来，把后端版本的入口指到包装上、
+并在模型行加三格环境变量即可：
+
+- 后端版本 `0.1.7-sm75.1-custom` 的 `entrypoint`：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
+- 模型环境变量：`SM75_PANEL_AUTOSTART=1`、`SM75_CONSOLE_HOST=0.0.0.0`、`SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`
+- 面板口 **1616**；登录令牌在 `$SM75_CONSOLE_ROOT/key`，面板日志 `panel.log`，数据落在 worker 数据目录、重启不丢。
+- 不设 `SM75_PANEL_AUTOSTART` 时包装纯透传，引擎行为与不带这一层完全一致。
+
+单独起面板（不跑模型）的命令、三枚 BenchLocal 校验容器与雷达图的步骤，见 run-book 第 11 节。
+
 [English](README.en.md) · [发布说明](docs/releases/v0.1.7-beta2.md) · [参数模板](docs/configuration-v0.1.7.md) · [BenchLocal](docs/benchlocal.md)
 
 ## 0.5 速度
