@@ -727,8 +727,10 @@ async function proxy(req, res, p, suffix, payload) {
     }
   res.end();
 }
-async function benchModelContext(requireReady=false) {
-  const engine=standalone?.engine;
+function customApiBase(url) {
+  return String(url || "").trim().replace(/\/+$/, "").replace(/\/v1(\/(chat\/completions|models))?$/, "");
+}
+async function benchModelContext(requireReady=false) {  const engine=standalone?.engine;
   const p=engine?.profile||externalEngine?.profile||profiles.find(x=>x.id===engine?.id)||profiles.find(x=>x.id===store.settings().defaultProfile)||profiles[0];
   if(!p){if(requireReady)throw Error('请先启动模型');return {running:false,capabilities:{toggle:false,budget:false,reason:'请先启动模型'}};}
   const engineState=await status(p);
@@ -965,9 +967,57 @@ const server = http.createServer(async (req, res) => {
       return json(res,{...benchLocal.catalog(),enabled:setting.enabled!==false,presets:setting.presets||[],currentModel:await benchModelContext(),
         readiness:await benchLocal.readiness(),jobs:benchLocal.list(),activeId:benchLocal.active?.id||null});
     }
+    if (u.pathname === "/api/benchlocal/models" && req.method === "POST") {
+      const base = customApiBase(b.url);
+      if (!/^https?:\/\//i.test(base)) throw Error("API 地址需以 http(s):// 开头");
+      const key = String(b.key || "");
+      const response = await fetch(base + "/v1/models", {
+        headers: key ? { Authorization: "Bearer " + key } : {},
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) throw Error("拉取模型失败：HTTP " + response.status);
+      const data = await response.json();
+      return json(res, {
+        models: (Array.isArray(data.data) ? data.data : [])
+          .map((item) => item.id)
+          .filter(Boolean),
+      });
+    }
     if (u.pathname === "/api/benchlocal/run" && req.method === "POST") {
       if((store.get("extension","benchlocal")||{enabled:true}).enabled!==true)throw Error("请先开启BenchLocal");
       if(locks.has("model-switch")||[...jobs.values()].some(j=>j.kind==="benchmark"&&j.state==="running"))throw Error("其他操作或测试正在运行");
+      const custom = b.api && b.api.enabled ? b.api : null;
+      if (custom) {
+        const base = customApiBase(custom.url);
+        const model = String(custom.model || "").trim();
+        const key = String(custom.key || "");
+        if (!/^https?:\/\//i.test(base) || !model)
+          throw Error("自定义 API 需要地址和模型名称");
+        const probe = await fetch(base + "/v1/models", {
+          headers: key ? { Authorization: "Bearer " + key } : {},
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!probe.ok) throw Error("自定义 API 不可用：HTTP " + probe.status);
+        return json(res, await benchLocal.start(b, {
+          url: base,
+          model,
+          modelName: model,
+          profileName: "自定义 API",
+          profile: "custom-api",
+          capabilities: { toggle: false, budget: false, reason: "自定义 API" },
+          snapshot: {
+            engine: "自定义 OpenAI 兼容 API",
+            kv: "unknown",
+            context: "unknown",
+            tp: "unknown",
+            quantization: "unknown",
+            speculation: { method: "none", tokens: 0, draft: null },
+          },
+          identity: digest({ base, model }),
+          engineKey: key,
+          isCurrent: () => true,
+        }));
+      }
       return json(res,await benchLocal.start(b,await benchModelContext(true)));
     }
     if (u.pathname === "/api/benchlocal/cancel" && req.method === "POST")return json(res,await benchLocal.cancel(b.id));

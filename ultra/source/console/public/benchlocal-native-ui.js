@@ -38,6 +38,32 @@ export function mountBenchLocal({api,run}) {
   function project(value){if(!Object.hasOwn(panels,value))value='benchlocal';for(const[k,p]of Object.entries(panels))if(p)p.hidden=k!==value;for(const button of projectButtons)button.setAttribute('aria-selected',String(button.dataset.benchmarkProject===value));try{localStorage.setItem('sm75-model-test-project',value);}catch{}if(value==='benchlocal')void refresh();}
   for(const button of projectButtons)button.onclick=()=>project(button.dataset.benchmarkProject);
   const fields=[...root.querySelectorAll('[data-bl-param]')];
+  function customApi(){
+    if(!$('blCustomApi').checked)return null;
+    const url=$('blApiUrl').value.trim(),key=$('blApiKey').value,model=$('blApiModel').value.trim();
+    if(!url||!model)throw Error('自定义 API 需要填写 API 地址和模型名称');
+    return {enabled:true,url,key,model};
+  }
+  function paintCurrentModel(){
+    if(!data)return;
+    $('blCurrentModel').textContent=$('blCustomApi').checked
+      ?('当前模型：'+($('blApiModel').value.trim()||'自定义 API（待填写）'))
+      :(data.currentModel.running?'当前模型：'+data.currentModel.modelName+' · 名称、API 与凭据自动读取':data.currentModel.loading?'模型正在加载，完成后可以开始评测':'请先在运行配置中启动模型');
+  }
+  $('blApiProbe').onclick=run(async()=>{
+    const url=$('blApiUrl').value.trim(),key=$('blApiKey').value;
+    if(!url)throw Error('请填写 API 地址');
+    $('blApiStatus').textContent='正在连接…';
+    try{
+      const result=await api('/console-api/benchlocal/models',{url,key});
+      const models=Array.isArray(result.models)?result.models:[];
+      $('blApiModels').replaceChildren(...models.map(id=>node('option',undefined,{value:id})));
+      if(!$('blApiModel').value&&models[0])$('blApiModel').value=models[0];
+      $('blApiStatus').textContent=models.length?'连接成功，发现 '+models.length+' 个模型':'连接成功，但没有模型列表；请手填模型名称';
+      paintCurrentModel();
+    }catch(error){$('blApiStatus').textContent=error.message;throw error;}
+  });
+  $('blCustomApi').onchange=()=>{if($('blCustomApi').checked)$('blCustomApiPanel').open=true;paintCurrentModel();};
   function readOptions(){
     const value={thinking:$('blThinking').value,effort:$('blEffort').value,presetName:$('blPresetName').value.trim()||($('blPreset').value==='default'?'题包默认':'自定义')};
     for(const input of fields){if(!input.checkValidity())throw Error('请检查 '+input.parentElement.textContent.trim());if(input.value!=='')value[input.dataset.blParam]=Number(input.value);}
@@ -74,7 +100,8 @@ export function mountBenchLocal({api,run}) {
     for(const pack of packs){const input=root.querySelector('input[data-pack="'+pack.id+'"]');if(input){input.checked=selected.has(pack.id);input.closest('.bl-category').classList.toggle('selected',input.checked);}if(selected.has(pack.id))count+=pack.scenarioCount;}
     $('blSelectionCount').textContent=`已选 ${selected.size} 类 · ${count} 题`;
     const unavailable=[...selected].some(id=>data?.readiness?.[id]&&!data.readiness[id].ready);
-    $('blRun').disabled=!!data?.activeId||!selected.size||!data?.currentModel?.running||unavailable;
+    const custom=$('blCustomApi').checked;
+    $('blRun').disabled=!!data?.activeId||!selected.size||(!custom&&!data?.currentModel?.running)||unavailable;
     $('blStop').disabled=!data?.activeId;
     for(const[id,yes]of [['blSelectSix',selected.size===6&&packs.filter(p=>p.defaultSelected).every(p=>selected.has(p.id))],['blSelectAll',selected.size===packs.length],['blSelectNone',!selected.size]])$(id).setAttribute('aria-pressed',String(yes));
   }
@@ -190,7 +217,7 @@ export function mountBenchLocal({api,run}) {
       data=await api('/console-api/benchlocal');if(loadError){$('blStatus').textContent='';loadError=false;}$('benchToggle-benchlocal').checked=data.enabled;root.hidden=!data.enabled;
       if(!selectionReady){selected=new Set(data.packs.filter(x=>x.defaultSelected).map(x=>x.id));try{const saved=JSON.parse(localStorage.getItem('sm75-benchlocal-native-preferences')||'null');if(saved){if(Array.isArray(saved.selected))selected=new Set(saved.selected.filter(id=>data.packs.some(x=>x.id===id)));setOptions(saved.options||{});}}catch{}selectionReady=true;}
       const ps=JSON.stringify(data.presets);if(ps!==presetSignature){presetSignature=ps;const before=$('blPreset').value;$('blPreset').replaceChildren(node('option','题包默认',{value:'default'}),node('option','自定义',{value:'custom'}),...data.presets.map(x=>node('option',x.name,{value:'saved:'+x.name})));$('blPreset').value=[...$('blPreset').options].some(o=>o.value===before)?before:'custom';}
-      $('blCurrentModel').textContent=data.currentModel.running?'当前模型：'+data.currentModel.modelName+' · 名称、API 与凭据自动读取':data.currentModel.loading?'模型正在加载，完成后可以开始评测':'请先在运行配置中启动模型';paintThinking();paintCatalog();
+      $('blCurrentModel').textContent='';paintCurrentModel();paintThinking();paintCatalog();
       const view=savedView;savedView=null;
       if(view){if(data.jobs.some(x=>x.id===view.id))selectedId=view.id;const p=data.packs.find(x=>x.id===view.detail?.packId);if(p?.scenarios.some(x=>x.id===view.detail.id))detailCase=view.detail;}
       const a=view?.compare||$('blCompare').value,b=view?.compareTwo||$('blCompareTwo').value;
@@ -202,9 +229,9 @@ export function mountBenchLocal({api,run}) {
     }catch(error){loadError=true;$('blStatus').textContent=error.message||'能力评测暂时不可用';}finally{loading=false;}
   }
   $('benchToggle-benchlocal').onchange=run(async()=>{await api('/console-api/benchlocal',{enabled:$('benchToggle-benchlocal').checked});await refresh();});
-  async function start(body){remember();$('blRun').disabled=true;$('blStatus').textContent='正在准备评测…';try{const row=await api('/console-api/benchlocal/run',body);reports.set(row.id,row);selectedId=row.id;record=row;revision='';data.activeId=row.id;renderResults();await refresh();rememberView();$('blStatus').textContent='';}catch(error){$('blStatus').textContent=error.message;throw error;}finally{paintSelection();}}
+  async function start(body,useCustom=true){remember();$('blRun').disabled=true;$('blStatus').textContent='正在准备评测…';try{const custom=useCustom?customApi():null;const row=await api('/console-api/benchlocal/run',custom?{...body,api:custom}:body);reports.set(row.id,row);selectedId=row.id;record=row;revision='';data.activeId=row.id;renderResults();await refresh();rememberView();$('blStatus').textContent='';}catch(error){$('blStatus').textContent=error.message;throw error;}finally{paintSelection();}}
   $('blRun').onclick=run(()=>start({packIds:[...selected],options:readOptions()}));
-  $('blReplay').onclick=run(()=>start({replayId:selectedId}));
+  $('blReplay').onclick=run(()=>start({replayId:selectedId},false));
   $('blStop').onclick=run(async()=>{if(data?.activeId)await api('/console-api/benchlocal/cancel',{id:data.activeId});await refresh();});
   $('blHistory').onchange=run(()=>choose($('blHistory').value));
   for(const id of ['blCompare','blCompareTwo'])$(id).onchange=run(async()=>{await loadReport($(id).value);renderScores();rememberView();});

@@ -721,6 +721,16 @@
               <div class="benchmark-heading"><span>能力评测 · BenchLocal</span><input type="checkbox" role="switch" id="benchToggle-benchlocal" aria-label="启用能力评测 · BenchLocal" checked /></div>
               <div id="benchLocalPanel" class="benchlocal-panel">
                 <p id="blCurrentModel" class="muted"></p>
+                <details id="blCustomApiPanel" class="bl-advanced">
+                  <summary>自定义 API（可选，不跟随当前模型）</summary>
+                  <div class="benchlocal-controls">
+                    <label><input id="blCustomApi" type="checkbox" /> 启用自定义 API</label>
+                    <label>API 地址<input id="blApiUrl" type="text" placeholder="http://172.17.100.10:8180/v1" /></label>
+                    <label>API 密钥<input id="blApiKey" type="password" autocomplete="off" placeholder="可留空" /></label>
+                    <label>模型名称<input id="blApiModel" list="blApiModels" type="text" placeholder="测试并拉取，或手填" /><datalist id="blApiModels"></datalist></label>
+                  </div>
+                  <div class="benchlocal-actions"><button id="blApiProbe" type="button">测试并拉取模型</button><span id="blApiStatus" class="muted" role="status"></span></div>
+                </details>
                 <div class="benchlocal-controls bl-primary-controls">
                   <label>参数方案<select id="blPreset"><option value="default">题包默认</option><option value="custom">自定义</option></select></label>
                   <label>思考模式<select id="blThinking"><option value="default">跟随题包</option><option value="off">关闭</option><option value="on">开启</option></select></label>

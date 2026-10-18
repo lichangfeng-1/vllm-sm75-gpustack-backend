@@ -2,6 +2,7 @@ import fs from 'node:fs';import path from 'node:path';import http from 'node:htt
 const here=path.dirname(fileURLToPath(import.meta.url));
 const frameBootstrap=fs.readFileSync(new URL('./public/frame-appearance.js',import.meta.url),'utf8');
 const credentialsScript='<script data-sm75-fetch-credentials>(function(){const f=window.fetch;window.fetch=function(input,init){init=init?{...init}:{};try{const u=new URL(input instanceof Request?input.url:String(input),location.href);if(u.origin===location.origin)init.credentials="include";}catch{}return f.call(this,input,init);};})();</script>';
+const speedResetScript='<script data-sm75-speed-reset>(function(){try{const k="sm75-speed-proxy-v1";if(localStorage.getItem(k)!=="1"){localStorage.removeItem("llmPerfTestApiUrl");localStorage.removeItem("llmPerfTestApiKey");localStorage.setItem(k,"1");}}catch{}})();</script>';
 export function injectFrameAppearance(html){
  if(html.includes('data-sm75-frame-appearance'))return html;
  const script='<script data-sm75-frame-appearance>'+frameBootstrap.replace(/<\/script/gi,'<\\/script')+'</script>';
@@ -26,16 +27,18 @@ export class OriginalTests{
   const prefix='/bench-app/'+type;
   const up=http.request({host:'127.0.0.1',port:this.port(type),path:suffix,method:req.method,headers:{...req.headers,host:'127.0.0.1:'+this.port(type),'accept-encoding':'identity'}},r=>{
    const headers={...r.headers,'Cache-Control':'no-store'};delete headers['set-cookie'];
-   if((r.headers['content-type']||'').includes('text/html')){const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>{let html=injectFrameAppearance(Buffer.concat(chunks).toString('utf8'));if(!html.includes('data-sm75-fetch-credentials'))html=html.replace(/<head\b[^>]*>/i,m=>m+credentialsScript);const i=profile.args.indexOf('--served-model-name'),model=i>=0?profile.args[i+1]:profile.args[0];
+   if((r.headers['content-type']||'').includes('text/html')){const chunks=[];r.on('data',c=>chunks.push(c));r.on('end',()=>{let html=injectFrameAppearance(Buffer.concat(chunks).toString('utf8'));if(!html.includes('data-sm75-fetch-credentials'))html=html.replace(/<head\b[^>]*>/i,m=>m+credentialsScript);if(this.external&&type==='speedtest'&&!html.includes('data-sm75-speed-reset'))html=html.replace(/<head\b[^>]*>/i,m=>m+speedResetScript);const i=profile.args.indexOf('--served-model-name'),model=i>=0?profile.args[i+1]:profile.args[0];const engineBase=(process.env.SM75_ENGINE_URL||'').replace(/\/+$/,'');
     if(type==='speedtest'){
      html=html.replace('</body>','<script>'+fs.readFileSync(path.join(here,'public','benchmark-sampling.js'),'utf8')+'</script></body>');
      html=html.replace('const savedMinLength =',"try{if(!localStorage.getItem('sm75-speed-defaults-v2')){for(const [k,v]of Object.entries({MinLength:512,MaxLength:131072,Step:128,StepMultiplier:2,OutputLength:512}))localStorage.setItem('llmPerfTest'+k,String(v));localStorage.setItem('sm75-speed-defaults-v2','1');}}catch{}const savedMinLength =");
      for(const [name,value]of Object.entries({minLength:512,maxLength:131072,step:128,stepMultiplier:2,outputLength:512,timeout:30000,temperature:1,top_p:0.1,presence_penalty:0,frequency_penalty:0}))html=html.replace(new RegExp('let d_'+name+' = [^;]+;'),'let d_'+name+' = '+value+';');
      html=html.replace('backendUrlInput.value = `ws://${host}:${port}`;','backendUrlInput.value = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}'+prefix+'`;');
-     const openaiUrl=this.external?'http://'+req.headers.host+prefix+'/model/v1/chat/completions':'http://'+ip+':8000/v1/chat/completions';
-     html=html.replace(/let d_openai_apiUrl = '[^']*'/,"let d_openai_apiUrl = "+JSON.stringify(openaiUrl)).replace(/let d_openai_modelName = '[^']*'/,'let d_openai_modelName = '+JSON.stringify(model)).replace("let d_api_key = '';","let d_api_key = 'sm75-managed';");
+     const openaiUrl=this.external&&engineBase?engineBase+'/v1/chat/completions':this.external?'http://'+req.headers.host+prefix+'/model/v1/chat/completions':'http://'+ip+':8000/v1/chat/completions';
+     html=html.replace(/let d_openai_apiUrl = '[^']*'/,"let d_openai_apiUrl = "+JSON.stringify(openaiUrl)).replace(/let d_openai_modelName = '[^']*'/,'let d_openai_modelName = '+JSON.stringify(model));
+     if(!this.external)html=html.replace("let d_api_key = '';","let d_api_key = 'sm75-managed';");
     }else{
-     html=html.replaceAll('https://api.openai.com/v1/chat/completions',`http://${req.headers.host}${prefix}/model/v1/chat/completions`);
+     const sqlOpenaiUrl=this.external&&engineBase?engineBase+'/v1/chat/completions':`http://${req.headers.host}${prefix}/model/v1/chat/completions`;
+     html=html.replaceAll('https://api.openai.com/v1/chat/completions',sqlOpenaiUrl);
      html=html.replaceAll("fetch('/save_trace'","fetch('"+prefix+"/save_trace'").replaceAll("fetch('/save_summary'","fetch('"+prefix+"/save_summary'").replaceAll("fetch('/download_zip'","fetch('"+prefix+"/download_zip'");
      const init=`<script>window.addEventListener('load',()=>{const e=document.getElementById('api-endpoint');if(e&&(e.value==='https://api.openai.com/v1/chat/completions'||!e.value))e.value=location.origin+${JSON.stringify(prefix+'/model/v1/chat/completions')};});</script>`;html=html.replace('</body>',init+'</body>');
     }
