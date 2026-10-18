@@ -4,7 +4,7 @@
 NotImplementedError: Qwen4Exp PLE embedding does not support quantization config INCConfig
 （0.1.7-beta2 现场 ngram_embedding.py 的白名单只有 None / ModelOpt* / Fp8Config）。
 
-本仓适配（相对物料 档案/调试/20261007-AutoRound映射/部署物料/patch_ple_inc.py，其余逐字保留；
+本仓适配（相对本项目过程档案「20261007-AutoRound 映射」部署物料里的同名件，该档案未随包发布；其余逐字保留；
 ①②＝入库轮，③④＝修复轮 1 按审查 I-2 新增，适配处由两处增为四处，NOTICE 改动 3 已同步登记）：
   ① 退出码换成本任务登记的码位（交接约束第 4 条）：锚点缺失 4→11（＝11b）、
      回读契约/编译失败 5→12、目标解析失败 3→2（3 已被任务 2 探源占用，2＝用法/前置，

@@ -106,7 +106,7 @@ NOTICE —— vllm-sm75-gpustack-backend
   改动 3（任务 4 · 镜像层 2 incple＝AutoRound 量化白名单补丁）
     新增：gpustack/layers/incple/patch_ple_inc.py、gpustack/layers/incple/install-incple-v1.sh；
     改动：gpustack/Dockerfile.v1 续写层 2 段（FROM pcieipc-layer AS incple-layer，两道 RUN 门）。
-    物料源：调试档案-20261007-AutoRound映射/部署物料/patch_ple_inc.py（自有件，2026-10-07 实测
+    物料源：本项目过程档案「20261007-AutoRound 映射」的部署物料 patch_ple_inc.py（自有件，该档案未随包发布；2026-10-07 实测
       成果；入库改两处、修复轮 1 增至四处——①退出码换本任务登记码位：锚点缺失 4→11（＝11b）、写盘契约 5→12、
       目标解析 3→2；②兜底解析从 import vllm 改 importlib.util.find_spec，不执行包内代码；
       ③（修复轮 1·审查 I-2a）锚点匹配从 str.count 子串改整行精确匹配（缩进参与比对，缩进超集/

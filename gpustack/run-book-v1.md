@@ -169,7 +169,7 @@ bash docker/benchlocal.sh connect    # 面板容器不在 bench 那张网上时�
 
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
-仓根 `README.md` 的性能节挂着三张测速表：裸上游 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出）。
+仓根 `README.md` 的性能节挂着三张测速表：基线档 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出）。
 
 **这三张不是本 run-book 这条路的读数。** 它们的备注逐字是 `G292Z20 8*T10 SM-75 …`，**没有出现 GPUStack 字样**，
 是在镜像自带的 Ultra／面板形态上、用"大模型 Prefill & Decode 性能测试工具 v3（chao 魔改版）"跑出来的。
