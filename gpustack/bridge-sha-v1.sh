@@ -1,5 +1,7 @@
 #!/bin/sh
-# bridge-sha-v1.sh —— 两容器速度层指纹桥（任务 6）
+# bridge-sha-v1.sh —— 两容器速度层指纹桥（历史枚）
+# ⚠ 现行枚＝同目录 bridge-sha-v2.sh：本件的容器模式探测缺 docker exec -i，
+#   在真容器上会因 stdin 为空而返回空串、假红退 2。留盘不覆盖只作历史。
 #
 # 做什么：把 stage1 成品容器（GPUStack 线，vllm-sm75-gpustack:v0.1.7-beta2-v1）与
 #   bench 测速容器（gpustack/Dockerfile.bench-v1 产物）之间的 10 件层产物

@@ -21,7 +21,7 @@
 | 码 | 归属件 | 判的是什么 | 声明处 |
 |---|---|---|---|
 | 0 | 全部甲层件 | 通过 | 各件头注首行 |
-| 2 | 全部甲层件 | 用法/前置类红的统一码位：参数形态非法、缺必要工具、依赖件缺失或不可读、落点守卫判死、行尾含 CR、末行缺换行 | `gate-tree-unchanged-v1.sh:12`、`build-gpustack-v1.sh:25`、`lint-paste-v1.sh:32`、`bridge-sha-v1.sh:16`、`preflight-sources-v1.sh:15`、`verify-gpustack-form-v1.sh:78`、`gen-args-paste-v1.py:41` |
+| 2 | 全部甲层件 | 用法/前置类红的统一码位：参数形态非法、缺必要工具、依赖件缺失或不可读、落点守卫判死、行尾含 CR、末行缺换行 | `gate-tree-unchanged-v1.sh:12`、`build-gpustack-v1.sh:25`、`lint-paste-v1.sh:32`、`bridge-sha-v1.sh:16`、`bridge-sha-v2.sh:23`、`preflight-sources-v1.sh:15`、`verify-gpustack-form-v1.sh:78`、`gen-args-paste-v1.py:41` |
 | 3 | `preflight-sources-v1.sh` | 至少一个分组"全组红"（逐组取或，组内有一条绿就不红） | `preflight-sources-v1.sh:18` |
 | 4 | `gate-tree-unchanged-v1.sh` | 基线表格式非法（非法行／重复路径／末行缺换行导致行数与条目不符） | `gate-tree-unchanged-v1.sh:13` |
 | 5 | `gate-tree-unchanged-v1.sh` | 基线表已存在且未加 `--force`（防静默重定基线） | `gate-tree-unchanged-v1.sh:14` |
@@ -30,7 +30,7 @@
 | 8 | `build-gpustack-v1.sh` | 补丁不匹配（dry-run 返回 1＝hunk 不匹配，或特征计数不符） | `build-gpustack-v1.sh:27` |
 | 9 | `build-gpustack-v1.sh` | 上游文件被改（把护栏自己的 7 映射过来） | `build-gpustack-v1.sh:28` |
 | 10 | `gate-tree-unchanged-v1.sh` | 基线表不存在 | `gate-tree-unchanged-v1.sh:16` |
-| 13 | `bridge-sha-v1.sh` | 指纹桥差集非空：`DIFF`＝两边字节不同，`MISSING_A`/`MISSING_B`＝一边缺件，两类行可区分 | `bridge-sha-v1.sh:18` |
+| 13 | `bridge-sha-v1.sh` | 指纹桥差集非空：`DIFF`＝两边字节不同，`MISSING_A`/`MISSING_B`＝一边缺件，两类行可区分 | `bridge-sha-v1.sh:18`、`bridge-sha-v2.sh:25` |
 | 14 | `lint-paste-v1.sh`／`gen-args-paste-v1.py` | args 块里出现 GPUStack 会尾补的三条之一（`--host`／`--port`／`--served-model-name`） | `lint-paste-v1.sh:33`、`gen-args-paste-v1.py:42` |
 | 15 | `lint-paste-v1.sh` | env 块键重复 | `lint-paste-v1.sh:34` |
 | 16 | `lint-paste-v1.sh`／`gen-args-paste-v1.py` | 内容断言红的共用码位：行形态非法、占位符残留、行数≠24、flag 缺失/重复/集合不符、`--max-model-len` 取值不符、与内置常量表逐字或顺序不符（L11-L13 与 A1-A7 全归此码，靠点名文案区分） | `lint-paste-v1.sh:35-39`、`gen-args-paste-v1.py:43-45` |
