@@ -47,9 +47,8 @@ cd vllm-sm75-gpustack-backend
 
 ```bash
 bash gpustack/preflight-sources-v1.sh          # 只读 HEAD 探测，红就别往下走
-bash gpustack/build-gpustack-v1.sh             # 补丁门五道，不执行 docker build
-bash gpustack/build-gpustack-v1.sh --build     # 第一段，产出 vllm-sm75:v0.1.7-beta2
-docker images vllm-sm75                        # 期望这一枚在（十 GB 量级，首次很慢，建议后台跑并跟看日志）
+bash gpustack/build-gpustack-v1.sh --build     # 一条命令：五道补丁门 → 第一段构建（门不绿会在构建前停住，不白花时间）
+docker images vllm-sm75                        # 期望 vllm-sm75:v0.1.7-beta2（十 GB 量级，首次很慢，建议后台跑并跟看日志）
 
 docker build --file gpustack/Dockerfile.v1 --target panel-layer \
   --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
@@ -57,6 +56,8 @@ docker build --file gpustack/Dockerfile.v1 --target panel-layer \
 
 docker images vllm-sm75-gpustack               # 期望 tag v0.1.7-beta2-v1
 ```
+
+> `--build` 已经是"门＋构建"一条命令；只想先验门、不想等构建时，去掉 `--build` 单独跑一次即可（那一步不执行 docker build）。
 
 四条会踩的：
 
