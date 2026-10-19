@@ -574,8 +574,8 @@ NCCL 日志级别。排查通信问题临时改 `INFO`，会打出拓扑与通�
 **`OMP_NUM_THREADS=1`**
 每个进程只用 1 个 OpenMP 线程，避免八进程把 CPU 线程超订。
 
-**`VLLM_SM75_QWEN38_HC_GEMV=0`**
-上游的 HC GEMV 路径开关。本档取 0（与测速基准同口径）；改成 1 属另一档，需单独测。
+**`VLLM_SM75_QWEN38_HC_GEMV=1`**
+上游的 HC 投影 GEMV 核开关。面板测速档位本来就取 1；2026-10-19 单变量 A/B（1024 单档）0→1 得 **+3.97%**（49.66→51.63 tok/s），八卡日志各有三形状 `NEXT_HC_GEMV_ACTIVE`。温度 0 指纹只出现同义改写；如大样本精度对拍发现退化，改回 0 并重建。
 
 **`VLLM_FLASHINFER_WORKSPACE_BUFFER_SIZE=134217728`**
 flashinfer 的 workspace 大小（128 MiB）。调小省显存但可能触发回退；调大更宽裕、占显存。
@@ -681,7 +681,7 @@ NCCL_DEBUG=WARN
 NCCL_IB_DISABLE=1
 NCCL_P2P_DISABLE=0
 OMP_NUM_THREADS=1
-VLLM_SM75_QWEN38_HC_GEMV=0
+VLLM_SM75_QWEN38_HC_GEMV=1
 VLLM_FLASHINFER_WORKSPACE_BUFFER_SIZE=134217728
 VLLM_USE_BREAKABLE_CUDAGRAPH=1
 VLLM_WORKER_MULTIPROC_METHOD=spawn
