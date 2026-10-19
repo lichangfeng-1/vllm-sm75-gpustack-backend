@@ -721,15 +721,18 @@
               <div class="benchmark-heading"><span>能力评测 · BenchLocal</span><input type="checkbox" role="switch" id="benchToggle-benchlocal" aria-label="启用能力评测 · BenchLocal" checked /></div>
               <div id="benchLocalPanel" class="benchlocal-panel">
                 <p id="blCurrentModel" class="muted"></p>
-                <details id="blCustomApiPanel" class="bl-advanced">
+                <details id="blCustomApiPanel" class="bl-advanced bl-custom-api">
                   <summary>自定义 API（可选，不跟随当前模型）</summary>
-                  <div class="benchlocal-controls">
-                    <label><input id="blCustomApi" type="checkbox" /> 启用自定义 API</label>
-                    <label>API 地址<input id="blApiUrl" type="text" placeholder="http://172.17.100.10:8180/v1" /></label>
+                  <div class="bl-custom-head">
+                    <label><input id="blCustomApi" type="checkbox" /> <span>启用自定义 API</span></label>
+                    <span class="muted">用于测试其他 OpenAI 兼容接口，不影响当前模型。</span>
+                  </div>
+                  <div class="bl-custom-grid">
+                    <label class="bl-span2">API 地址<input id="blApiUrl" type="text" placeholder="http://172.17.100.10:8180/v1" /></label>
                     <label>API 密钥<input id="blApiKey" type="password" autocomplete="off" placeholder="可留空" /></label>
                     <label>模型名称<input id="blApiModel" list="blApiModels" type="text" placeholder="测试并拉取，或手填" /><datalist id="blApiModels"></datalist></label>
                   </div>
-                  <div class="benchlocal-actions"><button id="blApiProbe" type="button">测试并拉取模型</button><span id="blApiStatus" class="muted" role="status"></span></div>
+                  <div class="benchlocal-actions bl-custom-actions"><button id="blApiProbe" type="button">测试并拉取模型</button><span id="blApiStatus" class="muted" role="status"></span></div>
                 </details>
                 <div class="benchlocal-controls bl-primary-controls">
                   <label>参数方案<select id="blPreset"><option value="default">题包默认</option><option value="custom">自定义</option></select></label>
