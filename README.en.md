@@ -37,7 +37,7 @@ Below this we do not guarantee (and have not tested); above it we do not guarant
 Full steps and troubleshooting: **`gpustack/run-book-v1.md`**. Minimal sequence:
 
 ```bash
-# 0) Pull the two base images first (otherwise stage 1 stalls on a 60 GB download)
+# 0) Pull the two base images first (otherwise the first build stalls on a ~42 GiB base-image pull)
 docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688
 docker pull quay.io/gpustack/gpustack:v2.2.3
 
@@ -45,10 +45,14 @@ docker pull quay.io/gpustack/gpustack:v2.2.3
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
 
-# 2) One command: upstream vLLM base -> SM75 base -> custom backend (fastest profile by default)
-#    The last layer pins transformers/tokenizers to 5.15.1/0.22.2 (measured 57.04 tok/s).
+# 2) One command: upstream vLLM base -> custom backend (single build, fastest profile by default)
+#    The repo merges the upstream docker/Dockerfile with our five layers into
+#    gpustack/Dockerfile.allinone (reproducible generator), so one docker build goes from the
+#    vllm/vllm-openai base to the final image -- no intermediate base tag.
+#    The last layer pins transformers/tokenizers to 5.15.1/0.22.2 (measured 56.83-57.04 tok/s).
 #    Output tag: vllm-sm75-gpustack:v0.1.7-beta2-v6.
-#    Rollback to the base-image versions (5.17.0/0.23.2): add --no-tf-pin (output tag -v4).
+#    Rollback to base-image versions (5.17.0/0.23.2): --no-tf-pin (output tag -v4-nopin).
+#    Legacy two-stage build (troubleshooting only): --two-stage.
 bash gpustack/preflight-sources-v1.sh
 bash gpustack/build-backend-v1.sh
 

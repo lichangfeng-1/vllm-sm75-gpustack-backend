@@ -31,10 +31,10 @@
 
 **下文命令里"你这台机器"的值，统一由 `HOST_IP` 与 `GS_DATA_DIR` 两个变量给**（在 §1 的 export 之后照抄即可）。
 
-**先把两枚基础镜像拉下来**（这是让构建"很快"的关键——否则第一段构建会卡在 60 GB 的基座下载上）：
+**先把两枚基础镜像拉下来**（这是让构建"很快"的关键——否则首次构建会卡在约 42 GiB 的基座拉取上）：
 
 ```bash
-docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688   # 第一段基座，约 60 GB
+docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688   # 上游基座，落盘约 42 GiB（构建后 SM75 后端约 64 GB）
 docker pull quay.io/gpustack/gpustack:v2.2.3                                                                                  # 平台本体，约 1 GB
 ```
 
@@ -52,53 +52,46 @@ cd vllm-sm75-gpustack-backend
 
 ## 2 探活并构建后端镜像
 
-**从上游 vLLM 基座到自定义后端是一条链，不是两个产品。** 基座是 `vllm/vllm-openai:v0.30.0-cu129`（钉在 `docker/Dockerfile:3`），推荐用一条 `build-backend-v1.sh` 命令把它推到末端；下面的两段命令只是排错时的手动等价路径：
+**从上游 vLLM 基座到自定义后端是“一次构建”，不是两个产品。** 基座是 `vllm/vllm-openai:v0.30.0-cu129`（钉在 `docker/Dockerfile:3`）。默认入口把上游 Dockerfile 原文与我们的五层合成一份 `gpustack/Dockerfile.allinone`，`build-backend-v1.sh` 用它**一次 `docker build` 从基座走到末端**，不再产生中间基座 tag：
 
 ```text
 vllm/vllm-openai:v0.30.0-cu129
-  ↓ bash gpustack/build-gpustack-v1.sh --build
-vllm-sm75:v0.1.7-beta2                     （SM75 基座：补丁门＋上游树零改动）
-  ↓ docker build -f gpustack/Dockerfile.v1 --target runtime-pin-layer …
-vllm-sm75-gpustack:v0.1.7-beta2-v6         （默认最快档：五层全上＋运行期钉 5.15.1/0.22.2）
+  ↓ docker build -f gpustack/Dockerfile.allinone --target runtime-pin-layer …
+vllm-sm75-gpustack:v0.1.7-beta2-v6         （默认最快档：上游构建段＋五层＋运行期钉 5.15.1/0.22.2）
 ```
 
-`vllm-sm75` 只是链条中间产物，**不是后端镜像**；第 6 节注册时必须用链条末端那枚 `vllm-sm75-gpustack`。两段都跑完，注册时才有的可填。
+`gpustack/Dockerfile.allinone` 由 `gpustack/gen-allinone-dockerfile-v1.py` 生成（上游 `docker/Dockerfile` 原文仍是冻结文件，生成物提交入库、可审计）；`--check` 可验证生成物与输入一致。第 6 节注册用末端那枚 `vllm-sm75-gpustack`。
 
-> **2026-10-20 定版**：默认交付是 `-v6`（层 5 把 transformers/tokenizers 钉到 5.15.1/0.22.2，实测 57.04）；`--no-tf-pin` 产出 `-v4`（基座原版 5.17.0/0.23.2，56.26/56.97，回退用）。**同一枚镜像**既能做 GPUStack 后端，也能单独起面板（入口 `runtime-entrypoint.py`，见 §11），不依赖任何历史镜像。
+> **2026-10-20 定版**：默认交付是 `-v6`（层 5 把 transformers/tokenizers 钉到 5.15.1/0.22.2，实测 56.83–57.04）；`--no-tf-pin` 产出 `-v4-nopin`（基座原版 5.17.0/0.23.2，56.26/56.97，回退用）。**同一枚镜像**既能做 GPUStack 后端，也能单独起面板（入口 `runtime-entrypoint.py`，见 §11），不依赖任何历史镜像。
 
-**推荐只跑一条命令**（基座是内部构建缓存；已在本地就复用）：
+**推荐只跑一条命令**：
 
 ```bash
 bash gpustack/preflight-sources-v1.sh
-bash gpustack/build-backend-v1.sh            # 默认：基座缺失时重建，产出钉 5.15.1/0.22.2 的 -v6 最快档
+bash gpustack/build-backend-v1.sh            # 单次构建，产出钉 5.15.1/0.22.2 的 -v6
 docker images vllm-sm75-gpustack             # 期望 v0.1.7-beta2-v6
 ```
 
-`--drop-base` 会在后端构建成功后删掉 `vllm-sm75:v0.1.7-beta2` 这个中间 tag（省盘，但下次要重建基座）。Docker 本身没有“无中间层”的构建，能去掉的是**中间产物 tag**，不是构建层。`--no-tf-pin` 产出 `-v4`（基座原版 5.17.0/0.23.2，回退用）。
+`--two-stage` 是回退路径（先建 `vllm-sm75` 基座再叠 `Dockerfile.v1`，用于排错/对比）；只有它才会产生 `vllm-sm75:v0.1.7-beta2` 中间 tag，配套 `--rebuild-base`/`--drop-base`。`--no-tf-pin` 产出 `-v4`。
 
-等价的手动两段（排错或分步跟日志时用）：
+等价的手动单次构建（排错时用）：
 
 ```bash
-bash gpustack/preflight-sources-v1.sh          # 只读 HEAD 探测，红就别往下走
-bash gpustack/build-gpustack-v1.sh --build     # 一条命令：五道补丁门 → 第一段构建（门不绿会在构建前停住，不白花时间）
-docker images vllm-sm75                        # 期望 vllm-sm75:v0.1.7-beta2（十 GB 量级，首次很慢，建议后台跑并跟看日志）
-
-docker build --file gpustack/Dockerfile.v1 --target runtime-pin-layer \
-  --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 \
+bash gpustack/preflight-sources-v1.sh
+python3 gpustack/gen-allinone-dockerfile-v1.py
+docker build --file gpustack/Dockerfile.allinone --target runtime-pin-layer \
   --build-arg TF_VERSION=5.15.1 --build-arg TOKENIZERS_VERSION=0.22.2 \
-  -t vllm-sm75-gpustack:v0.1.7-beta2-v6 .      # 第二段：层1 pcieipc ＋ 层2 incple ＋ 层3 时区 ＋ 层4 面板 ＋ 层5 运行期钉版
-
-docker images vllm-sm75-gpustack               # 期望 tag v0.1.7-beta2-v6
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v6 .
 ```
 
 > `--build` 已经是"门＋构建"一条命令；只想先验门、不想等构建时，去掉 `--build` 单独跑一次即可（那一步不执行 docker build）。
 
 四条会踩的：
 
-- 第一段的产物名是 `vllm-sm75:v…`，**它不是后端镜像**。拿它去注册，实例起不来且现象像镜像坏了。
-- 第二段取 `--target runtime-pin-layer`（文件末段＝最终层）。取 `panel-layer` 得到不含运行期钉版的 v4（5.17/0.23），取 `pcieipc-layer` 只得到层 1，缺 incple 与 tzdata。
-- `BASE_TAG` 必须是**没被本线加装过**的那层。层 1 的装机脚本是追加型的，见到自己的 marker 就退 3（`gpustack/layers/pcieipc/install-pcieipc.sh:35`），拿已含层 1 的 tag 当基座会把构建直接打红。
-- 基座那枚 tag 与 digest 钉在 `docker/Dockerfile:3` 与 `docker/build.sh:21`，现值 `vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb…`。换基座用第一段的 `BASE_IMAGE=` 环境变量覆盖（脚本原样转成 `--build-arg`，不必改仓内文件）。**要注意换的到底是什么**：上游那几行是按 `--index …/cu129` 重装 `torch==2.13.0+cu129` 并断言 `torch.version.cuda == "12.9"` 的（`docker/Dockerfile:15-17`），所以只换基座时镜像里的 torch 与 triton 不变，变的是它下面那层 CUDA 工具链；要让 torch 也跟着换档，得连这几行一起动，而 `docker/Dockerfile` 在上游冻结清单里。
+- `--two-stage` 才会产出 `vllm-sm75:v…` 中间镜像，**它不是后端镜像**；默认单次构建没有这一层。
+- 末端 target 取 `--target runtime-pin-layer`（文件末段＝最终层）。取 `panel-layer` 得到不含运行期钉版的 v4（5.17/0.23），取 `pcieipc-layer` 只得到层 1，缺 incple 与 tzdata。
+- 仅 `--two-stage` 的 `BASE_TAG` 必须是**没被本线加装过**的那层。层 1 的装机脚本是追加型的，见到自己的 marker 就退 3（`gpustack/layers/pcieipc/install-pcieipc.sh:35`），拿已含层 1 的 tag 当基座会把构建直接打红。
+- 基座 tag 与 digest 钉在 `docker/Dockerfile:3` 与 `docker/build.sh:21`，现值 `vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb…`。单次构建下改 `docker/Dockerfile` 的 `ARG BASE_IMAGE`（或生成器参数）后重生成 allinone。**要注意换的到底是什么**：上游那几行按 `--index …/cu129` 重装 `torch==2.13.0+cu129` 并断言 `torch.version.cuda == "12.9"`（`docker/Dockerfile:15-17`），只换基座时 torch 与 triton 不变，变的是 CUDA 工具链；要让 torch 跟着换档，得连这几行一起动。
 
 两枚构建期下载件（`flashinfer_cubin` wheel 与 `nvidia-pstated` 二进制）都钉在上游 Release ＋ sha256，我们不托管、不重新分发（后者是 GPL-3.0-only）。
 
@@ -156,6 +149,7 @@ docker start sm75-gpustack-worker
 - **`--advertise-address` 不能省**。多网卡机器上 worker 会通告错地址，表现是"worker 显示 ready，但模型起不来或连不上"，很难查。
 - 跨机部署才需要 token：用 UI 的 Workers → 添加 worker 给出的整条命令，`--token` 会出现在命令行上，**同机 `ps` 可见**，跑完记得收紧该 token。
 - **`--privileged` ＋ `docker.sock`＝容器内进程等价宿主 root**。这是 GPUStack 自己起模型容器的必要条件，无解，只能限定：只在可信机器上跑、别把 8180 发到不可信网络、API key 别写进 URL（会进访问日志）。
+- **为什么 worker 保留 host（必要项）**：worker 通过 `docker.sock` 管理模型容器，模型实例端口由平台直接开在宿主命名空间；改 bridge 需要映射 worker 监听口（10150）与每个模型端口，并重测注册/调度，未纳入本交付默认。**server 已按最小暴露走 bridge＋只映射 8180；测速与验证容器也改为 bridge＋单端口。**
 - worker 走 host 网，所以模型实例端口（如 40014）**直接开在宿主上且引擎侧不带鉴权**。"仅内网可达"是硬约束，不是建议。
 - 这里**不设 `--shm-size`**：模型实例容器的 `/dev/shm` 由模型环境变量 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB` 决定（见第 7 步），设 worker 的没用。
 
@@ -212,7 +206,7 @@ bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt
 - `后端参数` 整块粘 `gpustack/args-paste-videooff-v1.txt`（**默认 A 路线**，24 行：保留图像、视频 0）；纯文本（省显存、少一段视觉预热）改用 `gpustack/args-paste-v1.txt`（24 行，含 `--language-model-only`）。
 - `环境变量` 整块粘 `gpustack/env-paste-v1.txt`（**25 行**）。**第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM=120779177984` 是硬性项**：没有它，平台按启发式估出 204.5 GiB 需求，而本机八卡可分配只有 117.76 GiB，所以模型永久排队、界面不报错也不给原因。换机器按 `claim ＝ 实测逐卡驻留 MiB × 卡数 × 1048576` 重算。
 - 表单里会多出几条不是你粘的 env（`SAFETENSORS_FAST_GPU`、`RUNAI_STREAMER_*`、`VLLM_CACHE_ROOT`）——那是平台自己塞的默认值，别当成粘坏了。
-- **默认 A 路线已开图、关视频**：粘贴块第 6 行是 `--limit-mm-per-prompt={"image":16,"video":0}`，引擎按多模态加载（`Qwen4ExpForConditionalGeneration`，带视觉塔）；实测 A 路线与纯文本只差 0.1–0.6 tok/s，单图请求 `multimodal_tokens.image=64` 正常。**每请求**上限 16 张，不是每会话总量；超过会被拒，不会自动拆批/循环，多图请分请求或调高上限（要重算 claim）。
+- **默认 A 路线已开图、关视频**：粘贴块第 6 行是 `--limit-mm-per-prompt={"image":4,"video":0}`，引擎按多模态加载（`Qwen4ExpForConditionalGeneration`，带视觉塔）；实测 A 路线与纯文本只差 0.1–0.6 tok/s，单图请求 `multimodal_tokens.image=64` 正常。**每请求**上限 4 张，不是每会话总量；超过会被拒，不会自动拆批/循环。**引擎不会把旧图从上下文中顶掉**——要“新图顶旧图”，由客户端维护会话滑动窗口（只保留最近 N 张图/最近几轮，旧消息连同图片从 `messages` 删除），引擎侧只负责每请求 ≤4。
 - **切纯文本**：把第 6 行换成 `--language-model-only`（即 `args-paste-v1.txt`），省显存、少一段视觉预热；claim 口径不同，换档要按实测重算。
 - **开视频**：把 `video` 改成 1（每路按帧数吃 token，本线未做视频性能验收）；开放任何新模态都要重算 claim。开多模态后逐卡实测 15,372 MiB，已超 `0.92 × 16384 ＝ 15,073` 的可分配口径，本机这一档存在"准入靠低报、运行靠物理余量"的不体面形态，余量只剩约 1,012 MiB/卡。
 - **不写限额时的引擎默认上限是 999，不是 1**（`vllm/config/multimodal.py:478-489`，注释原文 "Unspecified modality is set to 999 by default"）；10-15 那次"看起来只进 1 张"是请求里本来就只带了一张。10-15 实测一张工作台截图进模型、正文准确描述了画面，硬指标 `usage.multimodal_tokens.image = 2040`、prompt 2117 token、`mm_cache_queries_total = 1.0`，引擎自报 `Multi-modal warmup completed`。**该次取证走的是引擎直连口（本机 40028），不是 8180 网关**，别把这条读成"网关侧图像已验"。
@@ -221,11 +215,11 @@ bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt
 
 | 想要什么 | 参数块怎么改 |
 |---|---|
-| **A 路线（默认交付档：开图、关视频）** | `--limit-mm-per-prompt={"image":16,"video":0}`，删掉 `--language-model-only` |
+| **A 路线（默认交付档：开图、关视频）** | `--limit-mm-per-prompt={"image":4,"video":0}`，删掉 `--language-model-only` |
 | 纯文本 | 保留 `--language-model-only`，不加限额（`args-paste-v1.txt`） |
 | 开图、不写限额 | **删掉** `--language-model-only`（引擎默认上限 999） |
-| 开图、每请求最多 32 张 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":32}` |
-| 图＋视频 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":16,"video":1}` |
+| 开图、每请求最多 4 张 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":32}` |
+| 图＋视频 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":4,"video":1}` |
 
 三条硬约束，改之前先看：
 
@@ -310,7 +304,7 @@ docker run -d --name sm75-bench-cli \
 
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
-**本仓默认路线（`-v6`）实测（2026-10-20，SMT Off，AutoRound，output 1024，并发 1，面板直连）**：8192/16384/32768 = **56.79 / 57.15 / 57.17（均值 57.04）**，A 路线（image16/video0），与历史 AutoRound 57.04 一致。关键变量是**transformers/tokenizers 成对钉到 5.15.1/0.22.2**：v4 栈钉对＝57.04，旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36，v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers。** 同机对照：不钉版 v4 **56.26/56.97**；旧面板独立容器 59.35（text-only，不可与 A 路线相减）。**仓库从 vLLM 基座一条命令构建的就是 v6，不需要任何历史镜像。**
+**本仓默认路线（`-v6`）实测（2026-10-20，SMT Off，AutoRound，output 1024，并发 1，面板直连）**：8192/16384/32768 = **56.79 / 57.15 / 57.17（均值 57.04）**，A 路线（image4/video0），与历史 AutoRound 57.04 一致。关键变量是**transformers/tokenizers 成对钉到 5.15.1/0.22.2**：v4 栈钉对＝57.04，旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36，v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers。** 同机对照：不钉版 v4 **56.26/56.97**；旧面板独立容器 59.35（text-only，不可与 A 路线相减）。**仓库从 vLLM 基座一条命令构建的就是 v6，不需要任何历史镜像。**
 
 仓根 `README.md` 的性能节挂着三张测速表：基线档 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出）。
 
@@ -333,12 +327,14 @@ docker run --rm -v "$PWD/bench-seed:/seed" --entrypoint python3 \
 第二步，无头复跑（每完成一格增量落 `<cfg>.results.json`，文件 mtime 就是取证时刻）：
 
 ```bash
-docker run --rm --network host \
+docker run --rm \
   -v "$PWD/bench-seed:/speedtest:ro" -v "$PWD/cfg.json:/work/cfg.json:ro" \
   -v "$KEY_FILE:/run/secrets/gs_apikey:ro" -v "$PWD/out:/work/out" \
   --entrypoint python3 vllm-sm75-gpustack-bench:v0.1.7-beta2-v1 \
   /opt/sm75-workbench/console/benchmark-runner.py /speedtest /work/cfg.json
 ```
+
+> 默认 bridge（不加 `--network host`）：cfg 里的 `url` 写宿主 IP，容器经 NAT 访问 8180；只有方括号里的目标明确要求“与宿主同栈绑定 127.0.0.1”时才需要 host。
 
 `cfg.json` 的字段与本机结案那批用的值（`url` 换成你的网关口，`key_file` 指到第 4 步落盘的那份键文件，**键值不进命令行也不进日志**）：
 
@@ -466,6 +462,8 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 
 - 上面是“只起面板、不跑模型”。要让这枚容器同时跑模型：加 `-e SM75_PROFILE=flash-next-tp8-256k-nomtp` 并把模型目录挂到 profile 的 `defaultModel` 路径（`-v <模型目录>:/models/Qwen3.8-Flash-Next-W4A16-AutoRound:ro`）。
 - **2026-10-20 实测（同一枚 `-v6` 镜像）**：GPUStack 后端入口（`panel-sidecar.py vllm serve`）面板 1615 与引擎 200；独立入口（`runtime-entrypoint.py`）面板 1615=200、引擎 8000=200（FP8PLE text-only profile；`POWER_MODE=sleep` 规避宿主缺 `libnvidia-api.so.1`）。**一枚镜像两种用法成立。**
+- **独立跑 AutoRound A 路线时，profile env 必须补三项**：`VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC=1`、`NCCL_P2P_LEVEL=SYS`、`VLLM_FIREFLY=auto`。镜像内 `flash-next-tp8-256k-nomtp` 档的 env 默认**没有** ALLREDUCE，直接起独立面板测 8192 只有 **41.84/40.61/40.92**（Firefly AR 档）；补齐后同尺 8192 = **56.32/57.28/56.77（中位 56.77）**，与 GPUStack 托管形态同档。
+- **独立面板测速的 API key**：引擎侧鉴权用 `$SM75_CONSOLE_ROOT/engine-key.current`（不是面板登录用的 `key`）；请求头 `Authorization: Bearer <engine-key>`。面板 UI 的 speedtest 扩展在独立模式需先启用；**一键方式**：容器 env 加 `SM75_EXTENSIONS=panel,harness,speedtest,sql` 与 `SM75_EXTENSIONS_FORCE=1`——首次启动会启用，已有 `enabled:false` 记录也会被显式强制打开（`FORCE` 默认关，不改变原有“仅首启启用”的行为）。
 
 **三条验证（都实测过）**：① `curl -s -o /dev/null -w '%{http_code}' http://<宿主>:1615/` 回 **200**；② 容器里 PID 1 之外能看到 `node /opt/sm75-workbench/console/server.mjs`；③ `$SM75_CONSOLE_ROOT/key`（43 B）在；面板 API 未登录时回 `{"error":"请先登录 SM75 控制台"}` 属正常。
 
@@ -665,7 +663,7 @@ GPUStack 用这一格整条覆盖镜像 ENTRYPOINT（字符串，`shlex.split` �
 --tensor-parallel-size=8
 --enable-expert-parallel
 --enable-ep-weight-filter
---limit-mm-per-prompt={"image":16,"video":0}
+--limit-mm-per-prompt={"image":4,"video":0}
 --max-model-len=262144
 --max-num-seqs=4
 --max-num-batched-tokens=4096
@@ -799,14 +797,14 @@ bash gpustack/build-oldpanel-backend-v1.sh
 ### 14.2 后端版本与模型行
 
 - 后端版本名 `0.1.7-sm75.1-oldpanel-custom`，镜像填产物 tag，入口仍是 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`。
-- 模型行照 §13 粘，A 路线用 `args-paste-videooff-v1.txt`（24 行，`--limit-mm-per-prompt={"image":16,"video":0}`，无 `--language-model-only`）。
+- 模型行照 §13 粘，A 路线用 `args-paste-videooff-v1.txt`（24 行，`--limit-mm-per-prompt={"image":4,"video":0}`，无 `--language-model-only`）。
 - **面板端口是 1615**：旧镜像 ENV 带 `SM75_CONSOLE_PORT=1615`，`panel-sidecar.py:150` 优先读 env。判端口看容器 `/proc/net/tcp`（1615=`064F`、1616=`0650`），别信 panel.log 尾部（混着历史容器的行）。
 
 ### 14.3 实测（同机 8×T10、SMT Off、AutoRound、output 1024、并发 1、面板直连）
 
 | 形态 | 8192 | 16384 | 32768 | 均值 |
 |---|---:|---:|---:|---:|
-| 旧引擎薄层＋A 路线（image16/video0） | 56.92 | 57.57 | 56.96 | **57.15** |
+| 旧引擎薄层＋A 路线（image4/video0） | 56.92 | 57.57 | 56.96 | **57.15** |
 | 旧引擎薄层＋text-only（两轮） | 57.56/57.07 | 56.98/58.11 | 57.22/58.04 | 57.25/57.74 |
 | v4 后端（5.17.0）panel sidecar，六档 | 56.97 | — | — | 56.26 |
 | v4 后端 8180 网关，四档 | 53.57 | — | — | 54.71 |
@@ -827,3 +825,21 @@ bash gpustack/build-oldpanel-backend-v1.sh
 - 做法：在 14.2 的旧引擎薄层镜像上**只**替换 `transformers 5.15.1→5.17.0` 与 `tokenizers 0.22.2→0.23.2`（两镜像完整 `pip list` 差集恰为这两项，`huggingface_hub` 相同）。recipe `gpustack/Dockerfile.oldpanel-backend-tf517-v1`，构建 5.5 s。
 - 同尺三档两轮：**53.31/57.02/54.40（54.91）**、**55.37/56.18/55.87（55.81）**，合并 **55.36**；比旧栈 5.15.1（57.15–57.74）低 **1.8–2.4**，也低于 v4 的 56.26/56.97。
 - ⇒ **不要建议用户单独升级或降级 transformers**：57 来自旧引擎整包（vLLM 构建＋5.15.1 组合），单项升级在旧栈上反而掉速；v5（v4 栈换 5.15.1，51.1 对 51.8）是同一规律的反向证据。第三线版本仅留档，生产仍用 14.1 的薄层镜像。
+
+## 15 扩展实验：CPU 亲和性（2026-10-20，负结果，不推荐）
+
+- **背景**：SMT Off 后想把 8 个 TP worker 与 EngineCore 钉到固定物理核，减少迁移与相互争用。
+- **做法**：`taskset -a -pc`（覆盖进程的全部线程）分两组：
+  - 1 核/进程：EngineCore→16，TP0–TP7→8–15；
+  - 2 核/进程：EngineCore→4-5，TP0–TP7→6-21（每进程两核）。
+- **结果**（同实例、v6、A 路线、8192 单档、系统空闲）：
+  - 默认亲和（0-23）基线：56.15 / 57.04 / 56.50；
+  - 1 核/进程：**52.40**；
+  - 2 核/进程：**55.38**。
+- **结论**：整进程绑核是**负优化**。每个 worker 有 80+ 线程（NCCL、RPC、回调、Python 线程池），单核/双核掩码压缩了调度弹性；默认 0-23 让内核按活跃线程分散，反而最好。**不纳入默认，也不作为推荐选项**。
+- **恢复**：`taskset -a -pc 0-23 <pid>`（EngineCore 与 8 个 worker）。
+- **后续可选（未做）**：只给每个 worker 中 CPU 占用最高的 1–2 个计算线程设掩码，其余线程不限制；当前证据不支持先做。
+
+### 15.1 读数重复性提示（同窗口实测）
+
+同一实例、同一配置、连续 5 次 8192 单档：**51.76 / 55.56 / 54.77 / 53.75 / 57.05**（中位数 54.77）；引擎侧纯 decode 窗口也在 51.9–57.1 波动。⇒ **单次读数不足以判定 1–2 tok/s 的配置差异**；引用性能结论时用多次中位数，并注明测试窗口是否有后台构建/其他负载。

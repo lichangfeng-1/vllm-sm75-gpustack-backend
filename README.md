@@ -38,7 +38,7 @@
 详细步骤与排错见 **`gpustack/run-book-v1.md`**；这里只给最小序列。
 
 ```bash
-# 0) 先把两枚基础镜像拉下来（否则第一段构建会卡在 60 GB 下载上）
+# 0) 先把两枚基础镜像拉下来（否则首次构建会卡在约 42 GiB 的上游基座拉取上）
 docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688
 docker pull quay.io/gpustack/gpustack:v2.2.3
 
@@ -46,11 +46,13 @@ docker pull quay.io/gpustack/gpustack:v2.2.3
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
 
-# 2) 一条命令：上游 vLLM 基座 → SM75 基座 → 自定义后端（默认最快档）
-#    默认在最后一层把 transformers/tokenizers 钉到 5.15.1/0.22.2（实测 57.04 tok/s）；
+# 2) 一条命令：上游 vLLM 基座 → 自定义后端（默认最快档，单次构建）
+#    仓库把上游 docker/Dockerfile 原文与五层合成 gpustack/Dockerfile.allinone（生成器可复现），
+#    一次 docker build 从 vllm/vllm-openai 基座走到末端，不产生中间基座 tag。
+#    默认在最后一层把 transformers/tokenizers 钉到 5.15.1/0.22.2（实测 56.83–57.04 tok/s）；
 #    产物 tag：vllm-sm75-gpustack:v0.1.7-beta2-v6。
-#    回退基座原版 5.17.0/0.23.2（56.26/56.97）：bash gpustack/build-backend-v1.sh --no-tf-pin
-#    （产物 tag 为 -v4；基座已在本地就复用，--rebuild-base 强制重建，--drop-base 删中间 tag）
+#    回退基座原版 5.17.0/0.23.2（56.26/56.97）：bash gpustack/build-backend-v1.sh --no-tf-pin（产物 -v4-nopin）
+#    旧两段构建仅作排错回退：bash gpustack/build-backend-v1.sh --two-stage
 bash gpustack/preflight-sources-v1.sh
 bash gpustack/build-backend-v1.sh
 
@@ -124,7 +126,7 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 | 口径 | 8192 | 16384 | 32768 | 均值 |
 |---|---:|---:|---:|---:|
 | **默认交付 `-v6`（v4 栈＋运行期钉 5.15.1/0.22.2）＋A 路线** | **56.79** | **57.15** | **57.17** | **57.04** |
-| 备选：旧引擎薄层后端（transformers 5.15.1）＋A 路线（image16/video0） | 56.92 | 57.57 | 56.96 | 57.15 |
+| 备选：旧引擎薄层后端（transformers 5.15.1）＋A 路线（image4/video0） | 56.92 | 57.57 | 56.96 | 57.15 |
 | 旧引擎薄层后端、text-only，两轮 | 57.56 / 57.07 | 56.98 / 58.11 | 57.22 / 58.04 | 57.25 / 57.74 |
 | v4 后端（transformers 5.17.0）panel sidecar 直连，六档 | 56.97 | — | — | 56.26 |
 | v4 后端 8180 网关，四档 | 53.57 | — | — | 54.71 |

@@ -1,0 +1,567 @@
+# syntax=docker/dockerfile:1.7
+
+# 本文件由 gpustack/gen-allinone-dockerfile-v1.py 生成，勿手改。
+# 前半段＝上游 docker/Dockerfile 原文＋gpustack/mirror-patch-v1.patch（与两段构建的基座同内容），
+# 后半段＝本仓五层；构建入口：docker build -f gpustack/Dockerfile.allinone --target runtime-pin-layer .
+
+
+ARG BASE_IMAGE=vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688
+ARG NODE_IMAGE=docker.m.daocloud.io/library/node:22.23.2-bookworm-slim@sha256:43aeff40f4afc22e83f7589a2f37e111cff5ca84529571f1c8415bcc5fcc21b2
+
+
+FROM ${BASE_IMAGE} AS sm75-base
+
+# 国内源改动 d)：构建期 pypi 索引整体切到国内镜像。
+# UV_DEFAULT_INDEX 是 uv 的官方环境变量，仅影响本镜像构建期解析；
+# ENV 会随层继承到运行期，但运行期不跑 pip/uv 安装，故不重置（如需干净运行期在 final 前 unset）。
+ARG PIP_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV UV_DEFAULT_INDEX=${PIP_MIRROR}
+
+# 国内源改动 b)：flashinfer 两个包拆成两条安装。
+# flashinfer-python 由上面的国内 pypi 镜像解析；flashinfer-cubin 清华镜像上只到 0.5.x、没有 0.6.18，
+# 故钉上游 GitHub Release 直链＋URL 片段里的 sha256（本仓不托管、不重新分发；上游挪址或换字节都会红）。
+RUN uv pip uninstall --system flashinfer-jit-cache
+RUN uv pip install --system --no-cache --no-deps flashinfer-python==0.6.18
+RUN uv pip install --system --no-cache --no-deps \
+        "https://github.com/flashinfer-ai/flashinfer/releases/download/v0.6.18/flashinfer_cubin-0.6.18-py3-none-any.whl#sha256=2dd65c0fcfc6bc44c67f148530de5372979c2e3d260e47935730f94156d4d873"
+
+# The pinned official cu129 image contains Torch 2.14/cu130 after its optional
+# connector install, while its vLLM/torchvision wheels require Torch 2.13.
+# Restore the CUDA 12.9 ABI before compiling any extension; keep the official
+# /etc/uv-overrides.txt NCCL pin. Resolve exact CUDA wheel and Triton versions.
+# 国内源改动 a)：PyTorch cu129 轮子索引参数化，默认值为 preflight 实测可探活的国内镜像。
+# 覆盖方式：docker build --build-arg PYTORCH_MIRROR=<url>
+ARG PYTORCH_MIRROR=https://mirror.sjtu.edu.cn/pytorch-wheels/cu129
+RUN uv pip install --system --no-cache \
+        --index ${PYTORCH_MIRROR} \
+        torch==2.13.0+cu129 triton==3.7.1 && \
+    python3 -c 'import torch, importlib.metadata as m; assert torch.__version__ == "2.13.0+cu129"; assert torch.version.cuda == "12.9"; assert m.version("triton") == "3.7.1"'
+
+# CUDA 12/13 wheels share .so paths. A version-only downgrade leaves overwritten
+# files behind, so remove conflicting distributions and reinstall all four.
+RUN uv pip uninstall --system nvidia-cudnn-cu13 nvidia-cusparselt-cu13 \
+        nvidia-nccl-cu13 nvidia-nvshmem-cu13 && \
+    uv pip install --system --no-cache --no-deps \
+        --reinstall-package nvidia-cudnn-cu12 --reinstall-package nvidia-cusparselt-cu12 \
+        --reinstall-package nvidia-nccl-cu12 --reinstall-package nvidia-nvshmem-cu12 \
+        nvidia-cudnn-cu12==9.20.0.48 nvidia-cusparselt-cu12==0.8.1 \
+        nvidia-nccl-cu12==2.30.7 nvidia-nvshmem-cu12==3.4.5
+# Keep CUDA Python API consistent with Torch and the optional LMCache wheel.
+RUN uv pip install --system --no-cache --no-deps cuda-python==12.9.7 cuda-bindings==12.9.7
+COPY docker/helpers/verify_cuda_libraries.py /tmp/verify_cuda_libraries.py
+RUN python3 /tmp/verify_cuda_libraries.py && rm /tmp/verify_cuda_libraries.py
+
+FROM sm75-base AS flashqla-builder
+
+ENV TORCH_CUDA_ARCH_LIST=7.5
+ARG MAX_JOBS=1
+ENV MAX_JOBS=${MAX_JOBS}
+WORKDIR /opt/flashqla-build
+COPY vllm/third_party/flash_qla_sm75 /opt/flashqla-build/source
+RUN python3 /opt/flashqla-build/source/build_extension.py \
+    --build-directory /opt/flashqla-build/work \
+    --output /opt/flashqla-build/flash_qla_sm75_gdn.so \
+    --verbose && \
+    cuobjdump --list-elf /opt/flashqla-build/flash_qla_sm75_gdn.so \
+        > /opt/flashqla-build/cuobjdump.txt && \
+    test "$(grep -Eo 'sm_[0-9]+' /opt/flashqla-build/cuobjdump.txt | \
+        sort -u)" = "sm_75"
+
+FROM sm75-base AS runtime
+ENV NCCL_P2P_LEVEL=SYS
+
+# ORIG-KEEP: transformers stays at the base image original (5.17.0, tokenizers 0.23.2).
+# The 5.15.1 pin existed only so the docstring patch below matched that exact text;
+# on 5.17.0 those docstrings are fixed upstream, so the pin and the patch both go.
+
+# Keep the production image's proven SM75 FlashInfer runtime.  In particular,
+# flashinfer-jit-cache 0.6.18 contains AOT cubins without an SM75 image and
+# makes BatchPrefillWithPagedKVCache fail during CUDA graph warmup.
+
+ARG BUILD_DATE
+ARG SOURCE_REVISION
+ARG BASE_IMAGE_ID
+ARG VLLM_SM75_RELEASE=vllm-sm75
+ARG UPSTREAM_VLLM_COMMIT=ced6857afa0ea7b2e3f0846a62e1394e90f15607
+ARG ONECAT_FLASHQLA_COMMIT=187b932dbd11940f0bcf52fb3675dd47fd69f313
+
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.opencontainers.image.base.name="${BASE_IMAGE_ID}" \
+      org.opencontainers.image.version="${VLLM_SM75_RELEASE}" \
+      org.opencontainers.image.title="VLLM-SM75" \
+      org.opencontainers.image.description="VLLM-SM75: FlashQLA-SM75 GDN prefill with Triton decode" \
+      ai.vllm.upstream.commit="${UPSTREAM_VLLM_COMMIT}" \
+      ai.vllm.upstream.version="v0.30.0" \
+      ai.vllm.flashqla.commit="${ONECAT_FLASHQLA_COMMIT}" \
+      ai.vllm.sm75.release="${VLLM_SM75_RELEASE}"
+
+COPY vllm/device_allocator/disk_snapshot.py /tmp/sm75-overlay/device_allocator/disk_snapshot.py
+COPY vllm/device_allocator/disk_sleep.py /tmp/sm75-overlay/device_allocator/disk_sleep.py
+COPY vllm/config/model.py /tmp/sm75-overlay/config/model.py
+COPY vllm/envs_sm75.py /tmp/sm75-overlay/envs_sm75.py
+COPY vllm/v1/core/sched/scheduler_sm75.py /tmp/sm75-overlay/v1/core/sched/scheduler_sm75.py
+COPY vllm/config/compilation.py /tmp/sm75-overlay/config/compilation.py
+COPY vllm/engine/arg_utils.py /tmp/sm75-overlay/engine/arg_utils.py
+COPY vllm/entrypoints/serve/utils/api_utils.py \
+    /tmp/sm75-overlay/entrypoints/serve/utils/api_utils.py
+COPY vllm/entrypoints/serve/instrumentator/metrics.py \
+    /tmp/sm75-overlay/entrypoints/serve/instrumentator/metrics.py
+COPY vllm/entrypoints/serve/instrumentator/request_timing.py \
+    /tmp/sm75-overlay/entrypoints/serve/instrumentator/request_timing.py
+COPY vllm/entrypoints/serve/instrumentator/monitor.py \
+    /tmp/sm75-overlay/entrypoints/serve/instrumentator/monitor.py
+COPY vllm/entrypoints/serve/instrumentator/dashboard.html \
+    /tmp/sm75-overlay/entrypoints/serve/instrumentator/dashboard.html
+COPY vllm/distributed/kv_transfer/kv_connector/v1/base.py \
+    /tmp/sm75-overlay/distributed/kv_transfer/kv_connector/v1/base.py
+COPY vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py \
+    /tmp/sm75-overlay/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py
+COPY vllm/model_executor/layers/quantization/kv_cache.py \
+    /tmp/sm75-overlay/model_executor/layers/quantization/kv_cache.py
+COPY vllm/model_executor/layers/quantization/utils/marlin_utils_fp8.py \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/marlin_utils_fp8.py
+COPY vllm/v1/attention/backends/flashinfer.py \
+    /tmp/sm75-overlay/v1/attention/backends/flashinfer.py
+COPY vllm/v1/attention/backends/gdn_attn.py \
+    /tmp/sm75-overlay/v1/attention/backends/gdn_attn.py
+COPY vllm/model_executor/kernels/linear/mixed_precision/marlin.py \
+    /tmp/sm75-overlay/model_executor/kernels/linear/mixed_precision/marlin.py
+COPY vllm/model_executor/kernels/linear/scaled_mm/marlin.py \
+    /tmp/sm75-overlay/model_executor/kernels/linear/scaled_mm/marlin.py
+COPY vllm/model_executor/kernels/linear/scaled_mm/cutlass.py \
+    /tmp/sm75-overlay/model_executor/kernels/linear/scaled_mm/cutlass.py
+COPY vllm/model_executor/kernels/linear/scaled_mm/humming.py \
+    /tmp/sm75-overlay/model_executor/kernels/linear/scaled_mm/humming.py
+COPY vllm/model_executor/layers/quantization/utils/firefly.py \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly.py
+COPY vllm/model_executor/layers/quantization/utils/firefly.cu \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly.cu
+COPY vllm/distributed/device_communicators/firefly_allreduce.py \
+    /tmp/sm75-overlay/distributed/device_communicators/firefly_allreduce.py
+COPY vllm/distributed/device_communicators/firefly_allreduce.cu \
+    /tmp/sm75-overlay/distributed/device_communicators/firefly_allreduce.cu
+COPY vllm/distributed/device_communicators/cuda_communicator.py \
+    /tmp/sm75-overlay/distributed/device_communicators/cuda_communicator.py
+COPY vllm/v1/engine/auto_sleep.py \
+    /tmp/sm75-overlay/v1/engine/auto_sleep.py
+COPY vllm/v1/engine/core.py \
+    /tmp/sm75-overlay/v1/engine/core.py
+COPY vllm/v1/engine/async_llm.py \
+    /tmp/sm75-overlay/v1/engine/async_llm.py
+COPY vllm/v1/engine/core_client.py \
+    /tmp/sm75-overlay/v1/engine/core_client.py
+COPY vllm/third_party/flash_qla_sm75 \
+    /tmp/sm75-overlay/third_party/flash_qla_sm75
+COPY docker/helpers/install_sm75_overlay.py /tmp/install_sm75_overlay.py
+COPY docker/helpers/patch_request_usage.py /tmp/patch_request_usage.py
+COPY docker/helpers/verify_sm75_image.py /tmp/verify_sm75_image.py
+RUN mkdir -p /opt/vllm-sm75/source /opt/vllm-sm75/extensions && \
+    python3 /tmp/install_sm75_overlay.py /tmp/sm75-overlay \
+        --source-copy /opt/vllm-sm75/source/vllm && \
+    cp -a /tmp/sm75-overlay/third_party/flash_qla_sm75 \
+        /opt/vllm-sm75/source/ && \
+    rm -rf /tmp/sm75-overlay /tmp/install_sm75_overlay.py
+
+COPY requirements/cuda.txt /opt/vllm-sm75/source/
+COPY tests/model_executor/test_sm75_gdn_selection.py \
+    /opt/vllm-sm75/source/tests/model_executor/test_sm75_gdn_selection.py
+COPY tests/kernels/attention/test_attention_selector.py \
+    /opt/vllm-sm75/source/tests/kernels/attention/test_attention_selector.py
+COPY tests/entrypoints/serve/utils/test_api_utils.py \
+    /opt/vllm-sm75/source/tests/entrypoints/serve/utils/test_api_utils.py
+COPY tests/config/test_model_dtype_override.py \
+    /opt/vllm-sm75/source/tests/config/test_model_dtype_override.py
+COPY tests/v1/engine/test_auto_sleep.py \
+    /opt/vllm-sm75/source/tests/v1/engine/test_auto_sleep.py
+
+COPY --from=flashqla-builder /opt/flashqla-build/flash_qla_sm75_gdn.so \
+    /opt/vllm-sm75/extensions/flash_qla_sm75_gdn.so
+COPY --from=flashqla-builder /opt/flashqla-build/cuobjdump.txt \
+    /opt/vllm-sm75/evidence/cuobjdump.txt
+
+# VLLM_FIREFLY=auto(=1, 等价): firefly 默认开, int4(AWQ/GPTQ) 走 int8 prefill
+# 加速, fp8 走上游 marlin(sm75 实测 firefly-fp8 不赚, fp8 加速走 VLLM_FIREFLY_AR)。
+# 纯 marlin 基线 -e VLLM_FIREFLY=0 关。MIN_M 用 envs.py 默认(1024)。
+ENV FLASH_QLA_SM75_PREBUILT_EXTENSION_PATH=/opt/vllm-sm75/extensions/flash_qla_sm75_gdn.so \
+    FLASH_QLA_SM75_ALLOW_JIT=0 \
+    PYTHONWARNINGS=ignore::FutureWarning \
+    TRANSFORMERS_VERBOSITY=error \
+    VLLM_FIREFLY=auto \
+    VLLM_USE_MODELSCOPE=true \
+    MODELSCOPE_CACHE=/root/.cache/modelscope/hub
+
+RUN python3 /tmp/verify_sm75_image.py && \
+    test -s /opt/vllm-sm75/extensions/flash_qla_sm75_gdn.so && \
+    test -s /opt/vllm-sm75/source/flash_qla_sm75/LICENSE && \
+    test -s /opt/vllm-sm75/source/flash_qla_sm75/SOURCE.md && \
+    rm -f /tmp/verify_sm75_image.py
+
+COPY docker/next /opt/vllm-sm75/next
+RUN python3 /opt/vllm-sm75/next/install.py
+COPY docker/next/templates /opt/vllm-sm75/templates
+
+COPY docker/speculative /opt/vllm-sm75/speculative
+COPY docker/helpers/install_speculative.py /tmp/install_speculative.py
+RUN python3 /tmp/install_speculative.py && rm /tmp/install_speculative.py
+COPY docker/speculative /opt/vllm-sm75/source/docker/speculative
+COPY tests /opt/vllm-sm75/source/tests
+
+FROM runtime AS selector-tests
+
+RUN uv pip install --system pytest==9.1.0 && \
+    python3 -m pytest \
+        /opt/vllm-sm75/source/tests/kernels/attention/test_attention_selector.py::test_flashinfer_compute_capability_includes_sm75 \
+        /opt/vllm-sm75/source/tests/model_executor/test_sm75_gdn_selection.py \
+        /opt/vllm-sm75/source/tests/entrypoints/serve/utils/test_api_utils.py::test_sensitive_args_are_redacted_without_mutating_input \
+        /opt/vllm-sm75/source/tests/config/test_model_dtype_override.py \
+        /opt/vllm-sm75/source/tests/v1/engine/test_auto_sleep.py \
+        /opt/vllm-sm75/source/tests/model_executor/test_dflash_quantization.py \
+        /opt/vllm-sm75/source/tests/model_executor/test_dflash_warmup.py \
+        /opt/vllm-sm75/source/tests/model_executor/test_v030_firefly_api.py \
+        /opt/vllm-sm75/source/tests/model_executor/test_v030_cutlass_fp8_selection.py \
+        /opt/vllm-sm75/source/tests/model_executor/test_v030_humming_fp8_selection.py \
+        /opt/vllm-sm75/source/tests/entrypoints/serve/instrumentator/test_monitor_control_api.py \
+        -v > /tmp/selector-pytest.log 2>&1 || { cat /tmp/selector-pytest.log; exit 1; }
+
+FROM runtime AS verified-runtime
+
+COPY --from=selector-tests /tmp/selector-pytest.log \
+    /opt/vllm-sm75/evidence/selector-pytest.log
+
+
+# All modes use the same image; runtime configuration selects speculation.
+FROM verified-runtime AS final
+# Inherit the official ENTRYPOINT ["vllm", "serve"] and unset CMD.
+# Keep upstream CLI startup presentation and default UI assets.
+
+# 容器内 pstate 管理: 固定版本二进制 + 启动包装脚本(GPL-3.0, 见 NOTICE)。
+# 容器运行时不会挂载 libnvidia-api.so.1, run.sh 在 POWER_MODE=pstate 时只读挂载宿主库。
+ARG NVIDIA_PSTATE_VERSION=1.0.9
+ARG NVIDIA_PSTATE_SHA256=4bf5b5eba202c65f5955e2981d184b4b4baa833d1d5df36b062445d736d1eda6
+COPY docker/helpers/pstate-entrypoint.sh /opt/vllm-sm75/pstate-entrypoint.sh
+COPY docker/helpers/pstate-supervisor.sh /opt/vllm-sm75/pstate-supervisor.sh
+COPY docker/helpers/nvidia-pstated.NOTICE /opt/vllm-sm75/nvidia-pstated.NOTICE
+RUN curl -fsSL -o /usr/local/bin/nvidia-pstated \
+        "https://github.com/sasha0552/nvidia-pstated/releases/download/v${NVIDIA_PSTATE_VERSION}/nvidia-pstated" && \
+    echo "${NVIDIA_PSTATE_SHA256}  /usr/local/bin/nvidia-pstated" | sha256sum -c - && \
+    chmod +x /usr/local/bin/nvidia-pstated /opt/vllm-sm75/pstate-entrypoint.sh /opt/vllm-sm75/pstate-supervisor.sh
+
+ENV SM75_FA2_SMALLQ_GRAPH=1 SM75_GDN_B1_METADATA=1
+
+LABEL ai.vllm.sm75.modes="base,mtp,dflash2,dspark"
+
+# Optional LMCache MP: explicit build/runtime opt-in, same contract as Ultra.
+ARG INSTALL_LMCACHE=0
+COPY ultra/source/lmcache /opt/vllm-sm75/lmcache
+COPY ultra/source/console/lmcache_probe.py /opt/vllm-sm75/console/lmcache_probe.py
+COPY docker/helpers/lmcache-launch.py /opt/vllm-sm75/lmcache-launch.py
+COPY docker/helpers/lmcache-entrypoint.sh /opt/vllm-sm75/lmcache-entrypoint.sh
+RUN chmod +x /opt/vllm-sm75/lmcache-entrypoint.sh && \
+    if [ "$INSTALL_LMCACHE" = 1 ]; then python3 /opt/vllm-sm75/lmcache/install.py --install --build-no-gpu; \
+    elif [ "$INSTALL_LMCACHE" != 0 ]; then echo 'INSTALL_LMCACHE must be 0 or 1' >&2; exit 2; fi
+
+COPY ultra/source/profiles /opt/vllm-sm75/profiles
+COPY docker/helpers/runtime-entrypoint.py docker/helpers/cpu-kv-check.py docker/helpers/benchlocal-entrypoint.py /opt/vllm-sm75/
+ENV SM75_EDITION=standard
+ENTRYPOINT ["python3", "/opt/vllm-sm75/runtime-entrypoint.py"]
+CMD []
+
+# ===================== 以下为本仓五层（吸收自 gpustack/Dockerfile.v1） =====================
+# ===================== 层 1：pcieipc（八卡 PCIe 直连通信提速） =====================
+FROM final AS pcieipc-layer
+
+ARG PCIEIPC_DEFER=0
+ARG PCIEIPC_IMPORT_GATE_LABEL=hard
+ARG PCIEIPC_SOURCE_WHEEL=flashinfer_python-0.7.0.post1-py3-none-any.whl
+ARG PCIEIPC_SOURCE_WHEEL_SHA256=c7adf826568d61fc1b7d3aadd4cae387a35a138bfc08e2deca2f34ecfa280716
+
+# LABEL 证据行：defer 与否必须能在成品镜像上被读出来，不允许"跳了门禁而镜像里看不出来"。
+LABEL sm75.gpustack.layer="1-pcieipc" \
+      sm75.gpustack.component="flashinfer-pcie-ipc-backport" \
+      sm75.gpustack.base="upstream-final" \
+      sm75.gpustack.pcieipc-import-gate="${PCIEIPC_IMPORT_GATE_LABEL}" \
+      sm75.gpustack.pcieipc-defer-arg="${PCIEIPC_DEFER}" \
+      sm75.gpustack.source_wheel="${PCIEIPC_SOURCE_WHEEL}" \
+      sm75.gpustack.source_wheel_sha256="${PCIEIPC_SOURCE_WHEEL_SHA256}" \
+      sm75.gpustack.files_added="6" \
+      sm75.gpustack.files_appended="3" \
+      sm75.gpustack.scope="flashinfer only; vllm tree untouched" \
+      sm75.gpustack.upstream="FlashInfer (Apache-2.0) — 层 1 六件逐字来自 0.7.0.post1，见仓根 NOTICE"
+
+# PCIEIPC_DEFER 与 LABEL 必须成对：0:hard（硬跑）或 1:deferred（显式延后）。
+# 只传一半（例如 defer=1 但 LABEL 仍是 hard）直接构建失败，不给"静默放宽"留路径。
+RUN set -eu; \
+    case "${PCIEIPC_DEFER}:${PCIEIPC_IMPORT_GATE_LABEL}" in \
+      0:hard)     echo "门禁形态：运行期 import 门禁硬开（LABEL=hard）" ;; \
+      1:deferred) echo "门禁形态：运行期 import 门禁显式延后（LABEL=deferred），任务 14 在带 GPU 的容器里补跑同一句 hasattr 判据" ;; \
+      *)          echo "红：PCIEIPC_DEFER=${PCIEIPC_DEFER} 与 LABEL=${PCIEIPC_IMPORT_GATE_LABEL} 不成对；只允许 0:hard 或 1:deferred。"; exit 1 ;; \
+    esac
+
+COPY gpustack/layers/pcieipc /opt/vllm-sm75/pcieipc
+
+# 门 1/3 件数门（红 17）：物料形状先于任何写盘动作。
+RUN bash /opt/vllm-sm75/pcieipc/lint-count-v1.sh --ctx /opt/vllm-sm75/pcieipc
+
+# 门 2/3 装机（幂等门在最前；pre 门禁 → 落六件 → 三处追加 → py_compile → post 门禁 → import 门禁 11a）
+RUN set -eu; \
+    if [ "${PCIEIPC_DEFER}" = "1" ]; then \
+      sh /opt/vllm-sm75/pcieipc/install-pcieipc.sh /opt/vllm-sm75/pcieipc --defer-import-gate; \
+    else \
+      sh /opt/vllm-sm75/pcieipc/install-pcieipc.sh /opt/vllm-sm75/pcieipc; \
+    fi
+
+# 门 3/3 终态门禁＋镜像内证据：gate-check-v3 post 红则本 RUN 红（该脚本自有红码 2）。
+# 证据落在 /opt/vllm-sm75/evidence/pcieipc-gate.json，任务 6 的指纹桥与任务 14 的验收直接读它。
+RUN set -eu; \
+    bash /opt/vllm-sm75/pcieipc/gate-evidence-v1.sh \
+      --ctx /opt/vllm-sm75/pcieipc \
+      --out /opt/vllm-sm75/evidence/pcieipc-gate.json; \
+    echo "== 证据文件内容（构建日志留一份可读副本）=="; \
+    cat /opt/vllm-sm75/evidence/pcieipc-gate.json
+
+# 层 1 的物料与脚本保留在镜像内（/opt/vllm-sm75/pcieipc），供验收就地重跑 gate-check；
+# 站点目录里的终态文件才是运行期真正生效的产物，两者由证据 JSON 逐件钉住。
+
+# ===================== 层 2：incple（AutoRound 量化白名单，Intel/Qwen3.8-Flash-Next-W4A16-AutoRound 起机的必要前提） =====================
+FROM pcieipc-layer AS incple-layer
+
+
+# LABEL 证据行：本层改的是 site-packages 安装件（D-04：镜像内 /opt/vllm-sm75/source 源码副本
+# 保持原样属预期，运行期加载的是 site-packages 件）；幂等复跑门把"不许重复插"钉进构建期。
+LABEL sm75.gpustack.layer="2-incple" \
+      sm75.gpustack.component="incple-autoround-ple-whitelist" \
+      sm75.gpustack.base="upstream-final" \
+      sm75.gpustack.target_model="Intel/Qwen3.8-Flash-Next-W4A16-AutoRound" \
+      sm75.gpustack.patch_script="gpustack/layers/incple/patch_ple_inc.py" \
+      sm75.gpustack.files_modified="1(site-packages ngram_embedding.py)" \
+      sm75.gpustack.scope="only vllm/models/qwen4_exp/nvidia/ngram_embedding.py in site-packages; /opt/vllm-sm75/source copy untouched by design (D-04)" \
+      sm75.gpustack.upstream="插入分支与 vllm 上游既有 INCConfig 形态同构（qwen_gdn_linear_attn.py:45/:778）；锚点法只插一行 import＋一支 if，不整文件覆盖"
+
+COPY gpustack/layers/incple /opt/vllm-sm75/incple
+
+# 门 1/2 装机＋构建期即验（红码：2 定位/前置与落点守卫、11b 锚点缺失、12 计数/编译断言）：
+# find_spec 探测 site-packages 实位（不写死路径）→ 落点守卫（词法＋物理向上遍历仓标记）
+# → 改前 sha → 锚点法插入 → 改后 sha → INCConfig 计数断言（1 处 import＋1 处白名单）。
+RUN set -eu; \
+    sh /opt/vllm-sm75/incple/install-incple-v1.sh /opt/vllm-sm75/incple
+
+# 门 2/2 幂等复跑：第二次必须退 0 且打印改前改后 sha 一致（IDEMPOTENT_NO_CHANGE），
+# 证明补丁不重复插；若发生重复插，计数断言（期望 1/1）红 12 直接构建失败。
+RUN set -eu; \
+    rc=0; out=$(sh /opt/vllm-sm75/incple/install-incple-v1.sh /opt/vllm-sm75/incple 2>&1) || rc=$?; \
+    printf '%s\n' "$out"; \
+    if [ "$rc" -ne 0 ]; then echo "红：incple 幂等复跑非零退出 rc=$rc（本码即复跑实跑码，门红＝构建红）"; exit "$rc"; fi; \
+    printf '%s\n' "$out" | grep -q "IDEMPOTENT_NO_CHANGE" || { \
+      echo "红：incple 幂等复跑未报 IDEMPOTENT_NO_CHANGE（第二次运行改前改后 sha 不一致？）"; exit 12; }; \
+    echo "INCPLE_IDEMPOTENT_RERUN_OK"
+
+# 层 2 的物料与脚本保留在镜像内（/opt/vllm-sm75/incple），供任务 14 验收就地重跑；
+# 运行期真正生效的是 site-packages 里的终态件，改前/改后 sha 均打印在构建日志里。
+# ===================== 层 3：时区（任务 5 本节，FROM incple-layer；本段是文件末段＝最终层） =====================
+# 为什么要有这层：上游 beta2 树里没有任何时区处理——仓根执行
+#   grep -rIl --exclude-dir=.git --exclude-dir=gpustack -e tzdata -e "TZ=" -e localtime -e zoneinfo .
+# 四类命中文件数全为 0（"utc" 的命中只落在 tools/validate-sm75-serving.py:38-39 与
+# tools/benchmark-dflash-serving.py 的 datetime.now(timezone.utc)，那是显式 UTC 打时间戳，
+# 不受容器 TZ 影响，且上游件不可改）。基座 vllm/vllm-openai 按官方镜像惯例默认 UTC（该默认值的
+# 容器内实测＝阶段二任务 14 的秒级探针 G-3，本层不依赖它成立——无论基座是哪个区，本层都显式定死）。
+# 结论：日志与推理侧时间戳按 UTC 出，与本机八卡用户的对时习惯不一致，故本层把镜像默认时区定为 Asia/Shanghai（UTC+8）。
+FROM incple-layer AS timezone-layer
+
+
+# 运行期覆盖语义（注册卡说明行的原文口径，见下方 LABEL 的 tz_override 字段）：
+#   1) 本层的 ENV TZ=Asia/Shanghai 只是**镜像默认值**；GPUStack 部署时模型 env 里的 TZ 优先级更高。
+#      2.2.3 证据：gpustack/worker/backends/base.py:457-458 ——
+#        `if self._model.env:` / `    env.update(self._model.env)`
+#      模型 env 直接 update 掉从 worker 进程继承的那份 env，容器创建时模型 env 的 TZ 赢过镜像默认，
+#      所以"用户在 GPUStack 里填了别的时区"不会被本层悄悄覆盖回来，反之用户不填时本层兜住。
+#   2) 交付给用户的 env 粘贴块已含 `TZ=Asia/Shanghai` 行（gpustack/env-paste-v1.txt 第 23 行，
+#      任务 7 建的 24 行块），镜像默认与粘贴块显式值同字，不会出现两处各定一个时区互相打架。
+#   3) gpustack/backend-version-card-v1.md 是任务 7 并行在建的件，本会话不创建也不修改它；
+#      上述说明先以本注释块＋LABEL 字段落进镜像层，待任务 7 收口后由任务 9 核对是否已进注册卡
+#      （该待办登记在任务 5 的过程件第九节，过程件未随包发布）。
+# 构建形态（任务 14）：docker build --file gpustack/Dockerfile.v1 --target timezone-layer
+#   --build-arg BASE_TAG=vllm-sm75:v0.1.7-beta2 --tag vllm-sm75-gpustack:v0.1.7-beta2-v1 <仓根>
+#   （设计稿第五节 stage1 收尾口径；是否再补 sm75.gpustack.layers 汇总 LABEL 由任务 9/14 定，本层不擅自加）。
+LABEL sm75.gpustack.layer="3-timezone" \
+      sm75.gpustack.component="timezone-default-asia-shanghai" \
+      sm75.gpustack.base="upstream-final" \
+      sm75.gpustack.tz_default="Asia/Shanghai" \
+      sm75.gpustack.tz_override="模型 env 的 TZ 优先于本层 ENV TZ（gpustack 2.2.3 gpustack/worker/backends/base.py:457-458 env.update(model env)）；粘贴块 gpustack/env-paste-v1.txt 已含 TZ=Asia/Shanghai（任务 7）" \
+      sm75.gpustack.files_added="0（仓内零新增；容器内新增 tzdata 与 /etc/localtime、/etc/timezone 接线）" \
+      sm75.gpustack.scope="image runtime default only; vllm tree and upstream 14 top-level items untouched" \
+      sm75.gpustack.upstream="tzdata（IANA 时区数据库的 Debian/Ubuntu 打包：tz 数据 public-domain＋Debian 打包 GPL-2）；阶段二构建期从 apt 源安装，本层不往仓内落任何第三方件"
+
+# apt 源不改（简报口径）：本层不动 sources.list，也不换国内 apt 镜像。Debian/Ubuntu 官方 CDN 的
+# 国内可达性一般，若阶段二构建判红，再按任务 2 的 preflight 口径议镜像替换（不在本任务范围）。
+# DEBIAN_FRONTEND 会随层继承到运行期（与任务 2 补丁里 UV_DEFAULT_INDEX 同一口径），
+# 运行期不跑 apt，故不重置；它只是让 tzdata 的 postinst 不弹交互表单。
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 门 1/3 tzdata 装机：--no-install-recommends 只拿 tzdata 本体，装完清缓存与索引，
+# 不给最终层留 apt lists。apt 失败＝它自己的非零码，由 build-gpustack-v1.sh --build 统一收进
+# 20＝构建失败；本层不新增码位（时区判据只用 18）。真装发生在阶段二（本阶段无镜像环境）。
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends tzdata; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
+
+# 镜像默认时区＝UTC+8（简报逐字）
+ENV TZ=Asia/Shanghai
+
+# 门 2/3 兜底接线：存在性断言排在任何比对之前（tzdata 没装成时这里就出声，不留到 date 比对时
+# 才以"缩写不对"的迷惑形态冒出来）。不读 TZ 环境变量、只认 /etc/localtime 与 /etc/timezone 的
+# 消费者（部分 JVM 与 C 库、日志组件）由此拿到同一个区。红 18。
+RUN set -eu; \
+    test -f /usr/share/zoneinfo/Asia/Shanghai \
+      || { echo "红 18：/usr/share/zoneinfo/Asia/Shanghai 不存在——tzdata 未装成或被裁掉，兜底接线无从谈起。"; exit 18; }; \
+    ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime; \
+    printf 'Asia/Shanghai\n' > /etc/timezone; \
+    echo "时区接线完成：/etc/localtime -> /usr/share/zoneinfo/Asia/Shanghai，/etc/timezone=Asia/Shanghai"
+
+# 门 3/3a 构建期断言（简报逐字句；红 18＝本层唯一红码）：容器里的 date 真读出 CST 这层才算成立。
+# 明写：构建期断言的容器内真跑在阶段二任务 14 复核（阶段一无镜像环境，本地只做逻辑等价干跑，
+# 干跑记录在任务 5 的过程件第五节与负控台账"任务 5 轮"，两者均属过程件、未随包发布）。
+RUN test "$(date +%Z)" = "CST" || (date; exit 18)
+
+# 门 3/3b 加严腿（仍只用 18）：堵住逐字句的三处残余边界——
+#   a) CST 这个缩写本身是歧义的：America/Chicago 与 America/Havana 冬令时同样输出 CST，
+#      单看 %Z 会放走"缩写对但偏移错"的镜像，故再断 date +%z 必须 +0800（Asia/Shanghai 无夏令时）；
+#   b) 断 TZ 真落进容器环境（printenv 读运行期 env），不是只在 Dockerfile 里写着；
+#   c) 断 /etc/localtime 与 Asia/Shanghai 的 tzfile 逐字节一致、/etc/timezone 文本一致——
+#      防"接错区"或 tzdata postinst 把 localtime 改回 Etc/UTC。
+#   工具不在 PATH 单列文案点名（否则会被误读成时区漂移），码仍归 18。
+RUN set -eu; \
+    command -v date >/dev/null 2>&1 || { echo "红 18：date 不在 PATH（工具缺失，不是时区漂移）。"; exit 18; }; \
+    command -v printenv >/dev/null 2>&1 || { echo "红 18：printenv 不在 PATH（工具缺失，不是时区漂移）。"; exit 18; }; \
+    command -v cmp >/dev/null 2>&1 || { echo "红 18：cmp 不在 PATH（工具缺失，不是时区漂移）。"; exit 18; }; \
+    command -v cat >/dev/null 2>&1 || { echo "红 18：cat 不在 PATH（工具缺失，不是时区漂移）。"; exit 18; }; \
+    test "$(printenv TZ)" = "Asia/Shanghai" \
+      || { echo "红 18：容器环境里的 TZ 不是 Asia/Shanghai（实得 [$(printenv TZ)]，空值也走这一支）。"; exit 18; }; \
+    test "$(date +%z)" = "+0800" \
+      || { echo "红 18：date 读出的 UTC 偏移不是 +0800（实得 [$(date +%z)]）——CST 缩写有歧义，偏移才是判据。"; exit 18; }; \
+    cmp -s /etc/localtime /usr/share/zoneinfo/Asia/Shanghai \
+      || { echo "红 18：/etc/localtime 不存在或与 /usr/share/zoneinfo/Asia/Shanghai 内容不一致（接错区或被 postinst 改回）。"; exit 18; }; \
+    test "$(cat /etc/timezone)" = "Asia/Shanghai" \
+      || { echo "红 18：/etc/timezone 文本不是 Asia/Shanghai（实得 [$(cat /etc/timezone)]）。"; exit 18; }; \
+    echo "时区断言全绿：TZ=Asia/Shanghai、date +%Z=CST、date +%z=+0800、localtime 与 timezone 接线一致"
+
+# 层 3 只在容器内落 tzdata 与两处接线文件，仓内零新增件；本段即最终层，
+# 成品镜像的时区默认值由镜像 ENV TZ 承载，运行期可由 GPUStack 模型 env 的 TZ 覆盖（见上方注释）。
+# ===================== 层 3 结束（文件末段） =====================
+
+# ===================== 层 4：面板负载（目标 panel-layer） =====================
+# 目的：一枚后端镜像同时满足两条用法——
+#   ① GPUStack 拉去跑模型：默认入口不变；
+#   ② 带面板的容器：SM75_EDITION=ultra 时，入口 /opt/vllm-sm75/runtime-entrypoint.py
+#      直接 exec node /opt/sm75-workbench/console/server.mjs（该入口文件基座里已有，
+#      与面板镜像内那份逐字节相同：sha256 59a2fa36…）。
+# 面板负载取自仓内 ultra/source（console 1.8 MB＋其余工作集），node 取自已钉 digest 的官方镜像；
+# 不拉 63.9 GB 的 console 镜像，也不在本仓分发第三方件。
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+FROM ${NODE_IMAGE} AS nodebin
+
+# DSH 工作台运行时：与面板共用 node v22.23.2；npm 走国内镜像。
+FROM ${NODE_IMAGE} AS harness
+ARG NPM_REGISTRY
+WORKDIR /opt/harness
+COPY ultra/harness/package.json ultra/harness/package-lock.json ./
+RUN npm config set registry "${NPM_REGISTRY}" \
+    && npm ci --omit=dev --no-audit --no-fund
+
+FROM timezone-layer AS panel-layer
+ARG NODE_IMAGE
+LABEL sm75.gpustack.layer="4-panel" \
+      sm75.gpustack.node-image="${NODE_IMAGE}" \
+      sm75.gpustack.panel-root="/opt/sm75-workbench" \
+      sm75.gpustack.harness-root="/opt/harness" \
+      io.sm75.benchlocal.unified="1"
+COPY --from=nodebin /usr/local/bin/node /usr/local/bin/node
+COPY --from=harness /opt/harness/node_modules /opt/harness/node_modules
+RUN ln -sf /opt/harness/node_modules/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm \
+    && pnpm --version
+COPY ultra/source/console /opt/sm75-workbench/console
+COPY ultra/source/profiles /opt/sm75-workbench/profiles
+COPY ultra/source/lmcache /opt/sm75-workbench/lmcache
+COPY ultra/source/benchlocal-native /opt/sm75-workbench/benchlocal-native
+COPY ultra/source/benchlocal-verifiers /opt/sm75-workbench/benchlocal-verifiers
+COPY ultra/source/vllm /opt/sm75-workbench/vllm
+# 安装 SM75 原生插件与品牌补丁到 DSH node_modules；必须在 console/plugins 就位之后。
+RUN node /opt/sm75-workbench/console/install-native-plugins.mjs \
+      /opt/harness/node_modules /opt/sm75-workbench/console
+# 装完立刻校验自定义客户端 bundle 的身份与语法，坏件不进镜像。
+RUN node /opt/sm75-workbench/console/verify-client-bundles.mjs /opt/harness/node_modules
+# 两套测试资产随仓分发（manifest.json 的 original_ui=1 已在仓内），构建期不再访问 GitHub raw。
+COPY gpustack/layers/panel/extensions/speedtest /opt/sm75-workbench/extensions/speedtest
+COPY gpustack/layers/panel/extensions/sql /opt/sm75-workbench/extensions/sql
+COPY gpustack/layers/panel/panel-sidecar.py /opt/vllm-sm75/panel-sidecar.py
+# 扩展模块（运行期由 SM75_EXTENSIONS 开关）：BenchLocal 三枚校验角色的执行依赖在构建期
+# 一次到位；测速与 SQL 两套资产已随仓 COPY 到 /opt/sm75-workbench/extensions（见上）。
+# .bench-cache / .hermes-cache / .hermes-venv-cache 是可选的构建加速目录
+# （四个已校验二进制、Hermes 源码、预建 venv）；不在上下文里也能构建，脚本会回退到官方源。
+# 缓存件仍逐个复核 sha256 / commit。PIP_INDEX_URL 默认走国内镜像，可用 --build-arg 覆盖。
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN --mount=type=bind,source=.bench-cache,target=/bench-cache \
+    --mount=type=bind,source=.hermes-cache,target=/hermes-cache \
+    --mount=type=bind,source=.hermes-venv-cache,target=/hermes-venv-cache \
+    if [ -d /hermes-cache/.git ] && [ ! -d /opt/hermes-agent/.git ]; then cp -a /hermes-cache /opt/hermes-agent; fi; \
+    if [ -x /hermes-venv-cache/bin/python ] && [ ! -x /opt/hermes-venv/bin/python ]; then cp -a /hermes-venv-cache /opt/hermes-venv; fi; \
+    SM75_BENCH_DOWNLOAD_CACHE=/bench-cache PIP_INDEX_URL=${PIP_INDEX_URL} \
+    python3 /opt/sm75-workbench/benchlocal-verifiers/install-runtime.py
+# 控制台/工作台截图与 headless Chrome 需要中文字体；不装会出现整屏方框。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+RUN chmod 0755 /opt/vllm-sm75/panel-sidecar.py
+# 入口包装：默认行为与基座完全相同（原样 exec runtime-entrypoint.py + GPUStack 给的命令）；
+# 只有模型行设了 SM75_PANEL_AUTOSTART=1 时，才先把面板拉到后台再 exec 引擎。
+ENTRYPOINT ["python3","/opt/vllm-sm75/panel-sidecar.py","python3","/opt/vllm-sm75/runtime-entrypoint.py"]
+RUN set -eu; \
+    command -v node >/dev/null 2>&1 || { echo "红 19：node 不在 PATH"; exit 19; }; \
+    test -f /opt/sm75-workbench/console/server.mjs || { echo "红 19：面板服务端 server.mjs 缺失"; exit 19; }; \
+    test -f /opt/sm75-workbench/console/public/index.html || { echo "红 19：面板前端 public/index.html 缺失"; exit 19; }; \
+    test -f /opt/vllm-sm75/runtime-entrypoint.py || { echo "红 19：入口 runtime-entrypoint.py 缺失"; exit 19; }; \
+    test -x /opt/vllm-sm75/panel-sidecar.py || { echo "红 19：面板包装 panel-sidecar.py 缺失或不可执行"; exit 19; }; \
+    test -f /opt/sm75-workbench/benchlocal-verifiers/runtime-lock.json || { echo "红 19：benchlocal runtime-lock.json 缺失（校验容器会退 2）"; exit 19; }; \
+    test -f /opt/harness/node_modules/@deepseek-ai/dsh/lib/bin.js || { echo "红 19：DSH 运行时缺失"; exit 19; }; \
+    test -f /opt/harness/node_modules/sm75-workbench/package.json || { echo "红 19：sm75-workbench 插件缺失"; exit 19; }; \
+    test -f /opt/harness/node_modules/sm75-brand/package.json || { echo "红 19：sm75-brand 插件缺失"; exit 19; }; \
+    test -f /opt/harness/node_modules/dsh-watcher/package.json || { echo "红 19：dsh-watcher 插件缺失"; exit 19; }; \
+    test -f /opt/harness/node_modules/sm75-workspace-tools/package.json || { echo "红 19：sm75-workspace-tools 插件缺失"; exit 19; }; \
+    test -f /opt/sm75-workbench/extensions/speedtest/manifest.json || { echo "红 19：测速扩展资产缺失"; exit 19; }; \
+    test -f /opt/sm75-workbench/extensions/sql/manifest.json || { echo "红 19：SQL 测试扩展资产缺失"; exit 19; }; \
+    getent passwd 10001 >/dev/null || { echo "红 19：BenchLocal 校验用户 10001 缺失"; exit 19; }; \
+    test -x /opt/hermes-venv/bin/python || { echo "红 19：Hermes 运行环境缺失"; exit 19; }; \
+    echo "面板层断言全绿：node=$(node -v)，server.mjs/public/index.html/runtime-entrypoint.py 均在位"
+
+# ===================== 层 5：运行期包钉版（默认最快档；可关） =====================
+# 2026-10-20 实测：同一枚从 vLLM 基座构建的后端镜像，只把 transformers/tokenizers 钉回
+#   5.15.1 / 0.22.2，GPUStack 面板直连 A 路线三档 56.79/57.15/57.17（均值 57.04），
+#   而不钉时（5.17.0/0.23.2）是 56.26/56.97。旧引擎镜像的 57 也来自同一组合。
+# 因此本层作为默认交付档：一条命令从 vLLM 基座构建，不依赖任何历史镜像。
+# 关掉（回到基座原版 5.17.0/0.23.2）：--build-arg TF_VERSION= --build-arg TOKENIZERS_VERSION= 或 build 脚本 --no-tf-pin。
+FROM panel-layer AS runtime-pin-layer
+
+ARG TF_VERSION=5.15.1
+ARG TOKENIZERS_VERSION=0.22.2
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+LABEL sm75.gpustack.layer="5-runtime-pin" \
+      sm75.gpustack.transformers="${TF_VERSION}" \
+      sm75.gpustack.tokenizers="${TOKENIZERS_VERSION}" \
+      sm75.gpustack.scope="python runtime packages only; engine/vllm tree untouched" \
+      sm75.gpustack.measured="GPUStack console direct, A route, 8192/16384/32768 = 56.79/57.15/57.17 tok/s (mean 57.04), SMT Off"
+
+RUN set -eu; \
+    if [ -n "${TF_VERSION}" ]; then \
+      (command -v uv >/dev/null 2>&1 && uv pip install --system --index-url "${PIP_INDEX_URL}" "transformers==${TF_VERSION}" "tokenizers==${TOKENIZERS_VERSION}") \
+        || python3 -m pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" "transformers==${TF_VERSION}" "tokenizers==${TOKENIZERS_VERSION}"; \
+      python3 -c "import transformers,tokenizers; print('PIN TF',transformers.__version__,'TOK',tokenizers.__version__); assert transformers.__version__=='${TF_VERSION}',transformers.__version__; assert tokenizers.__version__=='${TOKENIZERS_VERSION}',tokenizers.__version__"; \
+      python3 -m pip check || echo "NOTE: 镜像既存 pip check 冲突（torch/nccl、lmcache/cuda-python、vllm/flashinfer），与本层钉版无关"; \
+    else \
+      echo "TF_VERSION 为空：保持基座原版（仅供回退/对照）"; \
+    fi
+
+# 双形态入口不变：GPUStack 用 panel-sidecar.py vllm serve；单独面板用 runtime-entrypoint.py。
+ENTRYPOINT ["python3","/opt/vllm-sm75/panel-sidecar.py","python3","/opt/vllm-sm75/runtime-entrypoint.py"]

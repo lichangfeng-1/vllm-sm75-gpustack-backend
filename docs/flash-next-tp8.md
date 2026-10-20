@@ -293,9 +293,9 @@ curl --fail http://127.0.0.1:8000/v1/chat/completions \
 
 ```bash
 export RUN_LABEL=next-repro-01
-docker run --rm --network host --entrypoint python3 \
+docker run --rm --add-host=host.docker.internal:host-gateway --entrypoint python3 \
   --env-file "$DATA_ROOT/secrets/api.env" \
-  -e VLLM_BASE_URL=http://127.0.0.1:8000 -e VLLM_MODEL=Flash-Next-TP8 \
+  -e VLLM_BASE_URL=http://host.docker.internal:8000 -e VLLM_MODEL=Flash-Next-TP8 \
   -e VLLM_BENCH_ROOT=/bench \
   -v "$SOURCE_ROOT/tools:/tools:ro" -v "$MODEL_ROOT:/models:ro" \
   -v "$DATA_ROOT/benchmark:/bench" \

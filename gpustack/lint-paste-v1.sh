@@ -263,7 +263,7 @@ ARGS_EXPECT_VIDEOOFF='--dtype=float16
 --tensor-parallel-size=8
 --enable-expert-parallel
 --enable-ep-weight-filter
---limit-mm-per-prompt={"image":16,"video":0}
+--limit-mm-per-prompt={"image":4,"video":0}
 --max-model-len=262144
 --max-num-seqs=4
 --max-num-batched-tokens=4096

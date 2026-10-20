@@ -139,7 +139,8 @@ NL='
 MODE=''
 NEG_PCIE=0
 MOUNT_PARENT=0                # 0＝与平台同宽（挂模型目录本身）；1＝宽一级挂父目录，默认关
-TAIL_HOST=127.0.0.1           # 尾补 --host 的取值；默认 127.0.0.1（简报契约），--host 可覆写走平台 worker IP 形
+TAIL_HOST=127.0.0.1           # 访问地址（curl 用）＋端口映射绑定地址；默认 127.0.0.1，--host 可覆写走平台 worker IP 形
+BIND_HOST=0.0.0.0             # 容器内 vLLM 绑定地址（bridge 形态必须 0.0.0.0，映射才可达）
 IMAGE=$IMAGE_DEFAULT
 MODEL_DIR=''
 MODEL=''
@@ -357,7 +358,8 @@ build_argv() {
   local line
   # 不带 --rm：GPUStack v2.2.3 副本里 auto_remove 全树 0 命中（平台不传该字段，本机无法取证它来自谁），
   # 而 --rm 会在容器崩溃时连日志一起收走——C4..C7 与超时归因就只剩 docker 的"No such container"。
-  argv_push run -d --name "$CONTAINER_NAME" --network host --privileged --restart no --shm-size 64g
+  # 默认 bridge ＋ 只映射一个引擎端口（绑 $TAIL_HOST，最小暴露）；容器内 vLLM 绑 BIND_HOST。
+  argv_push run -d --name "$CONTAINER_NAME" -p "$TAIL_HOST:$PORT:$PORT" --privileged --restart no --shm-size 64g
   argv_push --env-file "$ENV_FILE"
   if [ "$NEG_PCIE" -eq 1 ]; then
     argv_push -e "$PCIE_KEY=0"
@@ -367,7 +369,7 @@ build_argv() {
     [ -n "$line" ] || continue
     argv_push "$line"
   done < "$ARGS_FILE"
-  argv_push --host "$TAIL_HOST" --port "$PORT" --served-model-name "$SERVED_NAME"
+  argv_push --host "$BIND_HOST" --port "$PORT" --served-model-name "$SERVED_NAME"
 }
 
 judge_tail_shape() { # judge_tail_shape —— 尾补三对必须逐字在位且只占末六词（词数被改动即红 2）

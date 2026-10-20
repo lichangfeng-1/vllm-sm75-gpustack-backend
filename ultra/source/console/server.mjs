@@ -46,16 +46,27 @@ const dshRoot = process.env.SM75_DSH_ROOT || "/dsh";
 fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 const store = new Store(root);
 // SM75_EXTENSIONS enables baked test extensions on first boot; users can still
-// toggle them in the panel afterwards.
+// toggle them in the panel afterwards. SM75_EXTENSIONS_FORCE=1 additionally
+// re-enables an extension that was explicitly disabled (off by default).
 const requestedExtensions = new Set(
   String(process.env.SM75_EXTENSIONS || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean),
 );
-for (const type of ["speedtest", "sql"])
-  if (requestedExtensions.has(type) && !store.get("extension", type))
-    store.put("extension", type, { enabled: true });
+const forceExtensions =
+  String(process.env.SM75_EXTENSIONS_FORCE || "") === "1";
+const bundledExtensions = path.join(path.dirname(here), "extensions");
+for (const type of ["speedtest", "sql"]) {
+  if (!requestedExtensions.has(type)) continue;
+  const current = store.get("extension", type);
+  const src = path.join(bundledExtensions, type);
+  const dst = path.join(root, "extensions", type);
+  if (fs.existsSync(src) && !fs.existsSync(dst))
+    fs.cpSync(src, dst, { recursive: true });
+  if (!current || (forceExtensions && current.enabled !== true))
+    store.put("extension", type, { ...(current || {}), enabled: true });
+}
 const secretPath = path.join(root, "key");
 const existingInstall = fs.existsSync(secretPath);
 const auth = new Auth(root, {
