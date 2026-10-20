@@ -1,0 +1,20 @@
+# Dockerfile.oldpanel-backend-v1 — 旧 Ultra 面板引擎 + v4 GPUStack/面板入口
+#
+# 底座是拿到 58–59 文本档的旧面板镜像（0.1.7-beta + to20s + pcieipc + incple）；
+# 只从 v4 后端镜像复制 /opt 下的面板/GPUStack 入口资产；
+# /usr/local/lib/python3.12/dist-packages 里的 vLLM/torch/FlashInfer/Triton 保持旧镜像原样，
+# 不重建、不替换引擎。用于验证 GPUStack 侧能否复现旧面板速度。
+ARG OLD_IMAGE=vllm-sm75:v0.1.7-ultra-beta-to20s-pcieipc-incple-20261010
+ARG PANEL_IMAGE=vllm-sm75-gpustack:v0.1.7-beta2-v4
+
+FROM ${PANEL_IMAGE} AS panel
+FROM ${OLD_IMAGE}
+
+COPY --from=panel /opt/vllm-sm75 /opt/vllm-sm75
+COPY --from=panel /opt/sm75-workbench /opt/sm75-workbench
+COPY --from=panel /opt/harness /opt/harness
+
+LABEL sm75.oldpanel-backend="v1" \
+      sm75.oldpanel-scope="panel/entry assets only; engine packages untouched" \
+      sm75.oldpanel-default-engine="vllm-sm75:v0.1.7-ultra-beta-to20s-pcieipc-incple-20261010" \
+      sm75.oldpanel-default-panel="vllm-sm75-gpustack:v0.1.7-beta2-v4"

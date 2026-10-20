@@ -25,6 +25,9 @@
 | NVIDIA Container Toolkit | 1.20.0 |
 | GPUStack | quay.io/gpustack/gpustack:v2.2.3 |
 | 硬件 | 8×Tesla T10 16 GiB ＋ 251 GiB 主机内存 |
+| CPU/内存 | 高单核 CPU ＋ 高频内存；参考 EPYC 7402 24C/24T、8×32 GB DDR4-2400；PLE 表常驻主机内存，容量要覆盖 PLE 表＋KV＋系统 |
+| SMT | BIOS **SMT=Off**；同镜像同档 8192 54.69→59.35 tok/s（2026-10-20），代价逻辑核 48→24 |
+| P2P/虚拟化 | **物理机直装 Ubuntu** 才实测（56/56、13.1–13.2 GB/s）；G292-Z20 的 PLX switch 整体直通 VM 仅理论、未实操 |
 
 低于上表我们不保证、也未验证；高于它同样不保证，请自行实测。逐项说明见 `gpustack/run-book-v1.md` 第 0 节。
 
@@ -52,9 +55,12 @@ bash gpustack/build-backend-v1.sh
 # 4) 注册后端版本：版本名 0.1.7-sm75.1-custom，镜像填上面那枚 tag，
 #    入口覆盖填：python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
 #    （也可以用 gpustack/set-panel-autostart-v1.sh 一次写好后端入口、面板三 env 与 SM75_EXTENSIONS）
+#    要复现 57+ 的旧引擎薄层后端：bash gpustack/build-oldpanel-backend-v1.sh
+#    产物 tag 填进后端版本，版本名用 0.1.7-sm75.1-oldpanel-custom；面板端口是 1615（旧镜像 ENV），不是 1616
 
 # 5) 部署模型：表单里整块粘
 #    gpustack/args-paste-v1.txt（24 行）＋ gpustack/env-paste-v1.txt（25 行）
+#    要保留图像、只关视频（A 路线）：把 args-paste-v1 换成 gpustack/args-paste-videooff-v1.txt（24 行）
 #    要面板与三种测试，再粘 gpustack/env-paste-panel-v1.txt（4 行）
 bash gpustack/lint-paste-v1.sh      # 末行必须是 LINT_PASTE_OK env=25 args=24
 ```
@@ -74,7 +80,7 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 
 - `SM75_EXTENSIONS` 是扩展开关：`panel`（面板）、`harness`（Ultra 工作台 DSH）、`benchlocal`（三枚校验器）、`speedtest`／`sql`（测试资产启用）；只想要面板就写 `panel`。
 - 后端版本的入口覆盖仍要填：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`（`gpustack/set-panel-autostart-v1.sh --apply` 会连同上面四格一起写好）。
-- 面板口 **1616**（`SM75_CONSOLE_PORT` 可改）；登录令牌在 `$SM75_CONSOLE_ROOT/key`；数据落在 worker 数据目录，重启不丢。
+- 面板口：v4 后端 **1616**（`SM75_CONSOLE_PORT` 可改）；薄层旧引擎后端沿用旧镜像 ENV 的 **1615**。登录令牌在 `$SM75_CONSOLE_ROOT/key`；数据落在 worker 数据目录，重启不丢。
 - 不设 `SM75_PANEL_AUTOSTART` 时入口包装纯透传，引擎行为与不带这一层完全一致。
 - **GPUStack 形态下面板自动进入外部引擎模式**：隐藏“模型库／运行配置／设置”，启停与模型连接交给 GPUStack；速度/SQL 测试、BenchLocal、监控照常使用。
 
@@ -101,7 +107,27 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 | 同一权重，叠上整组优化 · FP8PLE | 57.73 tok/s | 2749.96 |
 | 叠上整组优化 · W4A16-AutoRound | 57.04 tok/s | 2762.51 |
 
-输出侧 +33.3%，预填充几乎不动。**这三张表是在面板形态上量的**，不是 GPUStack 形态的验收线；GPUStack 形态的九档读数另见 run-book 第 10a 节（52.81，且其配置窗口与面板档不同）。怎么读、哪些数不能互相比，见 `gpustack/compat-matrix-v1.md` 最后一节。
+输出侧 +33.3%，预填充几乎不动。**这三张表是在面板形态上量的**，不是 GPUStack 形态的验收线；GPUStack 形态的九档读数另见 run-book 第 10a/14 节（旧九档 52.81 与本次 6 档 56.26 不是同一路径/档位）。怎么读、哪些数不能互相比，见 `gpustack/compat-matrix-v1.md` 最后一节。
+
+> 上面的 57.73/57.04 是 2026-10-07/08 的 **SMT On** 历史面板表；下面 2026-10-20 补充是 **SMT Off**。旧 v5/v4 51.1/51.8 也是 SMT On，SMT Off A/B 待复核，不引用。
+
+### 2026-10-20 GPUStack 形态补充（不替换上面的面板表）
+
+同机 8×T10、SMT Off、AutoRound W4A16、output 1024、并发 1、面板直连：
+
+| 口径 | 8192 | 16384 | 32768 | 均值 |
+|---|---:|---:|---:|---:|
+| **旧引擎薄层后端（transformers 5.15.1）＋A 路线（image16/video0）** | **56.92** | **57.57** | **56.96** | **57.15** |
+| 旧引擎薄层后端、text-only，两轮 | 57.56 / 57.07 | 56.98 / 58.11 | 57.22 / 58.04 | 57.25 / 57.74 |
+| v4 后端（transformers 5.17.0）panel sidecar 直连，六档 | 56.97 | — | — | 56.26 |
+| v4 后端 8180 网关，四档 | 53.57 | — | — | 54.71 |
+| 旧 Ultra 面板镜像 text-only 直连（独立容器），五档 | 59.35 | 58.73 | 59.43 | 58.59（五档） |
+
+- **薄层旧引擎后端**：底座旧 Ultra 镜像，只 `COPY --from=v4` 的 `/opt/vllm-sm75`、`/opt/sm75-workbench`、`/opt/harness`；引擎包一个字节不动。构建 `bash gpustack/build-oldpanel-backend-v1.sh`，产物 `vllm-sm75-gpustack:v0.1.7-beta-ultra-pcieipc-incple-panel-v1`。**面板端口沿用旧镜像 ENV 的 1615**（v4 是 1616）。
+- **同平台同路径 A/B**：旧引擎比 v4 高 **1.3–1.8 tok/s**，A 路线 **57.15** 已达到历史 AutoRound **57.04** 一档；保留图像只比 text-only 低 0.1–0.6，**多模态没有明显拖慢**（单图冒烟 `multimodal_tokens.image=64`、回答正确）。
+- **3% 未归因**：旧面板独立容器同模型 text-only 8192 59.35 / 五档 58.59，比薄层后端高约 3%。候选：旧容器有 `pstate-supervisor`（`-psl 16 -psh 16`）而 GPUStack sidecar 没起它（采样 99.3% P0，只解释极小部分）；args 差 `cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`、缺 `--auto-sleep-idle-timeout 0`；旧 5 档 8192 是最高点（单次波动 ±1.3）。**不得写成已解释。**
+- **A 路线首次启动要 JIT 编译 FlashInfer 多模态 kernel**：`init engine` 211 s、总启动约 9–10 分钟；缓存 `/root/.cache/flashinfer/0.6.18/75/` 不持久，重建即重编。
+- 引用这些数时必须带全条件（后端引擎包/路径/SMT/多模态），详细见 run-book 第 14 节、完整教程 v2 与 `调度/SM75性能变量与历史档位速查-20261019-v1.md`。
 
 ## 7 目录速览
 

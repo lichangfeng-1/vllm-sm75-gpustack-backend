@@ -755,3 +755,48 @@ docker build --file gpustack/Dockerfile.v1 --target panel-layer \
 
 **版本参考（2026-10-19 npm 国内镜像现读）**：`latest=0.2.0-rc.2`、`alpha=0.2.1-alpha.5`、`next=0.2.1-rc.2`；现装 `0.2.0-rc.2`。
 **0.2.0-rc.2 不是 drop-in**：它的客户端包结构已变（`dsh-client-ui-layout`／`dsh-llm-pi-ai`／`dsh-web-frontend` 不再以直接依赖出现），品牌与插件补丁需要重做；候选 `package.json`／锁文件已存 `K:\sm75\调度\dsh-0.2.0-rc.2-candidate\`。跨 minor 升级先升 rc 验证，别直接跟 `alpha`。
+
+## 14 旧引擎薄层后端（2026-10-20，目标 57+）
+
+目的：在 GPUStack 侧复现旧面板镜像的引擎速度。做法是**只换面板资产、不换引擎包**。
+
+### 14.1 配方与构建
+
+- 底座：`vllm-sm75:v0.1.7-ultra-beta-to20s-pcieipc-incple-20261010`（0.1.7-beta＋to20s＋pcieipc＋incple，引擎包 transformers **5.15.1**）。
+- 覆盖：`COPY --from=vllm-sm75-gpustack:v0.1.7-beta2-v4` 的 `/opt/vllm-sm75`、`/opt/sm75-workbench`、`/opt/harness`（面板 sidecar、控制台、BenchLocal、DSH 工作台）。
+- 不动：`/usr/local/lib/python3.12/dist-packages` 下的 vLLM/torch/FlashInfer/Triton，一个字节不改。
+- 命令：
+
+```bash
+bash gpustack/build-oldpanel-backend-v1.sh
+# 产物：vllm-sm75-gpustack:v0.1.7-beta-ultra-pcieipc-incple-panel-v1
+# 可用 OLD_IMAGE= / PANEL_IMAGE= / TAG= 覆盖默认值
+```
+
+- 构建只读两枚本地镜像，约 36 s（实测 35.9 s）。
+
+### 14.2 后端版本与模型行
+
+- 后端版本名 `0.1.7-sm75.1-oldpanel-custom`，镜像填产物 tag，入口仍是 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`。
+- 模型行照 §13 粘，A 路线用 `args-paste-videooff-v1.txt`（24 行，`--limit-mm-per-prompt={"image":16,"video":0}`，无 `--language-model-only`）。
+- **面板端口是 1615**：旧镜像 ENV 带 `SM75_CONSOLE_PORT=1615`，`panel-sidecar.py:150` 优先读 env。判端口看容器 `/proc/net/tcp`（1615=`064F`、1616=`0650`），别信 panel.log 尾部（混着历史容器的行）。
+
+### 14.3 实测（同机 8×T10、SMT Off、AutoRound、output 1024、并发 1、面板直连）
+
+| 形态 | 8192 | 16384 | 32768 | 均值 |
+|---|---:|---:|---:|---:|
+| 旧引擎薄层＋A 路线（image16/video0） | 56.92 | 57.57 | 56.96 | **57.15** |
+| 旧引擎薄层＋text-only（两轮） | 57.56/57.07 | 56.98/58.11 | 57.22/58.04 | 57.25/57.74 |
+| v4 后端（5.17.0）panel sidecar，六档 | 56.97 | — | — | 56.26 |
+| v4 后端 8180 网关，四档 | 53.57 | — | — | 54.71 |
+| 旧面板独立容器 text-only，五档 | 59.35 | 58.73 | 59.43 | 58.59 |
+
+- 同平台同路径：旧引擎高 **1.3–1.8**；A 路线达到历史 AutoRound **57.04** 一档。
+- A 路线 vs text-only 差 0.1–0.6 ⇒ **保留图像没有明显拖慢**；单图冒烟 `multimodal_tokens.image=64`、回答正确。
+- 到旧面板独立容器（58.59/59.35）还有约 **3% 未归因**：候选 `pstate-supervisor`（旧容器有、GPUStack sidecar 没起；采样 99.3% P0，只解释极小部分）、`cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`、缺 `--auto-sleep-idle-timeout 0`。**没有一项被证明，别写成已解释。**
+
+### 14.4 首次启动与回退
+
+- **A 路线首次启动会 JIT 编译 FlashInfer 多模态 kernel**（`cc1plus` 满载、`/root/.cache/flashinfer/0.6.18/75/`）：本次 `init engine` 211 s、总启动约 9–10 分钟；缓存不持久，重建容器会重编。等 `/health` 200 再测，别中途重启。
+- 回退：后端版本切回 `0.1.7-sm75.1-custom`（v4，面板 1616）；模型行用对应备份恢复。两套后端版本可并存，只切模型行引用。
+- 本轮备份：`model4-backup-20261020-oldpanel-v1.json`、`backend1-backup-20261020-oldpanel-v1.json`（服务器 0600）。
