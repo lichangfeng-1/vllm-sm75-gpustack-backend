@@ -45,40 +45,47 @@ docker pull quay.io/gpustack/gpustack:v2.2.3
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
 
-# 2) One command: vLLM base -> custom backend (the SM75 base is an internal cache;
-#    --rebuild-base forces a rebuild, --drop-base removes the base tag afterwards.
-#    Manual two-step path: run-book section 2)
+# 2) One command: upstream vLLM base -> SM75 base -> custom backend (fastest profile by default)
+#    The last layer pins transformers/tokenizers to 5.15.1/0.22.2 (measured 57.04 tok/s).
+#    Output tag: vllm-sm75-gpustack:v0.1.7-beta2-v6.
+#    Rollback to the base-image versions (5.17.0/0.23.2): add --no-tf-pin (output tag -v4).
 bash gpustack/preflight-sources-v1.sh
 bash gpustack/build-backend-v1.sh
 
 # 3) Start GPUStack (server/worker commands: run-book sections 3 and 5)
 
-# 4) Register the backend version: 0.1.7-sm75.1-custom, image = the tag above,
+# 4) Register the backend version (default = fastest): 0.1.7-sm75.1-fast-custom,
+#    image = vllm-sm75-gpustack:v0.1.7-beta2-v6,
 #    entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
-#    (set-panel-autostart-v1.sh also writes the panel trio and SM75_EXTENSIONS)
+#    (set-panel-autostart-v1.sh also writes the panel env and SM75_EXTENSIONS)
+#    Rollback route: 0.1.7-sm75.1-custom + vllm-sm75-gpustack:v0.1.7-beta2-v4
 
 # 5) Deploy the model: paste the blocks
-#    gpustack/args-paste-v1.txt (24 lines) + gpustack/env-paste-v1.txt (25 lines)
-#    add gpustack/env-paste-panel-v1.txt (4 lines) for the console and the three test suites
-bash gpustack/lint-paste-v1.sh      # last line must read LINT_PASTE_OK env=25 args=24
+#    gpustack/args-paste-videooff-v1.txt (24 lines, A route: images on, video off)
+#    + gpustack/env-paste-v1.txt (25 lines)
+#    add gpustack/env-paste-panel-v1.txt (5 lines, fixed port 1615) for the console and test suites
+bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt   # LINT_PASTE_OK env=25 args=24
 ```
 
-**The chain end must target `panel-layer`**: it is a superset (three layers + console payload +
-BenchLocal verifier runtime + vendored test assets), so one image serves as model backend, console
-host and verifier host.
+**The chain end must target `runtime-pin-layer`** (default via build-backend-v1.sh): it is a superset
+(four layers + console payload + BenchLocal verifier runtime + vendored test assets + the runtime pin),
+so one image serves as model backend, console host and verifier host. `--target panel-layer` builds the
+unpinned v4 for rollback; `--no-tf-pin` does the same through the script.
 
 ## 4 Optional web console (same image, same model row)
 
 The image already carries the console (node v22.23.2 + `/opt/sm75-workbench`). To start it together
-with the model, add three env vars to the model row:
+with the model, add these env vars to the model row:
 
 ```
 SM75_PANEL_AUTOSTART=1
 SM75_CONSOLE_HOST=0.0.0.0
 SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
+SM75_CONSOLE_PORT=1615
+SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 ```
 
-- Console listens on **1616** (override with `SM75_CONSOLE_PORT`); login token at `$SM75_CONSOLE_ROOT/key`; state lives under the worker data dir, so it survives restarts.
+- Console listens on **1615** for both routes (the old-engine thin image defaults to 1615; pinning it here keeps the v4 rollback on the same port). Login token at `$SM75_CONSOLE_ROOT/key`; state lives under the worker data dir, so it survives restarts.
 - Without `SM75_PANEL_AUTOSTART` the wrapper is a transparent passthrough.
 - Standalone console, the three BenchLocal verifier containers and the radar steps: run-book section 11.
 

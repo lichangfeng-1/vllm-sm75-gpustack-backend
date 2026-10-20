@@ -257,6 +257,32 @@ ARGS_EXPECT='--dtype=float16
 --reasoning-parser=qwen3
 --chat-template=/opt/vllm-sm75/templates/qwen38-next-high-compat.jinja'
 
+# A 路线（默认交付）：保留图像、关闭视频；与纯文本档只差第 6 行。
+ARGS_EXPECT_VIDEOOFF='--dtype=float16
+--hf-overrides={"dtype":"float16"}
+--tensor-parallel-size=8
+--enable-expert-parallel
+--enable-ep-weight-filter
+--limit-mm-per-prompt={"image":16,"video":0}
+--max-model-len=262144
+--max-num-seqs=4
+--max-num-batched-tokens=4096
+--gpu-memory-utilization=0.92
+--kv-cache-dtype=fp8_e4m3
+--kv-cache-memory-bytes=2415919104
+--enable-prefix-caching
+--engram-config={"cpu_offload":true}
+--gdn-prefill-backend=flashqla_sm75
+--generation-config=vllm
+--enable-prompt-tokens-details
+--compilation-config={"mode":0,"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4,8,16]}
+--block-size=16
+--scheduler-cls=vllm.v1.core.sched.scheduler_sm75.SM75Scheduler
+--enable-auto-tool-choice
+--tool-call-parser=qwen3_xml
+--reasoning-parser=qwen3
+--chat-template=/opt/vllm-sm75/templates/qwen38-next-high-compat.jinja'
+
 # L11：args 侧补齐与 env L4 对称的行数门。此前删掉非关键行（24→23）或加一行合法 flag
 #   （24→25）都全绿，而注册卡 §四 明写"整块粘贴 24 行"——本项目已经发生过面板静默丢掉 10 个
 #   定制项的事故，缺这一道就等于契约无人守。
@@ -286,7 +312,15 @@ ordered_gate() { # ordered_gate 实际件 常量表 门号 名称 契约行数 �
 }
 
 ordered_gate "$ENV_FILE" "$ENV_EXPECT" L12 "env 逐字有序" 25
-ordered_gate "$ARGS_FILE" "$ARGS_EXPECT" L13 "args 逐字有序" 24
+
+# L13 常量表按 args 第 6 行选择：纯文本档（language-model-only）或 A 路线（limit-mm）。
+# 两套都是 24 行契约；第 6 行不是这两者即红，避免"改一行就绕过逐字门"。
+case "$(sed -n '6p' "$ARGS_FILE")" in
+  --language-model-only) ARGS_CANON=$ARGS_EXPECT ;;
+  --limit-mm-per-prompt=*) ARGS_CANON=$ARGS_EXPECT_VIDEOOFF ;;
+  *) die 16 "断言 L13 args 逐字有序——第 6 行既不是纯文本档的 --language-model-only，也不是 A 路线的 --limit-mm-per-prompt=…；只认这两套 24 行契约。" ;;
+esac
+ordered_gate "$ARGS_FILE" "$ARGS_CANON" L13 "args 逐字有序" 24
 
 echo "绿｜env $ENV_FILE：$env_lines 行，形态合法、键唯一、无占位符、与常量表逐字同序"
 echo "绿｜args $ARGS_FILE：$args_lines 行，形态合法、无尾补三条、无占位符、无投机、flag 唯一、关键项在列、与常量表逐字同序"

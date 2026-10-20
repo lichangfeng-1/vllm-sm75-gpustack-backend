@@ -9,8 +9,8 @@
 | 字段（界面名 ／ 接口键） | 填什么 | 为什么 |
 |---|---|---|
 | 后端类型 type | 自定义（custom） | 不走内置镜像目录，镜像由这个仓构建 |
-| 版本名 backend_version | `0.1.7-sm75.1-custom` | 数字形态＋`-custom` 后缀。GPUStack 用 `should_default_to_ray`（`gpustack/utils/command.py:416-433`，阈值常量 `:413`＝`0.18.0`）选分布式执行器：版本名不含 `-custom` 一律回落 Ray，而标准镜像不带 Ray；解析抛异常也回落 Ray（`except Exception: return True`）。加 `-custom` 就是把"镜像里没有 Ray"告诉平台。单 worker 部署不进该分支（`gpustack/worker/backends/vllm.py:261/280` 需要 distributed_follower／distributed_leader 才触发），所以本卡只承诺单机 |
-| 镜像名称 image_name | `vllm-sm75-gpustack:v0.1.7-beta2-v4` | 完整 tag 写进这一个字段，不拆成"仓库＋标签"两处。**自 2026-10-19 起这枚镜像含层 4 面板负载与扩展模块**（node v22.23.2 ＋ `/opt/sm75-workbench` ＋ `/opt/harness` DSH ＋ `runtime-lock.json` ＋ 随仓速度/SQL 资产），同一枚镜像可承担"跑模型／起面板／起三枚校验容器／Ultra 工作台"四种角色 |
+| 版本名 backend_version | `0.1.7-sm75.1-fast-custom`（默认最快档；回退 `0.1.7-sm75.1-custom`；薄层备选 `0.1.7-sm75.1-oldpanel-custom`） | 数字形态＋`-custom` 后缀。GPUStack 用 `should_default_to_ray`（`gpustack/utils/command.py:416-433`，阈值常量 `:413`＝`0.18.0`）选分布式执行器：版本名不含 `-custom` 一律回落 Ray，而标准镜像不带 Ray；解析抛异常也回落 Ray（`except Exception: return True`）。加 `-custom` 就是把"镜像里没有 Ray"告诉平台。单 worker 部署不进该分支（`gpustack/worker/backends/vllm.py:261/280` 需要 distributed_follower／distributed_leader 才触发），所以本卡只承诺单机 |
+| 镜像名称 image_name | `vllm-sm75-gpustack:v0.1.7-beta2-v6`（默认，运行期钉 5.15.1/0.22.2）／回退 `vllm-sm75-gpustack:v0.1.7-beta2-v4` | 完整 tag 写进这一个字段，不拆成"仓库＋标签"两处。默认镜像由 `build-backend-v1.sh` 一条命令从 vLLM 基座构建（四层＋层 5 运行期钉版），实测 57.04；回退镜像为同一链条 `--no-tf-pin`。**两枚都含层 4 面板负载与扩展模块**（node v22.23.2 ＋ `/opt/sm75-workbench` ＋ `/opt/harness` DSH ＋ `runtime-lock.json` ＋ 随仓速度/SQL 资产），同一枚镜像可承担"跑模型／起面板／起三枚校验容器／Ultra 工作台"四种角色 |
 | 框架 custom_framework | `CUDA` | 该字段用于部署与兼容性检查（`gpustack/schemas/inference_backend.py:41`，字段声明 `:49`） |
 | 入口覆盖 entrypoint | 推荐 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve` | GPUStack 用这一格**整条覆盖**镜像 ENTRYPOINT（`gpustack/worker/backends/vllm.py:171-177`，字符串经 `shlex.split`；见 `schemas/inference_backend.py:277-281`）。包装只在模型行设了 `SM75_PANEL_AUTOSTART=1` 时先把面板拉到后台，其余时候原样 exec `vllm serve`，所以不设开关时行为与"留空"完全一致。**留空**仍是合法形态（只有模型、没有面板） |
 | 执行命令 run_command | 留空 | 留空＝沿用 GPUStack 内置默认命令与版本门参数；填了才进替换分支（`gpustack/worker/backends/base.py:817-821`），内置拼装被顶掉 |
@@ -45,8 +45,8 @@ vllm serve  <模型路径>  <GPUStack 版本门参数>  <后端参数粘贴块> 
 
 | 字段 | 填什么 |
 |---|---|
-| 后端版本 | `0.1.7-sm75.1-custom` |
-| 后端参数 | 整块粘贴 `gpustack/args-paste-v1.txt`（24 行，一行一条，**行内任何位置不得含空格或制表**；值一律等号形，JSON 值必须写成 `--flag={…}` 紧贴等号，不许写 `--flag {…}`） |
+| 后端版本 | `0.1.7-sm75.1-fast-custom`（回退 `0.1.7-sm75.1-custom`） |
+| 后端参数 | 整块粘贴 `gpustack/args-paste-videooff-v1.txt`（24 行，默认 A 路线：保留图像、关闭视频）；纯文本用 `args-paste-v1.txt`（24 行）。一行一条，**行内任何位置不得含空格或制表**；值一律等号形，JSON 值必须写成 `--flag={…}` 紧贴等号，不许写 `--flag {…}` |
 | 环境变量 | 整块粘贴 `gpustack/env-paste-v1.txt`（**25 行**，一行一条 `KEY=VALUE`，键与值两侧、值内都不得含空格或制表）**第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM=120779177984` 是硬性项，不许省**：没有它，平台按启发式算出 204.5 GiB 需求（本机八卡可分配只有 117.76 GiB），模型会一直排队、界面不报错也不给原因——这一条 10-14 实撞过一次，改前它只写在《参数字典》B 表第 25 行的散文里、没烘进粘贴块，所以照"整块粘贴"走的人必踩 |
 | 投机解码 | 不启用 |
 | 副本数／worker | 1 台 8 卡 worker，`--tensor-parallel-size=8` 已在参数块里 |
@@ -56,7 +56,7 @@ vllm serve  <模型路径>  <GPUStack 版本门参数>  <后端参数粘贴块> 
 ## 五、手改后复检
 
 ```
-bash gpustack/lint-paste-v1.sh
+bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt
 ```
 
 - 做什么：把两枚粘贴块再跑一遍结构护栏。门序 L0-L13：前置（存在性／CR／末行换行）→ env 行形态 → env 键唯一 → env 占位符 → env 行数==24 → args 行形态 → 尾补三条排除 → args 占位符 → args 投机 → args flag 唯一 → 关键项在列且 `--max-model-len=262144` → **L11 args 行数==24** → **L12 env 与脚本内置常量表逐行逐字同序** → **L13 args 同上**。改值、乱序、增删行、原地留一行空行都会点名到具体行号。

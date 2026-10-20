@@ -1,0 +1,20 @@
+# Dockerfile.oldpanel-backend-tf517 — 第三线：旧引擎薄层后端，只把 transformers/tokenizers 升到 v4 版本
+# 两镜像完整 pip 清单只差这两项；其余引擎栈（vLLM/torch/FlashInfer/Triton/incple/pcieipc）保持旧镜像原样。
+ARG BASE=vllm-sm75-gpustack:v0.1.7-beta-ultra-pcieipc-incple-panel-v1
+ARG SRC=vllm-sm75-gpustack:v0.1.7-beta2-v4
+FROM ${SRC} AS src
+FROM ${BASE}
+
+RUN rm -rf /usr/local/lib/python3.12/dist-packages/transformers \
+           /usr/local/lib/python3.12/dist-packages/transformers-5.15.1.dist-info \
+           /usr/local/lib/python3.12/dist-packages/tokenizers \
+           /usr/local/lib/python3.12/dist-packages/tokenizers-0.22.2.dist-info
+
+COPY --from=src /usr/local/lib/python3.12/dist-packages/transformers /usr/local/lib/python3.12/dist-packages/transformers
+COPY --from=src /usr/local/lib/python3.12/dist-packages/transformers-5.17.0.dist-info /usr/local/lib/python3.12/dist-packages/transformers-5.17.0.dist-info
+COPY --from=src /usr/local/lib/python3.12/dist-packages/tokenizers /usr/local/lib/python3.12/dist-packages/tokenizers
+COPY --from=src /usr/local/lib/python3.12/dist-packages/tokenizers-0.23.2.dist-info /usr/local/lib/python3.12/dist-packages/tokenizers-0.23.2.dist-info
+
+LABEL sm75.oldpanel-tf="5.17.0" \
+      sm75.oldpanel-tokenizers="0.23.2" \
+      sm75.oldpanel-scope="transformers/tokenizers only; rest of old engine stack untouched"

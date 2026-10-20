@@ -5,13 +5,13 @@
 | 能力 | 落点 | 规格原判 | 本轮定稿 |
 |---|---|---|---|
 | 速度环境变量 22 条（pcieipc 卡间通信开关、QSA 量化注意力一族） | 模型 env 粘贴块 `gpustack/env-paste-v1.txt`（2.2.3 `base.py:457`：模型 env 优先于宿主 env） | 不需要改启动入口 | 能用，不用改入口 |
-| MTP 投机、量化格式、上下文长度等 | 后端参数粘贴块 `gpustack/args-paste-v1.txt`（普通参数） | 不需要改启动入口 | 能用。MTP 投机解码这一版先不启用，`--speculative-config` 已从块里拿掉，以后用草稿模型的绝对路径参数行开启 |
+| MTP 投机、量化格式、上下文长度等 | 后端参数粘贴块 `gpustack/args-paste-videooff-v1.txt`（默认 A 路线）或 `args-paste-v1.txt`（纯文本） | 不需要改启动入口 | 能用。MTP 投机解码这一版先不启用，`--speculative-config` 已从块里拿掉，以后用草稿模型的绝对路径参数行开启 |
 | 时区 | env `TZ=Asia/Shanghai` ＋镜像内 tzdata 兜底 | 不需要覆盖入口 | 成立；镜像里也写了一层时区（`Dockerfile.v1` 层 3），两层各自独立生效，模型 env 的 TZ 优先（`base.py:457-458`） |
 | 共享内存 64 GiB | env `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64`（2.2.3 `base.py:676`，缺省 10） | 不需要改启动入口 | 能用；实际值在容器里跑 `df -h /dev/shm` 看 |
 | 省电常驻/自动休眠（pstate 包装脚本） | 需改启动入口＋宿主 libnvidia-api | 待服务器盘点 | **用不了。** 2026-10-11 在服务器上查过：宿主的三个标准路径里都没有这个库，只有一份私有副本，靠挂载喂给正在跑的引擎。而 GPUStack 自己起的 runner 容器没有挂东西的口子，所以"用宿主自带的库进 P8"这条路走不通，GPUStack 方案不含省电。查的过程见本文第一节。 |
 | CPU KV 卸载预检 | 需改启动入口 | 跟省电项一起用不了 | 它得先能改启动入口，而下一节会说到这个口子一直是默认的。**这一条是推出来的，没有实测**；它到底能省多少、要付多少，见第三节那一行。 |
 | 档位模板展开（profile） | 需入口包装 | GPUStack 场景不做 | 维持不做；档位由参数粘贴块整块表达，展开器不进 GPUStack 链路 |
-| 控制面板（可选，含 BenchLocal、速度/SQL 与 Ultra 工作台） | 后端版本 `entrypoint` 串 ＋ 模型 env 四格（面板三格＋`SM75_EXTENSIONS`） | 需改启动入口 | **能用**（2026-10-19 实测）：入口指到 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`，模型行设 `SM75_PANEL_AUTOSTART=1`/`SM75_CONSOLE_HOST=0.0.0.0`/`SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`/`SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql` 即随模型起（默认 1616，可用 `SM75_CONSOLE_PORT` 改）；不设开关时纯透传。**GPUStack 形态自动进入外部引擎模式**：隐藏模型库/运行配置/设置，测试与工作台接平台引擎；DSH 工作台随模型容器启动，`/dsh` 落在 `/var/lib/gpustack/dsh`。 |
+| 控制面板（可选，含 BenchLocal、速度/SQL 与 Ultra 工作台） | 后端版本 `entrypoint` 串 ＋ 模型 env 五格（面板四格＋`SM75_EXTENSIONS`） | 需改启动入口 | **能用**（2026-10-19 实测）：入口指到 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`，模型行设 `SM75_PANEL_AUTOSTART=1`/`SM75_CONSOLE_HOST=0.0.0.0`/`SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`/`SM75_CONSOLE_PORT=1615`/`SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql` 即随模型起（两套镜像统一 1615）；不设开关时纯透传。**GPUStack 形态自动进入外部引擎模式**：隐藏模型库/运行配置/设置，测试与工作台接平台引擎；DSH 工作台随模型容器启动，`/dsh` 落在 `/var/lib/gpustack/dsh`。 |
 
 **入口覆盖自 2026-10-19 起不再是"默认留空"**：面板形态必须覆写它（`gpustack/worker/backends/vllm.py:171-177` 会用后端版本的 `entrypoint` 整条替换镜像 ENTRYPOINT）；不用面板时可以留空，两者都合法。
 
@@ -111,20 +111,22 @@ incple AutoRound 量化白名单），加上靠环境变量打开的底座能力
 **最后一条**：这三个数是面板形态的，不是 GPUStack 形态的验收线。GPUStack 形态要另测，
 方法见 `gpustack/run-book-v1.md` 第 10 节。
 
-## 五、2026-10-20 旧引擎薄层后端：同平台 A/B（不替换上面三张表）
+## 五、2026-10-20 默认交付档与同平台 A/B（不替换上面三张表）
 
-这一节只回答一个问题：**同一台机器、同一个 GPUStack、同一把尺，换引擎包能不能把速度拉回 57+。**
+这一节只回答一个问题：**同一台机器、同一个 GPUStack、同一把尺，什么组合能把速度拉回 57+。**
 三张历史表（43.31／57.73／57.04）仍只属于面板形态，没有被本节的数替换。
 
 | 形态（SMT Off、AutoRound、output 1024、并发 1、面板直连） | 8192 | 16384 | 32768 | 均值 |
 |---|---:|---:|---:|---:|
-| 旧引擎薄层（transformers 5.15.1）＋A 路线 image16/video0 | 56.92 | 57.57 | 56.96 | **57.15** |
+| **默认 `-v6`（v4 栈＋钉 5.15.1/0.22.2）＋A 路线 image16/video0** | **56.79** | **57.15** | **57.17** | **57.04** |
+| 备选：旧引擎薄层（transformers 5.15.1）＋A 路线 | 56.92 | 57.57 | 56.96 | 57.15 |
 | 旧引擎薄层＋text-only（两轮） | 57.56/57.07 | 56.98/58.11 | 57.22/58.04 | 57.25/57.74 |
 | v4 后端（transformers 5.17.0）panel sidecar，六档 | 56.97 | — | — | 56.26 |
 | v4 后端 8180 网关，四档 | 53.57 | — | — | 54.71 |
 | 旧面板独立容器同模型 text-only，五档 | 59.35 | 58.73 | 59.43 | 58.59 |
 
-- **同平台同路径，旧引擎高 1.3–1.8 tok/s**；A 路线 57.15 达到历史 AutoRound 57.04 一档。**这 1.3–1.8 记“旧引擎整包”，不记 transformers 单项**：v5（v4＋transformers 5.15.1）当年同尺 51.1 对 51.8，单换 5.15.1 反而更慢（SMT On 窗口）。
+- **v6 由仓库一条命令从 vLLM 基座构建**：四层链末端加层 5，成对钉 `transformers==5.15.1`／`tokenizers==0.22.2`；与 v4 的 pip 清单差集恰为这两项。实测 57.04，与历史 AutoRound 57.04 一致。
+- **归因口径：成对钉版，不是“旧镜像整包”**。v4 栈钉对＝57.04、旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36；v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers，两项一起。**
 - **多模态不明显拖慢**：A 路线比 text-only 只低 0.1–0.6；单图冒烟 `multimodal_tokens.image=64`、回答正确。
-- **3% 残差未归因**：旧面板独立容器 58.59/59.35 比薄层后端高约 3%。候选只剩 `pstate-supervisor` 与 `cudagraph_capture_sizes [1,2,4]`（`--auto-sleep-idle-timeout` 经用户判定不影响、已撤）；没有一项被证明。
-- **引用纪律**：这四组数分属不同引擎包/路径/形态，**不能与 43.31/57.73/57.04 相减**，也不能把差记到单一机制名下；必须带全 SMT、后端、路径、多模态条件。
+- **3% 残差未归因**：旧面板独立容器 58.59/59.35 比 GPUStack 面板直连高约 3%。候选只剩 `pstate-supervisor` 与 `cudagraph_capture_sizes [1,2,4]`（`--auto-sleep-idle-timeout` 经用户判定不影响、已撤）；没有一项被证明。
+- **引用纪律**：这些数分属不同路径/形态，**不能与 43.31/57.73/57.04 相减**，也不能把差记到单一机制名下；必须带全 SMT、镜像/钉版、路径、多模态条件。

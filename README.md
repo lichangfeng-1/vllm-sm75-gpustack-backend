@@ -14,6 +14,8 @@
 
 另有一组环境变量把底座已有的 QSA、FlashQLA、自建调度器打开——那是**启用**，不是我们实现。
 
+**交付默认路线（2026-10-20 定）= 一条命令从 vLLM 基座构建的最快档（`-v6`）**：在既有四层链末端加一层运行期包钉版，把 transformers/tokenizers 钉到 **5.15.1/0.22.2**；同机同尺 GPUStack 面板直连 **56.79/57.15/57.17（均值 57.04）**（A 路线，输出 1024，并发 1，SMT Off），达到历史 AutoRound 57.04。**同一枚镜像两种用法**：GPUStack 后端（入口 `panel-sidecar.py vllm serve`）或单独面板（入口 `runtime-entrypoint.py`，见 run-book §11）。回退：`--no-tf-pin` 产出基座原版 v4（56.26/56.97）；有旧 Ultra 镜像的机器也可用 `build-oldpanel-backend-v1.sh` 薄层路线（57.15，等价备选）。
+
 ## 2 运行环境（实测下限，不保证兼容上限）
 
 | 件 | 本次实测通过的版本 |
@@ -44,43 +46,47 @@ docker pull quay.io/gpustack/gpustack:v2.2.3
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
 
-# 2) 一条命令：vLLM 基座 → 自定义后端（基座是内部构建缓存；--rebuild-base 强制重建，
-#    --drop-base 构建成功后删掉基座 tag。手动两段等价命令见 run-book §2）
+# 2) 一条命令：上游 vLLM 基座 → SM75 基座 → 自定义后端（默认最快档）
+#    默认在最后一层把 transformers/tokenizers 钉到 5.15.1/0.22.2（实测 57.04 tok/s）；
+#    产物 tag：vllm-sm75-gpustack:v0.1.7-beta2-v6。
+#    回退基座原版 5.17.0/0.23.2（56.26/56.97）：bash gpustack/build-backend-v1.sh --no-tf-pin
+#    （产物 tag 为 -v4；基座已在本地就复用，--rebuild-base 强制重建，--drop-base 删中间 tag）
 bash gpustack/preflight-sources-v1.sh
 bash gpustack/build-backend-v1.sh
 
 # 3) 起 GPUStack（server 与 worker 的具体命令见 run-book §3／§5）
 #    同机部署 worker 不需要 token；跨机用 GET /v2/clusters/1/registration-token 取
 
-# 4) 注册后端版本：版本名 0.1.7-sm75.1-custom，镜像填上面那枚 tag，
+# 4) 注册后端版本（默认 = 最快档）
+#    版本名 0.1.7-sm75.1-fast-custom，镜像填上一步产物 vllm-sm75-gpustack:v0.1.7-beta2-v6，
 #    入口覆盖填：python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
-#    （也可以用 gpustack/set-panel-autostart-v1.sh 一次写好后端入口、面板三 env 与 SM75_EXTENSIONS）
-#    要复现 57+ 的旧引擎薄层后端：bash gpustack/build-oldpanel-backend-v1.sh
-#    产物 tag 填进后端版本，版本名用 0.1.7-sm75.1-oldpanel-custom；面板端口是 1615（旧镜像 ENV），不是 1616
+#    （也可以用 gpustack/set-panel-autostart-v1.sh 一次写好后端入口、面板 env 与 SM75_EXTENSIONS）
+#    回退路径：版本 0.1.7-sm75.1-custom ＋ 镜像 vllm-sm75-gpustack:v0.1.7-beta2-v4
 
 # 5) 部署模型：表单里整块粘
-#    gpustack/args-paste-v1.txt（24 行）＋ gpustack/env-paste-v1.txt（25 行）
-#    要保留图像、只关视频（A 路线）：把 args-paste-v1 换成 gpustack/args-paste-videooff-v1.txt（24 行）
-#    要面板与三种测试，再粘 gpustack/env-paste-panel-v1.txt（4 行）
-bash gpustack/lint-paste-v1.sh      # 末行必须是 LINT_PASTE_OK env=25 args=24
+#    gpustack/args-paste-videooff-v1.txt（24 行，A 路线：保留图像、关闭视频）＋ env-paste-v1.txt（25 行）
+#    纯文本改用 gpustack/args-paste-v1.txt（24 行）
+#    要面板与三种测试，再粘 gpustack/env-paste-panel-v1.txt（5 行，含统一端口 1615）
+bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt   # 末行须为 LINT_PASTE_OK env=25 args=24
 ```
 
-**链条末端必须取 `--target panel-layer`**：它是超集，含前三层＋面板负载＋BenchLocal 校验器运行时＋随仓测试资产，一枚镜像同时承担"跑模型／起面板／起校验容器"三种角色。
+**链条末端取 `--target runtime-pin-layer`（默认）**：它是超集，含前四层＋面板负载＋BenchLocal 校验器运行时＋随仓测试资产＋运行期钉版，一枚镜像同时承担"跑模型／起面板／起校验容器"三种角色，也能单独起面板。
 
 ## 4 控制面板（可选，与模型同一个镜像、同一个模型行）
 
-镜像里已带面板（node v22.23.2 ＋ `/opt/sm75-workbench`）。要让面板和扩展随模型一起起来，在 **GPUStack 模型部署表单的“环境变量”** 里加下面四格（与 25 行 env 块同一处，整块粘贴；这不是宿主 shell 的 `export`）：
+镜像里已带面板（node v22.23.2 ＋ `/opt/sm75-workbench`）。要让面板和扩展随模型一起起来，在 **GPUStack 模型部署表单的“环境变量”** 里加下面五格（与 25 行 env 块同一处，整块粘贴；这不是宿主 shell 的 `export`）：
 
 ```
 SM75_PANEL_AUTOSTART=1
 SM75_CONSOLE_HOST=0.0.0.0
 SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
+SM75_CONSOLE_PORT=1615
 SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 ```
 
 - `SM75_EXTENSIONS` 是扩展开关：`panel`（面板）、`harness`（Ultra 工作台 DSH）、`benchlocal`（三枚校验器）、`speedtest`／`sql`（测试资产启用）；只想要面板就写 `panel`。
-- 后端版本的入口覆盖仍要填：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`（`gpustack/set-panel-autostart-v1.sh --apply` 会连同上面四格一起写好）。
-- 面板口：v4 后端 **1616**（`SM75_CONSOLE_PORT` 可改）；薄层旧引擎后端沿用旧镜像 ENV 的 **1615**。登录令牌在 `$SM75_CONSOLE_ROOT/key`；数据落在 worker 数据目录，重启不丢。
+- 后端版本的入口覆盖仍要填：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`（`gpustack/set-panel-autostart-v1.sh --apply` 会连同上面五格一起写好）。
+- 面板口**统一写 1615**：旧引擎薄层镜像的 ENV 本来就是 1615，显式写死让 v4 回退路径也起在同一端口，换镜像不用改书签/防火墙。登录令牌在 `$SM75_CONSOLE_ROOT/key`；数据落在 worker 数据目录，重启不丢。
 - 不设 `SM75_PANEL_AUTOSTART` 时入口包装纯透传，引擎行为与不带这一层完全一致。
 - **GPUStack 形态下面板自动进入外部引擎模式**：隐藏“模型库／运行配置／设置”，启停与模型连接交给 GPUStack；速度/SQL 测试、BenchLocal、监控照常使用。
 
@@ -92,7 +98,7 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 |---|---|
 | 从零到可推理的每一步 | `gpustack/run-book-v1.md` |
 | 每条参数为什么这么设、怎么调 | run-book **第 12 节**（逐条讲解） |
-| 只想复制粘贴 | run-book **第 13 节** ＋ `gpustack/args-paste-v1.txt`／`env-paste-v1.txt` |
+| 只想复制粘贴 | run-book **第 13 节** ＋ `gpustack/args-paste-videooff-v1.txt`（默认 A 路线）／`args-paste-v1.txt`（纯文本）／`env-paste-v1.txt` |
 | 后端注册表单逐项 | `gpustack/backend-version-card-v1.md` |
 | 能力落点与"为什么不是验收线" | `gpustack/compat-matrix-v1.md` |
 | 面板自启一键接线 | `gpustack/set-panel-autostart-v1.sh`（默认 dry-run，`--apply` 才改） |
@@ -117,17 +123,19 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 
 | 口径 | 8192 | 16384 | 32768 | 均值 |
 |---|---:|---:|---:|---:|
-| **旧引擎薄层后端（transformers 5.15.1）＋A 路线（image16/video0）** | **56.92** | **57.57** | **56.96** | **57.15** |
+| **默认交付 `-v6`（v4 栈＋运行期钉 5.15.1/0.22.2）＋A 路线** | **56.79** | **57.15** | **57.17** | **57.04** |
+| 备选：旧引擎薄层后端（transformers 5.15.1）＋A 路线（image16/video0） | 56.92 | 57.57 | 56.96 | 57.15 |
 | 旧引擎薄层后端、text-only，两轮 | 57.56 / 57.07 | 56.98 / 58.11 | 57.22 / 58.04 | 57.25 / 57.74 |
 | v4 后端（transformers 5.17.0）panel sidecar 直连，六档 | 56.97 | — | — | 56.26 |
 | v4 后端 8180 网关，四档 | 53.57 | — | — | 54.71 |
 | 旧 Ultra 面板镜像 text-only 直连（独立容器），五档 | 59.35 | 58.73 | 59.43 | 58.59（五档） |
 
-- **薄层旧引擎后端**：底座旧 Ultra 镜像，只 `COPY --from=v4` 的 `/opt/vllm-sm75`、`/opt/sm75-workbench`、`/opt/harness`；引擎包一个字节不动。构建 `bash gpustack/build-oldpanel-backend-v1.sh`，产物 `vllm-sm75-gpustack:v0.1.7-beta-ultra-pcieipc-incple-panel-v1`。**面板端口沿用旧镜像 ENV 的 1615**（v4 是 1616）。
-- **同平台同路径 A/B**：旧引擎比 v4 高 **1.3–1.8 tok/s**，A 路线 **57.15** 已达到历史 AutoRound **57.04** 一档；保留图像只比 text-only 低 0.1–0.6，**多模态没有明显拖慢**（单图冒烟 `multimodal_tokens.image=64`、回答正确）。这 1.3–1.8 记**旧引擎整包**，不记 transformers 单项：v5（v4＋transformers 5.15.1）当年同尺 51.1 对 51.8，单换 5.15.1 反而更慢（SMT On 窗口）。
-- **3% 未归因**：旧面板独立容器同模型 text-only 8192 59.35 / 五档 58.59，比薄层后端高约 3%。候选只剩：旧容器有 `pstate-supervisor`（`-psl 16 -psh 16`）而 GPUStack sidecar 没起它（采样 99.3% P0，只解释极小部分）；args 差 `cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`；旧 5 档 8192 是最高点（单次波动 ±1.3）。**`--auto-sleep-idle-timeout` 用户 2026-10-20 判定不影响、已撤下。不得写成已解释。**
+- **默认档 `-v6` 由仓库一条命令从 vLLM 基座构建**：在四层链末端加层 5，把 `transformers==5.15.1`、`tokenizers==0.22.2` 成对钉住；与 v4 的完整 pip 清单差集恰为这两项。实测 **57.04**，与历史 AutoRound 57.04 一致。
+- **归因口径**：关键变量是**这两个包成对钉版**，不是“旧镜像整包”。证据：v4 栈钉对＝57.04；旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36；v4 栈只换 transformers 5.15.1（tokenizers 未配对）＝51.1；v5 的反向结果因此不能当作“旧包更慢”的证据。**不要单独改 transformers，必须两项一起。**
+- **3% 未归因**：旧面板独立容器同模型 text-only 8192 59.35 / 五档 58.59，比 GPUStack 面板直连高约 3%。候选只剩 `pstate-supervisor`（旧容器有、GPUStack sidecar 没起；采样 99.3% P0，只解释极小部分）与 `cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`；`--auto-sleep-idle-timeout` 经用户判定不影响、已撤。**不得写成已解释。**
 - **A 路线首次启动要 JIT 编译 FlashInfer 多模态 kernel**：`init engine` 211 s、总启动约 9–10 分钟；缓存 `/root/.cache/flashinfer/0.6.18/75/` 不持久，重建即重编。
-- 引用这些数时必须带全条件（后端引擎包/路径/SMT/多模态），详细见 run-book 第 14 节、完整教程 v2 与 `调度/SM75性能变量与历史档位速查-20261019-v1.md`。
+- **第三线判据（旧栈单换 5.17/0.23）**：54.91/55.81（合并 55.36），比旧栈钉对低 1.8–2.4 ⇒ **钉版组合错向会掉速；方向与“必须 5.15.1/0.22.2”一致**。
+- 引用这些数时必须带全条件（后端引擎包/路径/SMT/多模态），详细见 run-book 第 14 节、完整教程与 `调度/SM75性能变量与历史档位速查-20261019-v1.md`。
 
 ## 7 目录速览
 

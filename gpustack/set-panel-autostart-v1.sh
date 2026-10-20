@@ -2,14 +2,15 @@
 # set-panel-autostart-v1.sh —— 一次把"面板随模型自启"接好（默认 dry-run，只打印不改）
 #
 # 做三件事：
-#   ① 后端版本 0.1.7-sm75.1-custom 的 entrypoint 指到 panel-sidecar 包装；
-#   ② 模型行 env 追加 SM75_PANEL_AUTOSTART=1 / SM75_CONSOLE_HOST=0.0.0.0 / SM75_CONSOLE_ROOT=/var/lib/gpustack/panel；
-#   ③ 模型行 env 追加 SM75_EXTENSIONS（默认 panel,benchlocal,speedtest,sql，可整体覆盖）。
+#   ① 后端版本 0.1.7-sm75.1-fast-custom（默认最快档，镜像 -v6）的 entrypoint 指到 panel-sidecar 包装；
+#   ② 模型行 env 追加 SM75_PANEL_AUTOSTART=1 / SM75_CONSOLE_HOST=0.0.0.0 / SM75_CONSOLE_ROOT=/var/lib/gpustack/panel / SM75_CONSOLE_PORT=1615；
+#   ③ 模型行 env 追加 SM75_EXTENSIONS（默认 panel,harness,benchlocal,speedtest,sql，可整体覆盖）。
 #      扩展依赖与两套测试资产已烘进镜像；不需要时把 EXTENSIONS 设为 panel 或删掉该变量。
 #
 # 用法：
 #   GS_KEY=<API key> HOST=<ip:8180> MODEL_ID=<模型 id> bash gpustack/set-panel-autostart-v1.sh          # 只看将改什么
 #   GS_KEY=<API key> HOST=<ip:8180> MODEL_ID=<模型 id> bash gpustack/set-panel-autostart-v1.sh --apply  # 真改
+#   VERSION_NAME=0.1.7-sm75.1-custom ... bash gpustack/set-panel-autostart-v1.sh --apply               # v4 回退路线
 #   EXTENSIONS=panel GS_KEY=... bash gpustack/set-panel-autostart-v1.sh --apply                        # 只起面板
 #
 # 依赖：curl、python3。改完要重启实例（平台按 replicas 重建），或用 UI 停/起一次。
@@ -18,7 +19,7 @@ set -eu
 : "${HOST:?需要 HOST，形如 172.17.100.10:8180}"
 MODEL_ID="${MODEL_ID:-4}"
 BACKEND_ID="${BACKEND_ID:-1}"
-VERSION_NAME="${VERSION_NAME:-0.1.7-sm75.1-custom}"
+VERSION_NAME="${VERSION_NAME:-0.1.7-sm75.1-fast-custom}"
 ENTRYPOINT="${ENTRYPOINT:-python3 /opt/vllm-sm75/panel-sidecar.py vllm serve}"
 EXTENSIONS="${EXTENSIONS:-panel,harness,benchlocal,speedtest,sql}"
 APPLY=0
@@ -43,7 +44,8 @@ if ver not in vc:
 cfg = dict(vc[ver])
 print("  entrypoint: %r -> %r" % (cfg.get("entrypoint"), ep))
 cfg["entrypoint"] = ep
-json.dump({"backend_name": b.get("backend_name"), "version_configs": {ver: cfg}},
+vc[ver] = cfg
+json.dump({"backend_name": b.get("backend_name"), "version_configs": vc},
           open("/tmp/spa-backend-put.json", "w"), ensure_ascii=False)
 
 m = json.load(open("/tmp/spa-model.json", encoding="utf-8"))
@@ -52,6 +54,7 @@ if "code" in m:
 env = dict(m.get("env") or {})
 want = {"SM75_PANEL_AUTOSTART": "1", "SM75_CONSOLE_HOST": "0.0.0.0",
         "SM75_CONSOLE_ROOT": "/var/lib/gpustack/panel",
+        "SM75_CONSOLE_PORT": "1615",
         "SM75_EXTENSIONS": extensions}
 for k, v in want.items():
     print("  env %-22s %r -> %r" % (k, env.get(k), v))
@@ -89,7 +92,7 @@ for name in ("backend", "model"):
     d = json.load(open("/tmp/spa-%s-out.json" % name, encoding="utf-8"))
     if "code" in d:
         raise SystemExit("%s PUT 被拒: %s" % (name, str(d)[:300]))
-print("APPLIED 后端 entrypoint 与模型 env 已写入；重启实例后生效（面板默认 :1616）")
+print("APPLIED 后端 entrypoint 与模型 env 已写入；重启实例后生效（面板 :1615）")
 PY
 
 # PUT 会清未提交的 image_name；提交后回读断言，防止静默丢镜像名。
