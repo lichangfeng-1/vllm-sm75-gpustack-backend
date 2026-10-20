@@ -500,7 +500,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
    - **无 root（本机 laryyli 实测）**：用户 cron 每分钟跑同一个 `sync`，用 `flock -n /tmp/sm75-bench-sync.lock` 防重入；本机包装 `/home/laryyli/benchlocal-sync-v1.sh`，crontab 行与日志见该文件/`benchlocal-sync.log`。原有 pstate `@reboot` 不动。
 5. **关闭面板启动（扩展/可选节）**：默认不关。确实不用面板时，把模型行 `SM75_PANEL_AUTOSTART` 置 0（或从 `SM75_EXTENSIONS` 去掉 `panel`），再执行 `benchlocal-containers-v1.sh stop`；看护也会因 1615 不可达自动停三容器。**不要只关面板而留着三容器**。
 6. **状态**：v7 镜像已构建（`vllm-sm75-gpustack:v0.1.7-beta2-v7`，`5ad2f2c1df6d`），外部三容器实机 **BF-01／CLI-01／HA-01 均 pass 100**；image4 冒烟 4 图 200、5 图 400；75 题全量/雷达未跑。v6 仍保留为回退。
-7. **★SHM 漏项（2026-10-21）**：模型行必须含 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64`；`docker inspect` 的 `ShmSize` 应为 `68719476736`。本机 10-21 实读 43 条 env 里没有它、`ShmSize=10737418240`（10G）；已补到 env 44，第三次容器 `ShmSize=68719476736`。**更正**：首启的 3 次 60s `No available shared memory broadcast block` 是首次填 JIT/预热时各 rank 不同步；第二次 0 次、`init engine=30.95 s`，不是 10G shm 导致。SHM=64 仍按教程硬性项补齐。
+7. **★SHM 漏项（2026-10-21）**：模型行必须含 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64`；`docker inspect` 的 `ShmSize` 应为 `68719476736`。本机 10-21 实读 43 条 env 里没有它、`ShmSize=10737418240`（10G）；已补到 env 44，第三次容器 `ShmSize=68719476736`、`init engine=31.34 s`。**更正**：首启的 3 次 60s `No available shared memory broadcast block` 是首次填 JIT/预热时各 rank 不同步；第二次 0 次、`init engine=30.95 s`，不是 10G shm 导致。SHM=64 仍按教程硬性项补齐。
 
 ### 11a 三枚校验器与雷达图（旧 v6 本地形态／回退说明）
 
