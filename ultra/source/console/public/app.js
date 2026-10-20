@@ -875,6 +875,7 @@ export function mountConsole(document = globalThis.document, options = {}) {
   let profiles = [],
     active = "",
     externalEngineMode = false,
+    engineEndpoint = "",
     current =
       options.initialPage ||
       new URLSearchParams(location.search).get("page") ||
@@ -1169,6 +1170,7 @@ export function mountConsole(document = globalThis.document, options = {}) {
         const d = await r.json();
         if (disposed || generation !== authGeneration) return;
         externalEngineMode = !!d.externalEngine;
+        engineEndpoint = d.engineUrl || "";
         applyEngineMode();
         syncLoginMode(d.accountConfigured);
         if (!d.authenticated) setAuth("anonymous");
@@ -1491,7 +1493,8 @@ export function mountConsole(document = globalThis.document, options = {}) {
           "/" +
           (type === "sql" ? "sql_benchmark.html" : "") +
           "?profile=" +
-          encodeURIComponent(active);
+          encodeURIComponent(active) +
+          (engineEndpoint ? "&engine=" + encodeURIComponent(engineEndpoint) : "");
         if (ready && frame.getAttribute("src") !== src) frame.src = src;
         if (!ready) frame.removeAttribute("src");
       }),

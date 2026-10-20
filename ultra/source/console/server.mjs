@@ -78,8 +78,13 @@ function writeBenchEnabled(enabled) {
     console.error("benchlocal flag:", error.message);
   }
 }
+const benchExtensionEnabled = String(process.env.SM75_EXTENSIONS || "")
+  .split(",")
+  .map((name) => name.trim())
+  .includes("benchlocal");
 writeBenchEnabled(
-  (store.get("extension", "benchlocal") || { enabled: true }).enabled !== false,
+  benchExtensionEnabled &&
+    (store.get("extension", "benchlocal") || { enabled: true }).enabled !== false,
 );
 const secretPath = path.join(root, "key");
 const existingInstall = fs.existsSync(secretPath);
@@ -857,7 +862,8 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === "/api/session" && req.method === "GET") {
       const principal = auth.principal(req);
       return json(res, { authenticated: !!principal, principal, accountConfigured: !!auth.policy.account,
-        externalEngine: !!externalEngine, engineModel: externalEngine?.model || null });
+        externalEngine: !!externalEngine, engineModel: externalEngine?.model || null,
+        engineUrl: externalEngine?.url || "" });
     }
     if (u.pathname === "/api/logout" && req.method === "POST") {
       if (!auth.originAllowed(req))

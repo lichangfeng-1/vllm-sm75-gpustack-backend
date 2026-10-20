@@ -2,7 +2,7 @@ import fs from 'node:fs';import path from 'node:path';import http from 'node:htt
 const here=path.dirname(fileURLToPath(import.meta.url));
 const frameBootstrap=fs.readFileSync(new URL('./public/frame-appearance.js',import.meta.url),'utf8');
 const credentialsScript='<script data-sm75-fetch-credentials>(function(){const f=window.fetch;window.fetch=function(input,init){init=init?{...init}:{};try{const u=new URL(input instanceof Request?input.url:String(input),location.href);if(u.origin===location.origin)init.credentials="include";}catch{}return f.call(this,input,init);};})();</script>';
-const speedResetScript=(engineUrl)=>'<script data-sm75-speed-reset>(function(){try{const k="sm75-speed-proxy-v2",u='+JSON.stringify(engineUrl||'')+';if(localStorage.getItem(k)!==u){localStorage.removeItem("llmPerfTestApiUrl");localStorage.removeItem("llmPerfTestApiKey");localStorage.setItem(k,u);}}catch{}})();</script>';
+export const speedResetScript=(engineUrl)=>'<script data-sm75-speed-reset>(function(){try{const k="sm75-speed-proxy-v2",u='+JSON.stringify(engineUrl||'')+';const saved=localStorage.getItem("llmPerfTestApiUrl")||"";let stale=false;try{const a=new URL(saved),b=new URL(u);stale=!!saved&&!!u&&a.hostname===b.hostname&&/^40\\d{3}$/.test(a.port)&&a.port!==b.port;}catch{}if(localStorage.getItem(k)!==u||stale){localStorage.removeItem("llmPerfTestApiUrl");localStorage.removeItem("llmPerfTestApiKey");localStorage.setItem(k,u);}}catch{}})();</script>';
 export function injectFrameAppearance(html){
  if(html.includes('data-sm75-frame-appearance'))return html;
  const script='<script data-sm75-frame-appearance>'+frameBootstrap.replace(/<\/script/gi,'<\\/script')+'</script>';

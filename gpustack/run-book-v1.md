@@ -57,19 +57,19 @@ cd vllm-sm75-gpustack-backend
 ```text
 vllm/vllm-openai:v0.30.0-cu129
   ↓ docker build -f gpustack/Dockerfile.allinone --target runtime-pin-layer …
-vllm-sm75-gpustack:v0.1.7-beta2-v6         （默认最快档：上游构建段＋五层＋运行期钉 5.15.1/0.22.2）
+vllm-sm75-gpustack:v0.1.7-beta2-v7         （默认交付档：上游构建段＋五层＋运行期钉 5.15.1/0.22.2）
 ```
 
 `gpustack/Dockerfile.allinone` 由 `gpustack/gen-allinone-dockerfile-v1.py` 生成（上游 `docker/Dockerfile` 原文仍是冻结文件，生成物提交入库、可审计）；`--check` 可验证生成物与输入一致。第 6 节注册用末端那枚 `vllm-sm75-gpustack`。
 
-> **2026-10-20 定版**：默认交付是 `-v6`（层 5 把 transformers/tokenizers 钉到 5.15.1/0.22.2，实测 56.83–57.04）；`--no-tf-pin` 产出 `-v4-nopin`（基座原版 5.17.0/0.23.2，56.26/56.97，回退用）。**同一枚镜像**既能做 GPUStack 后端，也能单独起面板（入口 `runtime-entrypoint.py`，见 §11），不依赖任何历史镜像。
+> **2026-10-21 定版**：默认交付是 `-v7`（层 5 把 transformers/tokenizers 钉到 5.15.1/0.22.2；同引擎层实测 56.83–57.04）；`--no-tf-pin` 产出 `-v4-nopin`（基座原版 5.17.0/0.23.2，56.26/56.97，回退用）。**同一枚镜像**既能做 GPUStack 后端，也能单独起面板（入口 `runtime-entrypoint.py`，见 §11），不依赖任何历史镜像。
 
 **推荐只跑一条命令**（默认两段构建；单次 allinone 为可选、待完整验收）：
 
 ```bash
 bash gpustack/preflight-sources-v1.sh
-bash gpustack/build-backend-v1.sh --two-stage   # 默认两段构建（已验证），产出钉 5.15.1/0.22.2 的 -v6
-docker images vllm-sm75-gpustack             # 期望 v0.1.7-beta2-v6
+bash gpustack/build-backend-v1.sh --two-stage   # 默认两段构建（已验证），产出钉 5.15.1/0.22.2 的 -v7
+docker images vllm-sm75-gpustack             # 期望 v0.1.7-beta2-v7
 ```
 
 `--two-stage` 是回退路径（先建 `vllm-sm75` 基座再叠 `Dockerfile.v1`，用于排错/对比）；只有它才会产生 `vllm-sm75:v0.1.7-beta2` 中间 tag，配套 `--rebuild-base`/`--drop-base`。`--no-tf-pin` 产出 `-v4`。
@@ -81,7 +81,7 @@ bash gpustack/preflight-sources-v1.sh
 python3 gpustack/gen-allinone-dockerfile-v1.py
 docker build --file gpustack/Dockerfile.allinone --target runtime-pin-layer \
   --build-arg TF_VERSION=5.15.1 --build-arg TOKENIZERS_VERSION=0.22.2 \
-  -t vllm-sm75-gpustack:v0.1.7-beta2-v6 .
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v7 .
 ```
 
 > `--build` 已经是"门＋构建"一条命令；只想先验门、不想等构建时，去掉 `--build` 单独跑一次即可（那一步不执行 docker build）。
@@ -168,7 +168,7 @@ curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/clusters/1/registrat
 
 ## 6 注册后端版本（一次即可）
 
-UI 后端页新建：后端 **vLLM**｜版本 `0.1.7-sm75.1-fast-custom`｜自定义 CUDA 可见性｜镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v6`。
+UI 后端页新建：后端 **vLLM**｜版本 `0.1.7-sm75.1-fast-custom`｜自定义 CUDA 可见性｜镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v7`。
 
 回退路线：版本 `0.1.7-sm75.1-custom` ＋ 镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v4`（基座原版 5.17/0.23）；有旧 Ultra 镜像的机器也可用薄层版 `0.1.7-sm75.1-oldpanel-custom`。其余填法不变，面板端口按 §11 写 1615。
 
@@ -218,13 +218,13 @@ bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt
 | **A 路线（默认交付档：开图、关视频）** | `--limit-mm-per-prompt={"image":4,"video":0}`，删掉 `--language-model-only` |
 | 纯文本 | 保留 `--language-model-only`，不加限额（`args-paste-v1.txt`） |
 | 开图、不写限额 | **删掉** `--language-model-only`（引擎默认上限 999） |
-| 开图、每请求最多 4 张 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":32}` |
+| 开图、每请求最多 4 张、关视频 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":4,"video":0}` |
 | 图＋视频 | 删掉 `--language-model-only` ＋ 加 `--limit-mm-per-prompt={"image":4,"video":1}` |
 
 三条硬约束，改之前先看：
 
-1. **JSON 必须紧贴等号、内部不能有空格**（`--limit-mm-per-prompt={"image":32}`）。GPUStack 按空格切参数，写成 `{ "image": 32 }` 会被拆成多个 token，引擎直接报参数错误。
-2. **默认值不是 1，是 999**：`vllm/config/multimodal.py:478-489` 对未指定模态直接返回 **999**（注释原文 "Unspecified modality is set to 999 by default"）⇒"只删 `--language-model-only`"等于几乎不设防。**推荐显式写 `{"image":32,"video":1}`**：视频每多一路按帧数吃 token，本线视频输入未实测（GPUStack 界面没有视频上传入口），先按 1 跑通再往上加。
+1. **JSON 必须紧贴等号、内部不能有空格**（`--limit-mm-per-prompt={"image":4,"video":0}`）。GPUStack 按空格切参数，写成 `{ "image": 4 }` 会被拆成多个 token，引擎直接报参数错误。
+2. **默认值不是 1，是 999**：`vllm/config/multimodal.py:478-489` 对未指定模态直接返回 **999**（注释原文 "Unspecified modality is set to 999 by default"）⇒"只删 `--language-model-only`"等于几乎不设防。**本交付显式写 `{"image":4,"video":0}`**；视频每多一路按帧数吃 token，本线视频未实测，先按 0 跑通。
 3. **每加一路模态都要重算 claim**：开多模态后逐卡实测 15,372 MiB，已超 `0.92 × 16384 ＝ 15,073` 的可分配口径 ⇒ 诚实的 claim 过不了准入，这一档在本机只能"低报过准入、靠物理余量跑"，余量约 1,012 MiB/卡。32 张图这种上限在**本机显存下不具备可跑性**，它只是"允许值"，不是"跑得动值"。
 
 ## 8 验收（四道，缺一不算过）
@@ -306,7 +306,7 @@ docker run -d --name sm75-bench-cli \
 
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
-**本仓默认路线（`-v6`）实测（2026-10-20，SMT Off，AutoRound，output 1024，并发 1，面板直连）**：8192/16384/32768 = **56.79 / 57.15 / 57.17（均值 57.04）**，A 路线（image4/video0），与历史 AutoRound 57.04 一致。关键变量是**transformers/tokenizers 成对钉到 5.15.1/0.22.2**：v4 栈钉对＝57.04，旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36，v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers。** 同机对照：不钉版 v4 **56.26/56.97**；旧面板独立容器 59.35（text-only，不可与 A 路线相减）。**仓库从 vLLM 基座一条命令构建的就是 v6，不需要任何历史镜像。**
+**默认路线（`-v7`；同引擎层读数，2026-10-20，SMT Off，AutoRound，output 1024，并发 1，面板直连）**：8192/16384/32768 = **56.79 / 57.15 / 57.17（均值 57.04）**，A 路线（image4/video0），与历史 AutoRound 57.04 一致。关键变量是**transformers/tokenizers 成对钉到 5.15.1/0.22.2**：v4 栈钉对＝57.04，旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36，v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers。** 同机对照：不钉版 v4 **56.26/56.97**；旧面板独立容器 59.35（text-only，不可与 A 路线相减）。**仓库从 vLLM 基座一条命令构建的就是 v7，不需要任何历史镜像。**
 
 仓根 `README.md` 的性能节挂着三张测速表：基线档 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出）。
 
@@ -421,12 +421,12 @@ SM75_BENCH_VERIFIER_STATE_DIR=/var/lib/gpustack/benchlocal
 
 ```bash
 # 推荐：用脚本（GET 整行后只改目标版本再整行 PUT，不会删掉其它版本；默认版本名 fast-custom）
-GS_KEY=... HOST=<ip:8180> MODEL_ID=4 bash gpustack/set-panel-autostart-v1.sh --apply
+GS_KEY=... HOST=<ip:8180> MODEL_ID=4 IMAGE_NAME=vllm-sm75-gpustack:v0.1.7-beta2-v7 bash gpustack/set-panel-autostart-v1.sh --apply
 
 # 仅当该后端只有这一个版本时，可直接 PUT（多版本时这样写会删掉未列出的版本）：
 curl -s -X PUT -H "X-API-Key: ${GS_KEY}" -H 'Content-Type: application/json' \
   -d '{"backend_name":"vLLM","version_configs":{"0.1.7-sm75.1-fast-custom":{
-       "image_name":"vllm-sm75-gpustack:v0.1.7-beta2-v6",
+       "image_name":"vllm-sm75-gpustack:v0.1.7-beta2-v7",
        "custom_framework":"cuda",
        "entrypoint":"python3 /opt/vllm-sm75/panel-sidecar.py vllm serve"}}}' \
   http://${HOST_IP}:8180/v2/inference-backends/1
@@ -463,7 +463,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
   -e SM75_EDITION=ultra -e SM75_CONSOLE_ROOT=/data \
   -e SM75_CONSOLE_HOST=0.0.0.0 -e SM75_CONSOLE_PORT=1615 \
   -v "$PANEL_DATA:/data" \
-  --entrypoint python3 vllm-sm75-gpustack:v0.1.7-beta2-v6 \
+  --entrypoint python3 vllm-sm75-gpustack:v0.1.7-beta2-v7 \
   /opt/vllm-sm75/runtime-entrypoint.py
 ```
 
@@ -491,6 +491,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
      bash gpustack/benchlocal-containers-v1.sh start
    ```
    launcher 自动建/复用 internal 网（不写死网段），起三容器后 `docker inspect` 发现网关与容器 IP，写 `benchlocal.env`；三容器 `--internal`、无 GPU、`--read-only`、`--cap-drop ALL`、2 CPU/4g、`restart unless-stopped`。`stop` 只停不删（IP 保留），`status` 只读；镜像/key/origin 不一致时必须显式 `--replace` 重建。
+   **顺序**：先执行上面的 `start` 写好 `benchlocal.env`，再启动模型/面板。面板只在启动时读一次配置；先起模型会读不到，BenchLocal 会一直未配置，需重启面板/模型。
 3. **面板开关与释放**：面板 BenchLocal 开关（`benchToggle-benchlocal`）写 `extension.benchlocal.enabled`；`server.mjs` 同步写 `${STATE_DIR}/benchlocal.enabled`。宿主看护每 30 秒（systemd）或每分钟（用户 cron）跑 `sync`：
    - 面板 1615 不可达，或 flag=0 → `docker stop` 三容器；
    - 面板可达且 flag=1 → `docker start`/幂等 `start`。
@@ -499,7 +500,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
    - **有 root（推荐）**：把 `gpustack/benchlocal-containers-v1.sh` 放到 `/usr/local/sbin/`，把 `gpustack/systemd/sm75-bench-verifiers.{service,timer}` 放到 `/etc/systemd/system/`，按 `systemd/sm75-bench-verifiers.env.example` 写 `/etc/sm75-bench-verifiers.env`（0600，填 `GPUSTACK_DATA_ROOT` 与 v7 `IMAGE`），`systemctl daemon-reload && systemctl enable --now sm75-bench-verifiers.timer`。
    - **无 root（本机 laryyli 实测）**：用户 cron 每分钟跑同一个 `sync`，用 `flock -n /tmp/sm75-bench-sync.lock` 防重入；本机包装 `/home/laryyli/benchlocal-sync-v1.sh`，crontab 行与日志见该文件/`benchlocal-sync.log`。原有 pstate `@reboot` 不动。
 5. **关闭面板启动（扩展/可选节）**：默认不关。确实不用面板时，把模型行 `SM75_PANEL_AUTOSTART` 置 0（或从 `SM75_EXTENSIONS` 去掉 `panel`），再执行 `benchlocal-containers-v1.sh stop`；看护也会因 1615 不可达自动停三容器。**不要只关面板而留着三容器**。
-6. **状态**：v7 镜像已构建（`vllm-sm75-gpustack:v0.1.7-beta2-v7`，`5ad2f2c1df6d`），外部三容器实机 **BF-01／CLI-01／HA-01 均 pass 100**；image4 冒烟 4 图 200、5 图 400；75 题全量/雷达未跑。v6 仍保留为回退。
+6. **状态**：v7 镜像本轮实机为 `vllm-sm75-gpustack:v0.1.7-beta2-v7`（digest `5ad2f2c1df6d`）；**本轮之后的速度页/启动顺序代码修复需要重构建，digest 会变**。外部三容器实机 **BF-01／CLI-01／HA-01 均 pass 100**；image4 冒烟 4 图 200、5 图 400；75 题全量/雷达未跑。v6 仍保留为回退。
 7. **★SHM 漏项（2026-10-21）**：模型行必须含 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64`；`docker inspect` 的 `ShmSize` 应为 `68719476736`。本机 10-21 实读 43 条 env 里没有它、`ShmSize=10737418240`（10G）；已补到 env 44，第三次容器 `ShmSize=68719476736`、`init engine=31.34 s`。**更正**：首启的 3 次 60s `No available shared memory broadcast block` 是首次填 JIT/预热时各 rank 不同步；第二次 0 次、`init engine=30.95 s`，不是 10G shm 导致。SHM=64 仍按教程硬性项补齐。
 
 ### 11a 三枚校验器与雷达图（旧 v6 本地形态／回退说明）
@@ -508,7 +509,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 
 **当前 `-v6` 单容器默认形态（2026-10-20 实读）**：三枚 BenchLocal 校验器（bugfind-15／cli-40／hermesagent-20）不再是三个独立容器，而是 `gpustack/layers/panel/panel-sidecar.py:143-187` 在模型容器内拉起的三个本地网关进程（`gateway.mjs`，端口 4211／4212／4213，`SM75_BENCH_VERIFIERS` 指向 `127.0.0.1`）。每个网关再拉起自己的 verifier 子进程；`SM75_EXTENSIONS` 含 `benchlocal` 时随面板自动启动。它们以 `NVIDIA_VISIBLE_DEVICES=void`、`CUDA_VISIBLE_DEVICES=` 运行，但**这只是环境变量标记，不是设备隔离**：2026-10-20 实测 `verifier` 与 `ubuntu` 用户仍能 `nvidia-smi -L` 看到 8 卡，恶意／失控题包仍可能占 GPU。另有进程级隔离（独立网关／角色目录／临时工作目录），但没有容器级隔离，共享模型容器的文件系统与网络。
 
-**可选三容器形态（旧 / bench 镜像）**：§9／§9b 的 `sm75-bench-*` 仍可起，但当前 v6 单容器会先启动本地网关并覆盖 `SM75_BENCH_VERIFIERS`，**不会自动改用宿主侧三容器**；要回到三容器形态，需换用 `gpustack/Dockerfile.bench-v1` 的 bench 镜像／外部面板，或给 `start_verifiers` 增加显式模式开关（当前没有）。两种形态不要同时起，否则外部三容器是空跑。
+**可选三容器形态（旧 / bench 镜像）**：§9／§9b 的 `sm75-bench-*` 仍可起，但当前 v6 单容器会先启动本地网关并覆盖 `SM75_BENCH_VERIFIERS`，**不会自动改用宿主侧三容器**；v7 已有 external 模式开关（`SM75_BENCH_VERIFIERS_MODE=external`，见 11c），v6 旧形态没有。两种形态不要同时起，否则外部三容器是空跑。
 
 雷达图在**面板**里（BenchLocal 页面，`public/benchlocal-native-ui.js:108-136` 的 `drawRadar`），数据来自一次 BenchLocal 评测的逐题包结果。可执行步骤：
 
@@ -848,9 +849,9 @@ docker build --file gpustack/Dockerfile.v1 --target panel-layer \
 **版本参考（2026-10-19 npm 国内镜像现读）**：`latest=0.2.0-rc.2`、`alpha=0.2.1-alpha.5`、`next=0.2.1-rc.2`；现装 `0.2.0-rc.2`。
 **0.2.0-rc.2 不是 drop-in**：它的客户端包结构已变（`dsh-client-ui-layout`／`dsh-llm-pi-ai`／`dsh-web-frontend` 不再以直接依赖出现），品牌与插件补丁需要重做；候选 `package.json`／锁文件已存 `K:\sm75\调度\dsh-0.2.0-rc.2-candidate\`。跨 minor 升级先升 rc 验证，别直接跟 `alpha`。
 
-## 14 旧引擎薄层后端（2026-10-20，备选路线；默认请用 §2 的 `-v6`）
+## 14 旧引擎薄层后端（2026-10-20，备选路线；默认请用 §2 的 `-v7`）
 
-> 默认交付（`-v6`）已经从 vLLM 基座一条命令构建出同速档（57.04），**不需要旧 Ultra 镜像**。本节保留给"本机恰好有旧 Ultra 镜像、想复用其引擎包"的场景，或作为交叉验证；它比 `-v6` 多一步前置（旧镜像必须在本机）。
+> 默认交付（`-v7`）已经从 vLLM 基座一条命令构建出同速档（57.04），**不需要旧 Ultra 镜像**。本节保留给"本机恰好有旧 Ultra 镜像、想复用其引擎包"的场景，或作为交叉验证；它比 `-v7` 多一步前置（旧镜像必须在本机）。
 
 目的：在 GPUStack 侧复现旧面板镜像的引擎速度。做法是**只换面板资产、不换引擎包**。
 

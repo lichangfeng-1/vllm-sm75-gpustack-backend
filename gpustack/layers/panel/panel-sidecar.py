@@ -159,7 +159,7 @@ def read_verifier_config(path):
                     "SM75_BENCH_PROXY_BASE",
                 }:
                     values[name] = value.strip()
-    except OSError:
+    except (OSError, UnicodeError):
         pass
     return values
 

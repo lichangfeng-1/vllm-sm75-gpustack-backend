@@ -6,4 +6,4 @@ Requires=docker.service
 [Service]
 Type=oneshot
 EnvironmentFile=-/etc/sm75-bench-verifiers.env
-ExecStart=/usr/local/sbin/benchlocal-containers-v1.sh sync
+ExecStart=/bin/bash /usr/local/sbin/benchlocal-containers-v1.sh sync

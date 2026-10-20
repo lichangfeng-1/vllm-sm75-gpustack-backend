@@ -124,7 +124,7 @@ SELF=${0##*/}
 ENV_FILE_DEFAULT=$SCRIPT_DIR/env-paste-v1.txt
 ARGS_FILE_DEFAULT=$SCRIPT_DIR/args-paste-videooff-v1.txt
 # 镜像默认 tag 取自仓内权威登记：gpustack/backend-version-card-v1.md 第 13 行「镜像名称 image_name」。
-IMAGE_DEFAULT=vllm-sm75-gpustack:v0.1.7-beta2-v6
+IMAGE_DEFAULT=vllm-sm75-gpustack:v0.1.7-beta2-v7
 MIN_BLOCK_LINES=24            # 粘贴块下限：args 24 行／env 25 行，取较小者 24（精确行数由 lint 的 L4／L11 钉）
 PCIE_KEY=VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC
 SPEC_FLAG=--speculative-config
