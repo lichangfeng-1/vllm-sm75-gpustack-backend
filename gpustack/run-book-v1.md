@@ -791,9 +791,9 @@ bash gpustack/build-oldpanel-backend-v1.sh
 | v4 后端 8180 网关，四档 | 53.57 | — | — | 54.71 |
 | 旧面板独立容器 text-only，五档 | 59.35 | 58.73 | 59.43 | 58.59 |
 
-- 同平台同路径：旧引擎高 **1.3–1.8**；A 路线达到历史 AutoRound **57.04** 一档。
+- 同平台同路径：旧引擎高 **1.3–1.8**；A 路线达到历史 AutoRound **57.04** 一档。**记“旧引擎整包”，不记 transformers 单项**（v5＝v4＋transformers 5.15.1 当年同尺 51.1 对 51.8，单换 5.15.1 反而更慢，SMT On 窗口）。
 - A 路线 vs text-only 差 0.1–0.6 ⇒ **保留图像没有明显拖慢**；单图冒烟 `multimodal_tokens.image=64`、回答正确。
-- 到旧面板独立容器（58.59/59.35）还有约 **3% 未归因**：候选 `pstate-supervisor`（旧容器有、GPUStack sidecar 没起；采样 99.3% P0，只解释极小部分）、`cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`、缺 `--auto-sleep-idle-timeout 0`。**没有一项被证明，别写成已解释。**
+- 到旧面板独立容器（58.59/59.35）还有约 **3% 未归因**：候选只剩 `pstate-supervisor`（旧容器有、GPUStack sidecar 没起；采样 99.3% P0，只解释极小部分）与 `cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`（`--auto-sleep-idle-timeout` 经用户判定不影响、已撤）。**没有一项被证明，别写成已解释。**
 
 ### 14.4 首次启动与回退
 

@@ -124,8 +124,8 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 | 旧 Ultra 面板镜像 text-only 直连（独立容器），五档 | 59.35 | 58.73 | 59.43 | 58.59（五档） |
 
 - **薄层旧引擎后端**：底座旧 Ultra 镜像，只 `COPY --from=v4` 的 `/opt/vllm-sm75`、`/opt/sm75-workbench`、`/opt/harness`；引擎包一个字节不动。构建 `bash gpustack/build-oldpanel-backend-v1.sh`，产物 `vllm-sm75-gpustack:v0.1.7-beta-ultra-pcieipc-incple-panel-v1`。**面板端口沿用旧镜像 ENV 的 1615**（v4 是 1616）。
-- **同平台同路径 A/B**：旧引擎比 v4 高 **1.3–1.8 tok/s**，A 路线 **57.15** 已达到历史 AutoRound **57.04** 一档；保留图像只比 text-only 低 0.1–0.6，**多模态没有明显拖慢**（单图冒烟 `multimodal_tokens.image=64`、回答正确）。
-- **3% 未归因**：旧面板独立容器同模型 text-only 8192 59.35 / 五档 58.59，比薄层后端高约 3%。候选：旧容器有 `pstate-supervisor`（`-psl 16 -psh 16`）而 GPUStack sidecar 没起它（采样 99.3% P0，只解释极小部分）；args 差 `cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`、缺 `--auto-sleep-idle-timeout 0`；旧 5 档 8192 是最高点（单次波动 ±1.3）。**不得写成已解释。**
+- **同平台同路径 A/B**：旧引擎比 v4 高 **1.3–1.8 tok/s**，A 路线 **57.15** 已达到历史 AutoRound **57.04** 一档；保留图像只比 text-only 低 0.1–0.6，**多模态没有明显拖慢**（单图冒烟 `multimodal_tokens.image=64`、回答正确）。这 1.3–1.8 记**旧引擎整包**，不记 transformers 单项：v5（v4＋transformers 5.15.1）当年同尺 51.1 对 51.8，单换 5.15.1 反而更慢（SMT On 窗口）。
+- **3% 未归因**：旧面板独立容器同模型 text-only 8192 59.35 / 五档 58.59，比薄层后端高约 3%。候选只剩：旧容器有 `pstate-supervisor`（`-psl 16 -psh 16`）而 GPUStack sidecar 没起它（采样 99.3% P0，只解释极小部分）；args 差 `cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`；旧 5 档 8192 是最高点（单次波动 ±1.3）。**`--auto-sleep-idle-timeout` 用户 2026-10-20 判定不影响、已撤下。不得写成已解释。**
 - **A 路线首次启动要 JIT 编译 FlashInfer 多模态 kernel**：`init engine` 211 s、总启动约 9–10 分钟；缓存 `/root/.cache/flashinfer/0.6.18/75/` 不持久，重建即重编。
 - 引用这些数时必须带全条件（后端引擎包/路径/SMT/多模态），详细见 run-book 第 14 节、完整教程 v2 与 `调度/SM75性能变量与历史档位速查-20261019-v1.md`。
 
