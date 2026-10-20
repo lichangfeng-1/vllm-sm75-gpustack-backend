@@ -465,6 +465,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 ```
 
 - 上面是“只起面板、不跑模型”。要让这枚容器同时跑模型：加 `-e SM75_PROFILE=flash-next-tp8-256k-nomtp` 并把模型目录挂到 profile 的 `defaultModel` 路径（`-v <模型目录>:/models/Qwen3.8-Flash-Next-W4A16-AutoRound:ro`）。
+- **2026-10-20 实测（同一枚 `-v6` 镜像）**：GPUStack 后端入口（`panel-sidecar.py vllm serve`）面板 1615 与引擎 200；独立入口（`runtime-entrypoint.py`）面板 1615=200、引擎 8000=200（FP8PLE text-only profile；`POWER_MODE=sleep` 规避宿主缺 `libnvidia-api.so.1`）。**一枚镜像两种用法成立。**
 
 **三条验证（都实测过）**：① `curl -s -o /dev/null -w '%{http_code}' http://<宿主>:1615/` 回 **200**；② 容器里 PID 1 之外能看到 `node /opt/sm75-workbench/console/server.mjs`；③ `$SM75_CONSOLE_ROOT/key`（43 B）在；面板 API 未登录时回 `{"error":"请先登录 SM75 控制台"}` 属正常。
 
