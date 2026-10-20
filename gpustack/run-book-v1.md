@@ -248,7 +248,7 @@ OpenAI 兼容口与 UI **同一个口**（`gpustack/config/config.py:922-927` �
 1. **`$GS_KEY` 必须在建的时候就要到手。** 平台侧的键是"建时给一次"的形态：`api_keys` 表里 `access_key` 只有 16 个字符（是标识位），secret 只存散列，事后从库里捞不出来。凡是以后还要走网关做验收的部署，**建 key 当场就落盘**，否则这一道整条腿死掉，而它红起来只有一句 401 `Invalid authentication credentials`。
 2. **`max_tokens` 要给够。** 这档带 `--reasoning-parser=qwen3`，思考链与正文分家；预算开小了会被思链吃满，出现 HTTP 200、`finish_reason=length`、`completion_tokens` 恰等于上限而正文 0 字（10-15 实测那发 reasoning_tokens 48、正文长度 0）。只看 HTTP 状态码判不了这一道。
 
-## 9 可选：独立的测速与雷达图容器
+## 9 可选：独立三容器校验器形态（旧 / bench 镜像）
 
 ```bash
 export ULTRA_DATA_ROOT=/srv/vllm-sm75/ultra
@@ -470,18 +470,19 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 
 **"预置复刻我们测好的配置"**：面板侧档位在 `/opt/sm75-workbench/profiles/`（`flash-next-tp8-256k-mtp3.json`、`flash-next-tp8-256k-nomtp.json` 等）。**先知道一条实测风险**：面板会**静默重写**档位 argv——本机实测过 53 项被改写成 37 项、丢掉 `--engram-config` 等 10 个 SM75 定制项，非人为触发。用面板跑之前，把档位 JSON 与 `gpustack/args-paste-v1.txt` 逐字 diff 一次，改完再看一眼落盘那份，别看界面显示。GPUStack 主流程（第 7 步粘贴块）不吃这个风险：平台原样把参数传给引擎，没有中间重写者。
 
-### 11a 三枚测速/校验容器与雷达图（扩展二）
+### 11a 三枚校验器与雷达图（扩展二）
 
-三枚容器是**宿主侧**容器（`bugfind`／`cli`／`hermes`），**不能由模型容器拉起**——模型实例没有 `docker.sock`，平台也不会为一个模型起 sidecar。起法就是第 9 节 `docker/benchlocal.sh start` 或 9b 那条手动命令。
+**当前 `-v6` 单容器默认形态（2026-10-20 实读）**：三枚 BenchLocal 校验器（bugfind-15／cli-40／hermesagent-20）不再是三个独立容器，而是 `gpustack/layers/panel/panel-sidecar.py:143-187` 在模型容器内拉起的三个本地网关进程（`gateway.mjs`，端口 4211／4212／4213，`SM75_BENCH_VERIFIERS` 指向 `127.0.0.1`）。每个网关再拉起自己的 verifier 子进程；`SM75_EXTENSIONS` 含 `benchlocal` 时随面板自动启动。它们以 `NVIDIA_VISIBLE_DEVICES=void`、`CUDA_VISIBLE_DEVICES=` 运行，**CPU-only，不占八卡**；有进程级隔离（独立网关／角色目录／临时工作目录），但没有容器级隔离，共享模型容器的文件系统与网络。
+
+**可选三容器形态（旧 / bench 镜像）**：§9／§9b 的 `sm75-bench-*` 仍可起，但当前 v6 单容器会先启动本地网关并覆盖 `SM75_BENCH_VERIFIERS`，**不会自动改用宿主侧三容器**；要回到三容器形态，需换用 `gpustack/Dockerfile.bench-v1` 的 bench 镜像／外部面板，或给 `start_verifiers` 增加显式模式开关（当前没有）。两种形态不要同时起，否则外部三容器是空跑。
 
 雷达图在**面板**里（BenchLocal 页面，`public/benchlocal-native-ui.js:108-136` 的 `drawRadar`），数据来自一次 BenchLocal 评测的逐题包结果。可执行步骤：
 
-1. 起来面板（本节任一方式），记下 `SM75_CONSOLE_ROOT/key` 里的登录令牌，用浏览器打开 `http://<宿主>:1615/`。
-2. 宿主侧起三枚校验容器（第 9 节）。
-3. 面板 → BenchLocal → 选题包（一次 **1–9 个**，多选有校验上限）→ 运行。
-4. 跑完在结果页看雷达图；导出用 `/benchlocal/export`，逐题原始结果在 `$SM75_CONSOLE_ROOT/metrics/` 下。
+1. 起来面板（v6 单容器已自带本地校验器，不需要再起三容器），记下 `SM75_CONSOLE_ROOT/key` 里的登录令牌，用浏览器打开 `http://<宿主>:1615/`。
+2. 面板 → BenchLocal → 选题包（一次 **1–9 个**，多选有校验上限）→ 运行。
+3. 跑完在结果页看雷达图；导出用 `/benchlocal/export`，逐题原始结果在 `$SM75_CONSOLE_ROOT/metrics/` 下。
 
-**这一小节标【部分实跑】**:面板启动与端口已验，三枚容器已验，**"一次完整题包跑完→雷达出图"这一步尚未在本机实跑**；第一次跑撞错按报错回来补这里。
+**这一小节标【部分实跑】**:v6 单容器的三个本地网关与 75 题运行已见（2026-10-20 进行中），**"一次完整题包跑完→雷达出图"尚未在本轮验收**；三容器旧形态另见 §9。
 
 ## 12 参数逐个说明（24 条后端参数 ＋ 28 条环境变量 ＋ 3 条面板变量）
 
