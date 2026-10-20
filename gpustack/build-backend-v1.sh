@@ -8,7 +8,8 @@
 # 用法：
 #   bash gpustack/build-backend-v1.sh                 # 默认：单次构建，产出钉 5.15.1/0.22.2 的 -v6
 #   bash gpustack/build-backend-v1.sh --no-tf-pin     # 不钉运行期包（基座原版 5.17.0/0.23.2，产出 -v4）
-#   bash gpustack/build-backend-v1.sh --two-stage     # 回退：旧两段（先建 vllm-sm75 基座，再叠 Dockerfile.v1）
+#   bash gpustack/build-backend-v1.sh --allinone      # 可选：单次 allinone 构建（需网络拉上游件，待完整验收）
+#   bash gpustack/build-backend-v1.sh --two-stage     # 默认：两段（先建 vllm-sm75 基座，再叠 Dockerfile.v1；已实跑）
 #   bash gpustack/build-backend-v1.sh --rebuild-base  # 仅 --two-stage 下有效：强制重建基座
 #   bash gpustack/build-backend-v1.sh --drop-base     # 仅 --two-stage 下有效：成功后删基座 tag
 #   BASE_TAG=... IMAGE=... MAX_JOBS=2 TF_VERSION=5.15.1 TOKENIZERS_VERSION=0.22.2 bash gpustack/build-backend-v1.sh
@@ -28,10 +29,11 @@ TOKENIZERS_VERSION=${TOKENIZERS_VERSION-0.22.2}
 REBUILD_BASE=0
 DROP_BASE=0
 TF_PIN=1
-TWO_STAGE=0
+TWO_STAGE=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --two-stage) TWO_STAGE=1; shift ;;
+    --allinone) TWO_STAGE=0; shift ;;
     --rebuild-base) REBUILD_BASE=1; shift ;;
     --drop-base) DROP_BASE=1; shift ;;
     --no-tf-pin) TF_PIN=0; shift ;;

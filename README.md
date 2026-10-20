@@ -54,7 +54,7 @@ cd vllm-sm75-gpustack-backend
 #    回退基座原版 5.17.0/0.23.2（56.26/56.97）：bash gpustack/build-backend-v1.sh --no-tf-pin（产物 -v4-nopin）
 #    旧两段构建仅作排错回退：bash gpustack/build-backend-v1.sh --two-stage
 bash gpustack/preflight-sources-v1.sh
-bash gpustack/build-backend-v1.sh
+bash gpustack/build-backend-v1.sh --two-stage
 
 # 3) 起 GPUStack（server 与 worker 的具体命令见 run-book §3／§5）
 #    同机部署 worker 不需要 token；跨机用 GET /v2/clusters/1/registration-token 取

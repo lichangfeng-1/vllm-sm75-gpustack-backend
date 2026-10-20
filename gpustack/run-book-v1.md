@@ -64,11 +64,11 @@ vllm-sm75-gpustack:v0.1.7-beta2-v6         （默认最快档：上游构建段�
 
 > **2026-10-20 定版**：默认交付是 `-v6`（层 5 把 transformers/tokenizers 钉到 5.15.1/0.22.2，实测 56.83–57.04）；`--no-tf-pin` 产出 `-v4-nopin`（基座原版 5.17.0/0.23.2，56.26/56.97，回退用）。**同一枚镜像**既能做 GPUStack 后端，也能单独起面板（入口 `runtime-entrypoint.py`，见 §11），不依赖任何历史镜像。
 
-**推荐只跑一条命令**：
+**推荐只跑一条命令**（默认两段构建；单次 allinone 为可选、待完整验收）：
 
 ```bash
 bash gpustack/preflight-sources-v1.sh
-bash gpustack/build-backend-v1.sh            # 单次构建，产出钉 5.15.1/0.22.2 的 -v6
+bash gpustack/build-backend-v1.sh --two-stage   # 默认两段构建（已验证），产出钉 5.15.1/0.22.2 的 -v6
 docker images vllm-sm75-gpustack             # 期望 v0.1.7-beta2-v6
 ```
 
@@ -464,6 +464,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 - **2026-10-20 实测（同一枚 `-v6` 镜像）**：GPUStack 后端入口（`panel-sidecar.py vllm serve`）面板 1615 与引擎 200；独立入口（`runtime-entrypoint.py`）面板 1615=200、引擎 8000=200（FP8PLE text-only profile；`POWER_MODE=sleep` 规避宿主缺 `libnvidia-api.so.1`）。**一枚镜像两种用法成立。**
 - **独立跑 AutoRound A 路线时，profile env 必须补三项**：`VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC=1`、`NCCL_P2P_LEVEL=SYS`、`VLLM_FIREFLY=auto`。镜像内 `flash-next-tp8-256k-nomtp` 档的 env 默认**没有** ALLREDUCE，直接起独立面板测 8192 只有 **41.84/40.61/40.92**（Firefly AR 档）；补齐后同尺 8192 = **56.32/57.28/56.77（中位 56.77）**，与 GPUStack 托管形态同档。
 - **独立面板测速的 API key**：引擎侧鉴权用 `$SM75_CONSOLE_ROOT/engine-key.current`（不是面板登录用的 `key`）；请求头 `Authorization: Bearer <engine-key>`。面板 UI 的 speedtest 扩展在独立模式需先启用；**一键方式**：容器 env 加 `SM75_EXTENSIONS=panel,harness,speedtest,sql` 与 `SM75_EXTENSIONS_FORCE=1`——首次启动会启用，已有 `enabled:false` 记录也会被显式强制打开（`FORCE` 默认关，不改变原有“仅首启启用”的行为）。
+- **DSH 工作台里的图片滑动窗口**：DSH 0.2.0-rc.2 自带 `@deepseek-ai/dsh-compaction-image-offload`（包描述逐字："replace over-budget request images with placeholders and retry"，实现里选择最旧的图片）。触发条件是**图片预算超限**，不是固定保留 N 张：超限时把最旧的图片替换为占位文本并重试，已卸载的图片不会自动恢复；`/compact` 也会压缩历史。要与引擎的 `image:4` 配合，建议把工作台的图片预算设小、并在长会话里主动 `/compact`；严格“只留最近 4 张”需要客户端自己维护消息窗口。
 
 **三条验证（都实测过）**：① `curl -s -o /dev/null -w '%{http_code}' http://<宿主>:1615/` 回 **200**；② 容器里 PID 1 之外能看到 `node /opt/sm75-workbench/console/server.mjs`；③ `$SM75_CONSOLE_ROOT/key`（43 B）在；面板 API 未登录时回 `{"error":"请先登录 SM75 控制台"}` 属正常。
 

@@ -54,7 +54,7 @@ cd vllm-sm75-gpustack-backend
 #    Rollback to base-image versions (5.17.0/0.23.2): --no-tf-pin (output tag -v4-nopin).
 #    Legacy two-stage build (troubleshooting only): --two-stage.
 bash gpustack/preflight-sources-v1.sh
-bash gpustack/build-backend-v1.sh
+bash gpustack/build-backend-v1.sh --two-stage
 
 # 3) Start GPUStack (server/worker commands: run-book sections 3 and 5)
 
