@@ -72,7 +72,7 @@ bash gpustack/build-backend-v1.sh --two-stage   # 默认两段构建（已验证
 docker images vllm-sm75-gpustack             # 期望 v0.1.7-beta2-v7
 ```
 
-`--two-stage` 是回退路径（先建 `vllm-sm75` 基座再叠 `Dockerfile.v1`，用于排错/对比）；只有它才会产生 `vllm-sm75:v0.1.7-beta2` 中间 tag，配套 `--rebuild-base`/`--drop-base`。`--no-tf-pin` 产出 `-v4`。
+`--two-stage` 是默认路径（先建 `vllm-sm75` 基座再叠 `Dockerfile.v1`，也用于排错/对比）；只有它才会产生 `vllm-sm75:v0.1.7-beta2` 中间 tag，配套 `--rebuild-base`/`--drop-base`。`--no-tf-pin` 产出 `-v4-nopin`。
 
 等价的手动单次构建（排错时用）：
 
@@ -170,7 +170,7 @@ curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/clusters/1/registrat
 
 UI 后端页新建：后端 **vLLM**｜版本 `0.1.7-sm75.1-fast-custom`｜自定义 CUDA 可见性｜镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v7`。
 
-回退路线：版本 `0.1.7-sm75.1-custom` ＋ 镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v4`（基座原版 5.17/0.23）；有旧 Ultra 镜像的机器也可用薄层版 `0.1.7-sm75.1-oldpanel-custom`。其余填法不变，面板端口按 §11 写 1615。
+回退路线：版本 `0.1.7-sm75.1-custom` ＋ 镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v4-nopin`（基座原版 5.17/0.23）；有旧 Ultra 镜像的机器也可用薄层版 `0.1.7-sm75.1-oldpanel-custom`。其余填法不变，面板端口按 §11 写 1615。
 
 注意两处大小写：表单里框架标签显示 `CUDA`，提交值是小写 `cuda`；列表页显示的是落库值。这是两个字段，不是矛盾。
 
@@ -507,7 +507,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 
 > **v7 默认已改为 11c 的 external 三容器；下面是 v6 的本地进程形态，仅作回退参考。**
 
-**当前 `-v6` 单容器默认形态（2026-10-20 实读）**：三枚 BenchLocal 校验器（bugfind-15／cli-40／hermesagent-20）不再是三个独立容器，而是 `gpustack/layers/panel/panel-sidecar.py:143-187` 在模型容器内拉起的三个本地网关进程（`gateway.mjs`，端口 4211／4212／4213，`SM75_BENCH_VERIFIERS` 指向 `127.0.0.1`）。每个网关再拉起自己的 verifier 子进程；`SM75_EXTENSIONS` 含 `benchlocal` 时随面板自动启动。它们以 `NVIDIA_VISIBLE_DEVICES=void`、`CUDA_VISIBLE_DEVICES=` 运行，但**这只是环境变量标记，不是设备隔离**：2026-10-20 实测 `verifier` 与 `ubuntu` 用户仍能 `nvidia-smi -L` 看到 8 卡，恶意／失控题包仍可能占 GPU。另有进程级隔离（独立网关／角色目录／临时工作目录），但没有容器级隔离，共享模型容器的文件系统与网络。
+**当前 `-v6` 单容器默认形态（2026-10-20 实读）**：三枚 BenchLocal 校验器（bugfind-15／cli-40／hermesagent-20）不再是三个独立容器，而是 `gpustack/layers/panel/panel-sidecar.py:211-259` 在模型容器内拉起的三个本地网关进程（`gateway.mjs`，端口 4211／4212／4213，`SM75_BENCH_VERIFIERS` 指向 `127.0.0.1`）。每个网关再拉起自己的 verifier 子进程；`SM75_EXTENSIONS` 含 `benchlocal` 时随面板自动启动。它们以 `NVIDIA_VISIBLE_DEVICES=void`、`CUDA_VISIBLE_DEVICES=` 运行，但**这只是环境变量标记，不是设备隔离**：2026-10-20 实测 `verifier` 与 `ubuntu` 用户仍能 `nvidia-smi -L` 看到 8 卡，恶意／失控题包仍可能占 GPU。另有进程级隔离（独立网关／角色目录／临时工作目录），但没有容器级隔离，共享模型容器的文件系统与网络。
 
 **可选三容器形态（旧 / bench 镜像）**：§9／§9b 的 `sm75-bench-*` 仍可起，但当前 v6 单容器会先启动本地网关并覆盖 `SM75_BENCH_VERIFIERS`，**不会自动改用宿主侧三容器**；v7 已有 external 模式开关（`SM75_BENCH_VERIFIERS_MODE=external`，见 11c），v6 旧形态没有。两种形态不要同时起，否则外部三容器是空跑。
 

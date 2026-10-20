@@ -44,3 +44,17 @@ test('clears the saved URL when the engine URL changes', () => {
   );
   assert.equal(store.has('llmPerfTestApiUrl'), false);
 });
+
+test('clears a saved 40xx URL on a different host', () => {
+  const store = run(
+    'http://172.17.100.10:40046',
+    'http://127.0.0.1:40062/v1/chat/completions',
+    'http://172.17.100.10:40046',
+  );
+  assert.equal(store.has('llmPerfTestApiUrl'), false);
+});
+
+test('escapes script-closing text in the injected engine URL', () => {
+  const html = speedResetScript('http://172.17.100.10:40046/</script>');
+  assert.equal(html.split('</script>').length - 1, 1);
+});

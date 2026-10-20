@@ -45,7 +45,11 @@ done
 if [ -n "$IMAGE_EXPLICIT" ]; then
   IMAGE=$IMAGE_EXPLICIT
 elif [ "$TF_PIN" = 1 ]; then
-  IMAGE=vllm-sm75-gpustack:v$VERSION-v7
+  if [ "$TWO_STAGE" = 1 ]; then
+    IMAGE=vllm-sm75-gpustack:v$VERSION-v7
+  else
+    IMAGE=vllm-sm75-gpustack:v$VERSION-v7-allinone
+  fi
 else
   # 不覆盖已有 -v4（两段构建的回退锚）；不钉版产物用独立 tag。
   IMAGE=vllm-sm75-gpustack:v$VERSION-v4-nopin

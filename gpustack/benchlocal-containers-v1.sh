@@ -210,6 +210,13 @@ do_start() {
       health_ok "$ip" && break
       sleep 1
     done
+    if ! health_ok "$ip"; then
+      docker restart "$name" >/dev/null 2>&1 || true
+      for _ in $(seq 1 30); do
+        health_ok "$ip" && break
+        sleep 1
+      done
+    fi
     health_ok "$ip" || {
       echo "红：$name 健康检查失败（$ip:4200）" >&2
       docker logs --tail 40 "$name" 2>&1 || true

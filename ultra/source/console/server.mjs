@@ -862,8 +862,7 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === "/api/session" && req.method === "GET") {
       const principal = auth.principal(req);
       return json(res, { authenticated: !!principal, principal, accountConfigured: !!auth.policy.account,
-        externalEngine: !!externalEngine, engineModel: externalEngine?.model || null,
-        engineUrl: externalEngine?.url || "" });
+        externalEngine: !!externalEngine, engineModel: externalEngine?.model || null });
     }
     if (u.pathname === "/api/logout" && req.method === "POST") {
       if (!auth.originAllowed(req))

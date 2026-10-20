@@ -18,6 +18,14 @@
 #
 # 依赖：curl、python3。改完要重启实例（平台按 replicas 重建），或用 UI 停/起一次。
 set -eu
+umask 077
+WORK=$(mktemp -d)
+export WORK
+trap 'rm -rf "$WORK"' EXIT
+CURL_CFG="$WORK/curl.cfg"
+printf 'header = "X-API-Key: %s"
+' "$GS_KEY" > "$CURL_CFG"
+chmod 600 "$CURL_CFG"
 : "${GS_KEY:?需要 GS_KEY（平台 API key，别写进脚本）}"
 : "${HOST:?需要 HOST，形如 172.17.100.10:8180}"
 MODEL_ID="${MODEL_ID:-4}"
@@ -28,17 +36,17 @@ EXTENSIONS="${EXTENSIONS:-panel,harness,benchlocal,speedtest,sql}"
 APPLY=0
 [ "${1:-}" = "--apply" ] && APPLY=1
 
-api() { curl -sS -m 20 -H "X-API-Key: ${GS_KEY}" "$@"; }
+api() { curl -sS -m 20 -K "$CURL_CFG" "$@"; }
 
 echo "== 读后端版本 =="
-api "http://${HOST}/v2/inference-backends/${BACKEND_ID}" -o /tmp/spa-backend.json
+api "http://${HOST}/v2/inference-backends/${BACKEND_ID}" -o "$WORK/spa-backend.json"
 echo "== 读模型行 =="
-api "http://${HOST}/v2/models/${MODEL_ID}" -o /tmp/spa-model.json
+api "http://${HOST}/v2/models/${MODEL_ID}" -o "$WORK/spa-model.json"
 
 python3 - "$VERSION_NAME" "$ENTRYPOINT" "$EXTENSIONS" <<'PY'
 import json, os, sys
 ver, ep, extensions = sys.argv[1], sys.argv[2], sys.argv[3]
-b = json.load(open("/tmp/spa-backend.json", encoding="utf-8"))
+b = json.load(open(os.path.join(os.environ["WORK"], "spa-backend.json"), encoding="utf-8"))
 if "code" in b:
     sys.exit("读后端失败: %s" % b)
 vc = dict(b.get("version_configs") or {})
@@ -53,9 +61,9 @@ if os.environ.get("IMAGE_NAME"):
     print("  version image: %r -> %r" % (old_image, cfg["image_name"]))
 vc[ver] = cfg
 json.dump({"backend_name": b.get("backend_name"), "version_configs": vc},
-          open("/tmp/spa-backend-put.json", "w"), ensure_ascii=False)
+          open(os.path.join(os.environ["WORK"], "spa-backend-put.json"), "w"), ensure_ascii=False)
 
-m = json.load(open("/tmp/spa-model.json", encoding="utf-8"))
+m = json.load(open(os.path.join(os.environ["WORK"], "spa-model.json"), encoding="utf-8"))
 if "code" in m:
     sys.exit("读模型失败: %s" % m)
 env = dict(m.get("env") or {})
@@ -87,8 +95,8 @@ body = {"name": m.get("name"), "source": m.get("source"), "env": env,
 for k in ("model_scope_model_id", "huggingface_repo_id", "local_path"):
     if m.get(k):
         body[k] = m[k]
-json.dump(body, open("/tmp/spa-model-put.json", "w"), ensure_ascii=False)
-print("  两份 PUT body 已写好：/tmp/spa-backend-put.json、/tmp/spa-model-put.json")
+json.dump(body, open(os.path.join(os.environ["WORK"], "spa-model-put.json"), "w"), ensure_ascii=False)
+print("  两份 PUT body 已写好：%s、%s" % (os.path.join(os.environ["WORK"], "spa-backend-put.json"), os.path.join(os.environ["WORK"], "spa-model-put.json")))
 PY
 
 if [ "$APPLY" != "1" ]; then
@@ -97,25 +105,25 @@ if [ "$APPLY" != "1" ]; then
 fi
 
 echo "== 提交后端版本 =="
-api -X PUT -H "Content-Type: application/json" --data @/tmp/spa-backend-put.json \
-  "http://${HOST}/v2/inference-backends/${BACKEND_ID}" -o /tmp/spa-backend-out.json
+api -X PUT -H "Content-Type: application/json" --data @"$WORK/spa-backend-put.json" \
+  "http://${HOST}/v2/inference-backends/${BACKEND_ID}" -o "$WORK/spa-backend-out.json"
 echo "== 提交模型行 =="
-api -X PUT -H "Content-Type: application/json" --data @/tmp/spa-model-put.json \
-  "http://${HOST}/v2/models/${MODEL_ID}" -o /tmp/spa-model-out.json
+api -X PUT -H "Content-Type: application/json" --data @"$WORK/spa-model-put.json" \
+  "http://${HOST}/v2/models/${MODEL_ID}" -o "$WORK/spa-model-out.json"
 python3 - <<'PY'
-import json
+import json, os
 for name in ("backend", "model"):
-    d = json.load(open("/tmp/spa-%s-out.json" % name, encoding="utf-8"))
+    d = json.load(open(os.path.join(os.environ["WORK"], "spa-%s-out.json" % name), encoding="utf-8"))
     if "code" in d:
         raise SystemExit("%s PUT 被拒: %s" % (name, str(d)[:300]))
 print("APPLIED 后端 entrypoint 与模型 env 已写入；重启实例后生效（面板 :1615）")
 PY
 
 # PUT 会清未提交的 image_name；提交后回读断言，防止静默丢镜像名。
-api "http://${HOST}/v2/models/${MODEL_ID}" -o /tmp/spa-model-after.json
+api "http://${HOST}/v2/models/${MODEL_ID}" -o "$WORK/spa-model-after.json"
 python3 - <<'PY'
-import json
-m = json.load(open("/tmp/spa-model-after.json", encoding="utf-8"))
+import json, os
+m = json.load(open(os.path.join(os.environ["WORK"], "spa-model-after.json"), encoding="utf-8"))
 image = m.get("image_name")
 if not image:
     raise SystemExit("红：PUT 后模型行 image_name 为空（平台会按默认解析，可能拉错镜像）")
