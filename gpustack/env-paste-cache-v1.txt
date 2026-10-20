@@ -1,0 +1,6 @@
+FLASHINFER_WORKSPACE_BASE=/var/lib/gpustack/cache
+HUMMING_CACHE_DIR=/var/lib/gpustack/cache/humming
+CUDA_CACHE_PATH=/var/lib/gpustack/cache/cuda
+TRITON_CACHE_DIR=/var/lib/gpustack/cache/triton
+TORCHINDUCTOR_CACHE_DIR=/var/lib/gpustack/cache/inductor
+TORCH_EXTENSIONS_DIR=/var/lib/gpustack/cache/torch_extensions

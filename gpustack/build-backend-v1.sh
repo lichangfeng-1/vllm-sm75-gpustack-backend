@@ -6,7 +6,7 @@
 #   不产生中间基座 tag。上游原文仍是冻结文件；生成物由仓库掌握，可审计。
 #
 # 用法：
-#   bash gpustack/build-backend-v1.sh                 # 默认：单次构建，产出钉 5.15.1/0.22.2 的 -v6
+#   bash gpustack/build-backend-v1.sh                 # 默认：两段构建，产出钉 5.15.1/0.22.2 的 -v7
 #   bash gpustack/build-backend-v1.sh --no-tf-pin     # 不钉运行期包（基座原版 5.17.0/0.23.2，产出 -v4）
 #   bash gpustack/build-backend-v1.sh --allinone      # 可选：单次 allinone 构建（需网络拉上游件，待完整验收）
 #   bash gpustack/build-backend-v1.sh --two-stage     # 默认：两段（先建 vllm-sm75 基座，再叠 Dockerfile.v1；已实跑）
@@ -14,7 +14,7 @@
 #   bash gpustack/build-backend-v1.sh --drop-base     # 仅 --two-stage 下有效：成功后删基座 tag
 #   BASE_TAG=... IMAGE=... MAX_JOBS=2 TF_VERSION=5.15.1 TOKENIZERS_VERSION=0.22.2 bash gpustack/build-backend-v1.sh
 #
-# 说明：默认产物 tag vllm-sm75-gpustack:v<VERSION>-v6；同一枚镜像既做 GPUStack 后端
+# 说明：默认产物 tag vllm-sm75-gpustack:v<VERSION>-v7；同一枚镜像既做 GPUStack 后端
 #       （入口 panel-sidecar.py vllm serve），也可单独起面板（入口 runtime-entrypoint.py）。
 set -euo pipefail
 
@@ -45,7 +45,7 @@ done
 if [ -n "$IMAGE_EXPLICIT" ]; then
   IMAGE=$IMAGE_EXPLICIT
 elif [ "$TF_PIN" = 1 ]; then
-  IMAGE=vllm-sm75-gpustack:v$VERSION-v6
+  IMAGE=vllm-sm75-gpustack:v$VERSION-v7
 else
   # 不覆盖已有 -v4（两段构建的回退锚）；不钉版产物用独立 tag。
   IMAGE=vllm-sm75-gpustack:v$VERSION-v4-nopin

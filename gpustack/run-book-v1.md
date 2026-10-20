@@ -477,25 +477,30 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 
 **"预置复刻我们测好的配置"**：面板侧档位在 `/opt/sm75-workbench/profiles/`（`flash-next-tp8-256k-mtp3.json`、`flash-next-tp8-256k-nomtp.json` 等）。**先知道一条实测风险**：面板会**静默重写**档位 argv——本机实测过 53 项被改写成 37 项、丢掉 `--engram-config` 等 10 个 SM75 定制项，非人为触发。用面板跑之前，把档位 JSON 与 `gpustack/args-paste-v1.txt` 逐字 diff 一次，改完再看一眼落盘那份，别看界面显示。GPUStack 主流程（第 7 步粘贴块）不吃这个风险：平台原样把参数传给引擎，没有中间重写者。
 
-### 11c v7 默认：三容器校验器、面板开关与资源释放（2026-10-20 实施，待冒烟）
+### 11c v7 默认：三容器校验器、面板开关与资源释放（2026-10-21 实机）
 
 **目标形态**：面板随模型行一起起；宿主侧三个 verifier 容器（bugfind-15／cli-40／hermesagent-20）也默认一起起。三者用同一枚 v7 镜像的 CPU-only 入口，挂在一张自动 IPAM 的 internal 网上；面板 `SM75_BENCH_VERIFIERS_MODE=external` 读取共享配置，不再在本容器内拉本地网关。
+
+**为什么在宿主层，不在模型行**：GPUStack 2.2.3 每个模型实例固定一个容器（`custom.py:138-143`、`sglang.py:244-249`、`vllm.py:368` 都是 `containers=[run_container]`）；唯一额外容器是 vLLM Ray 分布式 leader 的 `ray-head` sidecar（`vllm.py:304-368`），没有通用 sidecar；`roles` 只允许 `prefill/decode/router`（`schemas/models.py:468-475`、`routes/models.py:578`）。⇒ **不能通过模型启动参数拉起三枚兄弟容器**。原生替代只有三个 CPU-only custom 模型行（`cpu_offloading=true` 才走 CPU-only 候选），但它们不随引擎停、端口动态、面板无 GPUStack API 凭据、custom 无 health path 时“永远 ready”，代价更大。宿主 launcher 是当前不改 GPUStack 源码的边界方案。
 
 1. **宿主数据根**：GPUStack 已把宿主数据根 mount 到容器 `/var/lib/gpustack`；共享配置放 `${GPUSTACK_DATA_ROOT}/benchlocal`，面板内即 `/var/lib/gpustack/benchlocal`，**不需要新增 volume**。模型行只加三格：
    `SM75_BENCH_VERIFIERS_MODE=external`、`SM75_BENCH_VERIFIER_CONFIG_FILE=/var/lib/gpustack/benchlocal/benchlocal.env`、`SM75_BENCH_VERIFIER_STATE_DIR=/var/lib/gpustack/benchlocal`。
 2. **启动**：
    ```bash
-   sudo GPUSTACK_DATA_ROOT=<宿主数据根> IMAGE=vllm-sm75-gpustack:v0.1.7-beta2-v7 \
+   GPUSTACK_DATA_ROOT=<宿主数据根> IMAGE=vllm-sm75-gpustack:v0.1.7-beta2-v7 \
      bash gpustack/benchlocal-containers-v1.sh start
    ```
    launcher 自动建/复用 internal 网（不写死网段），起三容器后 `docker inspect` 发现网关与容器 IP，写 `benchlocal.env`；三容器 `--internal`、无 GPU、`--read-only`、`--cap-drop ALL`、2 CPU/4g、`restart unless-stopped`。`stop` 只停不删（IP 保留），`status` 只读；镜像/key/origin 不一致时必须显式 `--replace` 重建。
-3. **面板开关与释放**：面板 BenchLocal 开关（`benchToggle-benchlocal`）写 `extension.benchlocal.enabled`；`server.mjs` 同步写 `${STATE_DIR}/benchlocal.enabled`。宿主 `sm75-bench-verifiers.timer` 每 30 秒跑 `sync`：
+3. **面板开关与释放**：面板 BenchLocal 开关（`benchToggle-benchlocal`）写 `extension.benchlocal.enabled`；`server.mjs` 同步写 `${STATE_DIR}/benchlocal.enabled`。宿主看护每 30 秒（systemd）或每分钟（用户 cron）跑 `sync`：
    - 面板 1615 不可达，或 flag=0 → `docker stop` 三容器；
    - 面板可达且 flag=1 → `docker start`/幂等 `start`。
-   ⇒ 默认面板开＝三容器开；关面板或关 BenchLocal 会自动释放 3×2 CPU/4g 资源。手动 `stop` 是维护兜底；timer 开着时会被下次 sync 拉回，停止请用面板开关或停 timer。
-4. **systemd 安装（可选但推荐）**：把 `gpustack/benchlocal-containers-v1.sh` 放到 `/usr/local/sbin/`，把 `gpustack/systemd/sm75-bench-verifiers.{service,timer}` 放到 `/etc/systemd/system/`，按 `systemd/sm75-bench-verifiers.env.example` 写 `/etc/sm75-bench-verifiers.env`（0600，填 `GPUSTACK_DATA_ROOT` 与 v7 `IMAGE`），`systemctl daemon-reload && systemctl enable --now sm75-bench-verifiers.timer`。
-5. **关闭面板启动（扩展/可选节）**：默认不关。确实不用面板时，把模型行 `SM75_PANEL_AUTOSTART` 置 0（或从 `SM75_EXTENSIONS` 去掉 `panel`），再执行 `benchlocal-containers-v1.sh stop`；timer 也会因 1615 不可达自动停三容器。**不要只关面板而留着三容器**。
-6. **状态**：v7 镜像已构建（`vllm-sm75-gpustack:v0.1.7-beta2-v7`，静态核对 external／FORCE／entrypoint／5.15.1+0.22.2 均通过），但**尚未做单题/全量冒烟**；在冒烟通过前 v6 仍是已验证回退，不要把 v7 写成“已跑通”。
+   ⇒ 默认面板开＝三容器开；关面板或关 BenchLocal 会自动释放 3×2 CPU/4g 资源。手动 `stop` 是维护兜底；看护开着时会被下次 sync 拉回，停止请用面板开关或停看护。**10-21 实机**：`replicas 0` 后面板 000，cron 打 `SYNC stop panel=down`，三容器 **16 秒内 Exited(0)**；面板 200 后自动恢复 Up。三容器带 `restart unless-stopped`，没有看护时模型停/面板停都不会动它们。
+4. **安装（二选一）**：
+   - **有 root（推荐）**：把 `gpustack/benchlocal-containers-v1.sh` 放到 `/usr/local/sbin/`，把 `gpustack/systemd/sm75-bench-verifiers.{service,timer}` 放到 `/etc/systemd/system/`，按 `systemd/sm75-bench-verifiers.env.example` 写 `/etc/sm75-bench-verifiers.env`（0600，填 `GPUSTACK_DATA_ROOT` 与 v7 `IMAGE`），`systemctl daemon-reload && systemctl enable --now sm75-bench-verifiers.timer`。
+   - **无 root（本机 laryyli 实测）**：用户 cron 每分钟跑同一个 `sync`，用 `flock -n /tmp/sm75-bench-sync.lock` 防重入；本机包装 `/home/laryyli/benchlocal-sync-v1.sh`，crontab 行与日志见该文件/`benchlocal-sync.log`。原有 pstate `@reboot` 不动。
+5. **关闭面板启动（扩展/可选节）**：默认不关。确实不用面板时，把模型行 `SM75_PANEL_AUTOSTART` 置 0（或从 `SM75_EXTENSIONS` 去掉 `panel`），再执行 `benchlocal-containers-v1.sh stop`；看护也会因 1615 不可达自动停三容器。**不要只关面板而留着三容器**。
+6. **状态**：v7 镜像已构建（`vllm-sm75-gpustack:v0.1.7-beta2-v7`，`5ad2f2c1df6d`），外部三容器实机 **BF-01／CLI-01／HA-01 均 pass 100**；image4 冒烟 4 图 200、5 图 400；75 题全量/雷达未跑。v6 仍保留为回退。
+7. **★SHM 漏项（2026-10-21）**：模型行必须含 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64`；`docker inspect` 的 `ShmSize` 应为 `68719476736`。本机 10-21 实读 43 条 env 里没有它、`ShmSize=10737418240`（10G）；已补到 env 44，第三次容器 `ShmSize=68719476736`。**更正**：首启的 3 次 60s `No available shared memory broadcast block` 是首次填 JIT/预热时各 rank 不同步；第二次 0 次、`init engine=30.95 s`，不是 10G shm 导致。SHM=64 仍按教程硬性项补齐。
 
 ### 11a 三枚校验器与雷达图（旧 v6 本地形态／回退说明）
 
@@ -513,7 +518,7 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 
 **这一小节标【部分实跑】**:v6 单容器的三个本地网关与 75 题运行已见（2026-10-20 进行中），**"一次完整题包跑完→雷达出图"尚未在本轮验收**；三容器旧形态另见 §9。
 
-## 12 参数逐个说明（24 条后端参数 ＋ 28 条环境变量 ＋ 3 条面板变量）
+## 12 参数逐个说明（24 条后端参数 ＋ 39 条环境变量 ＋ 1 条后端入口）
 
 读法：每条先写"它管什么"，再写"想改怎么改、代价是什么"。凡是本仓没有逐条读上游实现的（QSA 一族），按变量名与实测行为描述，不假装知道内部细节。
 
@@ -535,10 +540,10 @@ MoE 专家并行：专家权重按卡分片，而不是每卡一份。关掉它�
 EP 下只加载本卡要用的专家权重，是省显存的关键一格。关掉会把全量专家都加载进来，显存直接不够。
 
 **`--language-model-only`**
-只加载语言塔，跳过视觉塔。省显存、少一段 warmup。要发图片或视频就把这一条删掉，并按多模态的实测驻留重算 `GPUSTACK_MODEL_VRAM_CLAIM`（见第 7 节的"多模态开关速查"）。注意：现役模型行上这一条缺失（见第 7 节末的提示）。
+只加载语言塔，跳过视觉塔。省显存、少一段 warmup。**A 路线（开图）不含这一条**；纯文本才加。开图后要按多模态的实测驻留重算 `GPUSTACK_MODEL_VRAM_CLAIM`（见第 7 节）。
 
-**`--limit-mm-per-prompt={"image":32}`**（可选，只在多模态时需要）
-限制每个请求能带几张图／几个视频。**不写时引擎对未指定模态返回 999**（`vllm/config/multimodal.py:478-489`，注释原文 "Unspecified modality is set to 999 by default"），等于几乎不设防；所以推荐显式写。**JSON 必须紧贴等号和花括号、中间不能有空格**，否则会被 GPUStack 的空格切分拆坏。本教程的推荐默认是 `{"image":32,"video":1}`：图按你要的上限 32，视频先给 1（每多一路按帧数吃 token，且本线视频未实测）。32 张图在本机显存下只是"允许值"，不是"跑得动值"。
+**`--limit-mm-per-prompt={"image":4,"video":0}`**
+每请求多模态上限；本交付 A 路线是 **图 4、视频 0（禁用）**。**不写时引擎对未指定模态返回 999**（`vllm/config/multimodal.py:478-489`，注释原文 "Unspecified modality is set to 999 by default"），等于几乎不设防；推荐显式写。**JSON 必须紧贴等号和花括号、中间不能有空格**，否则会被 GPUStack 的空格切分拆坏。这是**每请求**上限、不是每会话总量；多图会话由客户端维护滑动窗口。
 
 **`--max-model-len=262144`**
 最大上下文长度（256K）。调小会减少 KV 预留；调大要同时涨 `--kv-cache-memory-bytes` 或显存，否则起不来。
@@ -594,7 +599,7 @@ KV cache 的分页大小。16 与这套模型的注意力实现匹配；改成 3
 **`--chat-template=/opt/vllm-sm75/templates/qwen38-next-high-compat.jinja`**
 聊天模板文件。镜像里带的那份与这一档配套；换模型/换模板要一起换。
 
-### 12.2 环境变量（28 条 ＝ 契约 25 ＋ 面板 3）
+### 12.2 环境变量（39 条 ＝ 契约 25 ＋ 面板 5 ＋ 外部校验器 3 ＋ 编译缓存 6）
 
 **`NCCL_P2P_LEVEL=SYS`**
 NCCL 的 P2P 路径层级，本机无 NVLink，走 PCIe 交换（SYS 级）。改成别的层级会让 NCCL 绕开 P2P。
@@ -668,6 +673,9 @@ QSA 的 indexer 走 cuBLAS。
 **`GPUSTACK_MODEL_VRAM_CLAIM=120779177984`**
 申报给调度器的显存（约 112.5 GiB）。**这是准入判据、不是估算**：低于真实占用就是"假绿"——调度器放行、运行期靠物理余量硬撑。换机器按 `实测逐卡驻留 MiB × 卡数 × 1048576` 重算。
 
+**编译缓存 6 条**
+`FLASHINFER_WORKSPACE_BASE=/var/lib/gpustack/cache`、`HUMMING_CACHE_DIR=.../humming`、`CUDA_CACHE_PATH=.../cuda`、`TRITON_CACHE_DIR=.../triton`、`TORCHINDUCTOR_CACHE_DIR=.../inductor`、`TORCH_EXTENSIONS_DIR=.../torch_extensions`。整组实测：首启填缓存 `init engine=213.48 s`，第二次命中 **30.95 s**（降 85.5%）；权重加载仍约 210 s。缓存落 `${GPUSTACK_DATA_ROOT}/cache`，管理见 §11c 与教程 §7.2.1；`HUMMING_CACHE_DIR` 本机目录未生成，保留无副作用。
+
 **`SM75_PANEL_AUTOSTART=1`**
 面板自启开关（面板扩展）。设 1 才会在引擎前拉起面板；不设＝纯透传。
 
@@ -676,6 +684,21 @@ QSA 的 indexer 走 cuBLAS。
 
 **`SM75_CONSOLE_ROOT=/var/lib/gpustack/panel`**
 面板状态目录（登录令牌 `key`、`panel.log`、会话）。指到 worker 数据目录才随重启保留。
+
+**`SM75_CONSOLE_PORT=1615`**
+面板监听端口；GPUStack 形态统一 1615，回退档同口。
+
+**`SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql`**
+扩展模块开关；`benchlocal` 在 v7 默认走 external 三容器，`local` 为旧容器内 4211/4212/4213 三网关。
+
+**`SM75_BENCH_VERIFIERS_MODE=external`**
+校验器形态。`external`＝宿主三容器（v7 默认）；`local`＝模型容器内旧三网关。两种不要同时起。
+
+**`SM75_BENCH_VERIFIER_CONFIG_FILE=/var/lib/gpustack/benchlocal/benchlocal.env`**
+面板读取的校验器配置：key、三枚地址、代理基址。宿主 launcher 写，0600。
+
+**`SM75_BENCH_VERIFIER_STATE_DIR=/var/lib/gpustack/benchlocal`**
+面板写 `benchlocal.enabled` 开关标志的目录；宿主看护按它停/起三容器。
 
 ### 12.3 后端版本入口（一格，不在模型行）
 
@@ -745,7 +768,20 @@ GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64
 GPUSTACK_MODEL_VRAM_CLAIM=120779177984
 ```
 
-### 13.3 面板扩展（可选，追加到同一个 env 块）
+### 13.2.1 编译缓存（6 行，默认追加；仓库 `gpustack/env-paste-cache-v1.txt`）
+
+```
+FLASHINFER_WORKSPACE_BASE=/var/lib/gpustack/cache
+HUMMING_CACHE_DIR=/var/lib/gpustack/cache/humming
+CUDA_CACHE_PATH=/var/lib/gpustack/cache/cuda
+TRITON_CACHE_DIR=/var/lib/gpustack/cache/triton
+TORCHINDUCTOR_CACHE_DIR=/var/lib/gpustack/cache/inductor
+TORCH_EXTENSIONS_DIR=/var/lib/gpustack/cache/torch_extensions
+```
+
+首启填缓存 `init engine=213.48 s`，二启命中 **30.95 s**；权重加载仍约 210 s。缓存落 `${GPUSTACK_DATA_ROOT}/cache`，随数据目录保留；换镜像/升级 torch/CUDA/transformers 时才清，先改名 `*.bak-日期`，模型停时清；当前约 44M，不需要常驻清理。
+
+### 13.3 面板与外部校验器（本交付默认，追加到同一个 env 块）
 
 ```
 SM75_PANEL_AUTOSTART=1
@@ -758,7 +794,7 @@ SM75_BENCH_VERIFIER_CONFIG_FILE=/var/lib/gpustack/benchlocal/benchlocal.env
 SM75_BENCH_VERIFIER_STATE_DIR=/var/lib/gpustack/benchlocal
 ```
 
-后三格只在 v7 生效；v7 的三容器与开关见 11c。
+后三格是 external 三容器，仅在 v7 生效；v7 的三容器与开关见 11c。
 
 ### 13.4 后端版本入口（一格，写在后端版本里，不在模型行）
 
@@ -774,8 +810,9 @@ entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
 | `gpustack/build-gpustack-v1.sh --build` | 第一段构建（补丁门五道＋docker build） |
 | `docker build --file gpustack/Dockerfile.v1 --target panel-layer …` | 第二段构建（四层全上） |
 | `gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt` | 自检两块粘贴块（末行 `LINT_PASTE_OK env=25 args=24`） |
-| `gpustack/set-panel-autostart-v1.sh` | 一次性把后端 entrypoint ＋ 面板五格 env 写进平台（默认 dry-run，`--apply` 才改） |
+| `gpustack/set-panel-autostart-v1.sh` | 一次性把后端 entrypoint ＋ 面板五格＋external 三格＋缓存六格 env 写进平台（默认 dry-run，`--apply` 才改） |
 | `gpustack/benchlocal-containers-v1.sh start/stop/status/sync` | v7 三容器默认形态（自动 IPAM、发现 IP/网关、写共享配置） |
+| `gpustack/env-paste-cache-v1.txt` | 编译缓存 6 行（首填 213.48 s／二启 30.95 s；默认追加） |
 | `gpustack/systemd/sm75-bench-verifiers.{service,timer}` | 面板开关→三容器 start/stop 的 sync timer |
 | `docker/benchlocal.sh start/status/stop/connect` | 旧 bench 镜像三容器（v6/回退参考） |
 | `gpustack/verify-gpustack-form-v1.sh` | GPUStack 形态的只读验收（按需） |

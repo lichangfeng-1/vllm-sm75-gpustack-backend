@@ -1,12 +1,13 @@
 #!/bin/bash
 # set-panel-autostart-v1.sh —— 一次把"面板随模型自启"接好（默认 dry-run，只打印不改）
 #
-# 做三件事：
-#   ① 后端版本 0.1.7-sm75.1-fast-custom（默认最快档，镜像 -v6）的 entrypoint 指到 panel-sidecar 包装；
+# 做五件事：
+#   ① 后端版本 0.1.7-sm75.1-fast-custom（默认交付档，镜像 -v7）的 entrypoint 指到 panel-sidecar 包装，并把 IMAGE_NAME 写进该版本；
 #   ② 模型行 env 追加 SM75_PANEL_AUTOSTART=1 / SM75_CONSOLE_HOST=0.0.0.0 / SM75_CONSOLE_ROOT=/var/lib/gpustack/panel / SM75_CONSOLE_PORT=1615；
 #   ③ 模型行 env 追加 SM75_EXTENSIONS（默认 panel,harness,benchlocal,speedtest,sql，可整体覆盖）；
 #   ④ 追加 BenchLocal external 三格（v7 镜像生效；v6 镜像会忽略并继续本地校验器）：
 #      SM75_BENCH_VERIFIERS_MODE / SM75_BENCH_VERIFIER_CONFIG_FILE / SM75_BENCH_VERIFIER_STATE_DIR。
+#   ⑤ 追加编译缓存六格（默认 /var/lib/gpustack/cache；首次填、二启命中；不想要可删这六格）。
 #      扩展依赖与两套测试资产已烘进镜像；不需要时把 EXTENSIONS 设为 panel 或删掉该变量。
 #
 # 用法：
@@ -46,6 +47,10 @@ if ver not in vc:
 cfg = dict(vc[ver])
 print("  entrypoint: %r -> %r" % (cfg.get("entrypoint"), ep))
 cfg["entrypoint"] = ep
+if os.environ.get("IMAGE_NAME"):
+    old_image = cfg.get("image_name")
+    cfg["image_name"] = os.environ["IMAGE_NAME"]
+    print("  version image: %r -> %r" % (old_image, cfg["image_name"]))
 vc[ver] = cfg
 json.dump({"backend_name": b.get("backend_name"), "version_configs": vc},
           open("/tmp/spa-backend-put.json", "w"), ensure_ascii=False)
@@ -60,7 +65,13 @@ want = {"SM75_PANEL_AUTOSTART": "1", "SM75_CONSOLE_HOST": "0.0.0.0",
         "SM75_EXTENSIONS": extensions,
         "SM75_BENCH_VERIFIERS_MODE": "external",
         "SM75_BENCH_VERIFIER_CONFIG_FILE": "/var/lib/gpustack/benchlocal/benchlocal.env",
-        "SM75_BENCH_VERIFIER_STATE_DIR": "/var/lib/gpustack/benchlocal"}
+        "SM75_BENCH_VERIFIER_STATE_DIR": "/var/lib/gpustack/benchlocal",
+        "FLASHINFER_WORKSPACE_BASE": "/var/lib/gpustack/cache",
+        "HUMMING_CACHE_DIR": "/var/lib/gpustack/cache/humming",
+        "CUDA_CACHE_PATH": "/var/lib/gpustack/cache/cuda",
+        "TRITON_CACHE_DIR": "/var/lib/gpustack/cache/triton",
+        "TORCHINDUCTOR_CACHE_DIR": "/var/lib/gpustack/cache/inductor",
+        "TORCH_EXTENSIONS_DIR": "/var/lib/gpustack/cache/torch_extensions"}
 for k, v in want.items():
     print("  env %-22s %r -> %r" % (k, env.get(k), v))
     env[k] = v
