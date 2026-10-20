@@ -1,0 +1,9 @@
+[Unit]
+Description=SM75 BenchLocal verifier lifecycle sync
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/sm75-bench-verifiers.env
+ExecStart=/usr/local/sbin/benchlocal-containers-v1.sh sync

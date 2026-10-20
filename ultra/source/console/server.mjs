@@ -67,6 +67,20 @@ for (const type of ["speedtest", "sql"]) {
   if (!current || (forceExtensions && current.enabled !== true))
     store.put("extension", type, { ...(current || {}), enabled: true });
 }
+const benchStateDir = process.env.SM75_BENCH_VERIFIER_STATE_DIR || root;
+function writeBenchEnabled(enabled) {
+  try {
+    fs.mkdirSync(benchStateDir, { recursive: true, mode: 0o700 });
+    const file = path.join(benchStateDir, "benchlocal.enabled");
+    fs.writeFileSync(file + ".tmp", enabled ? "1\n" : "0\n", { mode: 0o644 });
+    fs.renameSync(file + ".tmp", file);
+  } catch (error) {
+    console.error("benchlocal flag:", error.message);
+  }
+}
+writeBenchEnabled(
+  (store.get("extension", "benchlocal") || { enabled: true }).enabled !== false,
+);
 const secretPath = path.join(root, "key");
 const existingInstall = fs.existsSync(secretPath);
 const auth = new Auth(root, {
@@ -974,6 +988,7 @@ const server = http.createServer(async (req, res) => {
           setting={...setting,presets:[...presets,item]};
         }
         store.put("extension","benchlocal",setting);
+        if(b.enabled!==undefined)writeBenchEnabled(setting.enabled!==false);
       } else if(req.method!=="GET")return json(res,{error:"不支持的方法"},405);
       return json(res,{...benchLocal.catalog(),enabled:setting.enabled!==false,presets:setting.presets||[],currentModel:await benchModelContext(),
         readiness:await benchLocal.readiness(),jobs:benchLocal.list(),activeId:benchLocal.active?.id||null});

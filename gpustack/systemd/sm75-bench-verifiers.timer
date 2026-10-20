@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync SM75 BenchLocal verifier containers with panel state
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=10s
+Unit=sm75-bench-verifiers.service
+
+[Install]
+WantedBy=timers.target

@@ -248,7 +248,9 @@ OpenAI 兼容口与 UI **同一个口**（`gpustack/config/config.py:922-927` �
 1. **`$GS_KEY` 必须在建的时候就要到手。** 平台侧的键是"建时给一次"的形态：`api_keys` 表里 `access_key` 只有 16 个字符（是标识位），secret 只存散列，事后从库里捞不出来。凡是以后还要走网关做验收的部署，**建 key 当场就落盘**，否则这一道整条腿死掉，而它红起来只有一句 401 `Invalid authentication credentials`。
 2. **`max_tokens` 要给够。** 这档带 `--reasoning-parser=qwen3`，思考链与正文分家；预算开小了会被思链吃满，出现 HTTP 200、`finish_reason=length`、`completion_tokens` 恰等于上限而正文 0 字（10-15 实测那发 reasoning_tokens 48、正文长度 0）。只看 HTTP 状态码判不了这一道。
 
-## 9 可选：独立三容器校验器形态（旧 / bench 镜像）
+## 9 旧形态参考：docker/benchlocal.sh + bench 镜像
+
+> **v7 默认三容器见 11c（新 launcher／自动 IPAM／面板 external）。** 本节保留旧 `docker/benchlocal.sh` 与 bench 镜像形态，仅作 v6/回退参考；不要与 11c 同时起。
 
 ```bash
 export ULTRA_DATA_ROOT=/srv/vllm-sm75/ultra
@@ -400,7 +402,7 @@ docker run --rm \
 
 第 2 步建出来的后端镜像**已经带面板负载**（`Dockerfile.v1` 层 4：node v22.23.2 ＋ `/opt/sm75-workbench` 全套，node 取自已钉 digest 的官方镜像，面板源码取自仓内 `ultra/source`，不拉 63.9 GB 的 console 镜像）。所以不需要第二枚镜像、也不需要第二条 docker 命令。
 
-**推荐用法：模型行 env 里加三行，面板随模型一起起**（`gpustack/Dockerfile.v1` 的入口包装 `panel-sidecar.py` 负责先把面板拉到后台，再原样 exec 引擎；**不设 `SM75_PANEL_AUTOSTART` 时行为与不加这一层完全一致**）：
+**推荐用法：模型行 env 里加五格，面板随模型一起起**（`gpustack/Dockerfile.v1` 的入口包装 `panel-sidecar.py` 负责先把面板拉到后台，再原样 exec 引擎；**不设 `SM75_PANEL_AUTOSTART` 时行为与不加这一层完全一致**）：
 
 ```
 SM75_PANEL_AUTOSTART=1
@@ -408,7 +410,12 @@ SM75_CONSOLE_HOST=0.0.0.0
 SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
 SM75_CONSOLE_PORT=1615
 SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
+SM75_BENCH_VERIFIERS_MODE=external
+SM75_BENCH_VERIFIER_CONFIG_FILE=/var/lib/gpustack/benchlocal/benchlocal.env
+SM75_BENCH_VERIFIER_STATE_DIR=/var/lib/gpustack/benchlocal
 ```
+
+后三格是 **v7 的 external 三容器模式**；v6 镜像会忽略它们并继续本地校验器。v7 的三容器默认形态、开关与资源释放见 **11c**。
 
 **但只有 env 不够，还要把后端版本的入口指到包装上**——GPUStack 会用**后端版本配置里的 `entrypoint`** 整条覆盖镜像自带的 ENTRYPOINT（`gpustack/worker/backends/vllm.py:171-177`，字符串经 `shlex.split` 后再追加模型参数）。这一步做一次即可：
 
@@ -470,7 +477,29 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 
 **"预置复刻我们测好的配置"**：面板侧档位在 `/opt/sm75-workbench/profiles/`（`flash-next-tp8-256k-mtp3.json`、`flash-next-tp8-256k-nomtp.json` 等）。**先知道一条实测风险**：面板会**静默重写**档位 argv——本机实测过 53 项被改写成 37 项、丢掉 `--engram-config` 等 10 个 SM75 定制项，非人为触发。用面板跑之前，把档位 JSON 与 `gpustack/args-paste-v1.txt` 逐字 diff 一次，改完再看一眼落盘那份，别看界面显示。GPUStack 主流程（第 7 步粘贴块）不吃这个风险：平台原样把参数传给引擎，没有中间重写者。
 
-### 11a 三枚校验器与雷达图（扩展二）
+### 11c v7 默认：三容器校验器、面板开关与资源释放（2026-10-20 实施，待冒烟）
+
+**目标形态**：面板随模型行一起起；宿主侧三个 verifier 容器（bugfind-15／cli-40／hermesagent-20）也默认一起起。三者用同一枚 v7 镜像的 CPU-only 入口，挂在一张自动 IPAM 的 internal 网上；面板 `SM75_BENCH_VERIFIERS_MODE=external` 读取共享配置，不再在本容器内拉本地网关。
+
+1. **宿主数据根**：GPUStack 已把宿主数据根 mount 到容器 `/var/lib/gpustack`；共享配置放 `${GPUSTACK_DATA_ROOT}/benchlocal`，面板内即 `/var/lib/gpustack/benchlocal`，**不需要新增 volume**。模型行只加三格：
+   `SM75_BENCH_VERIFIERS_MODE=external`、`SM75_BENCH_VERIFIER_CONFIG_FILE=/var/lib/gpustack/benchlocal/benchlocal.env`、`SM75_BENCH_VERIFIER_STATE_DIR=/var/lib/gpustack/benchlocal`。
+2. **启动**：
+   ```bash
+   sudo GPUSTACK_DATA_ROOT=<宿主数据根> IMAGE=vllm-sm75-gpustack:v0.1.7-beta2-v7 \
+     bash gpustack/benchlocal-containers-v1.sh start
+   ```
+   launcher 自动建/复用 internal 网（不写死网段），起三容器后 `docker inspect` 发现网关与容器 IP，写 `benchlocal.env`；三容器 `--internal`、无 GPU、`--read-only`、`--cap-drop ALL`、2 CPU/4g、`restart unless-stopped`。`stop` 只停不删（IP 保留），`status` 只读；镜像/key/origin 不一致时必须显式 `--replace` 重建。
+3. **面板开关与释放**：面板 BenchLocal 开关（`benchToggle-benchlocal`）写 `extension.benchlocal.enabled`；`server.mjs` 同步写 `${STATE_DIR}/benchlocal.enabled`。宿主 `sm75-bench-verifiers.timer` 每 30 秒跑 `sync`：
+   - 面板 1615 不可达，或 flag=0 → `docker stop` 三容器；
+   - 面板可达且 flag=1 → `docker start`/幂等 `start`。
+   ⇒ 默认面板开＝三容器开；关面板或关 BenchLocal 会自动释放 3×2 CPU/4g 资源。手动 `stop` 是维护兜底；timer 开着时会被下次 sync 拉回，停止请用面板开关或停 timer。
+4. **systemd 安装（可选但推荐）**：把 `gpustack/benchlocal-containers-v1.sh` 放到 `/usr/local/sbin/`，把 `gpustack/systemd/sm75-bench-verifiers.{service,timer}` 放到 `/etc/systemd/system/`，按 `systemd/sm75-bench-verifiers.env.example` 写 `/etc/sm75-bench-verifiers.env`（0600，填 `GPUSTACK_DATA_ROOT` 与 v7 `IMAGE`），`systemctl daemon-reload && systemctl enable --now sm75-bench-verifiers.timer`。
+5. **关闭面板启动（扩展/可选节）**：默认不关。确实不用面板时，把模型行 `SM75_PANEL_AUTOSTART` 置 0（或从 `SM75_EXTENSIONS` 去掉 `panel`），再执行 `benchlocal-containers-v1.sh stop`；timer 也会因 1615 不可达自动停三容器。**不要只关面板而留着三容器**。
+6. **状态**：v7 镜像已构建（`vllm-sm75-gpustack:v0.1.7-beta2-v7`，静态核对 external／FORCE／entrypoint／5.15.1+0.22.2 均通过），但**尚未做单题/全量冒烟**；在冒烟通过前 v6 仍是已验证回退，不要把 v7 写成“已跑通”。
+
+### 11a 三枚校验器与雷达图（旧 v6 本地形态／回退说明）
+
+> **v7 默认已改为 11c 的 external 三容器；下面是 v6 的本地进程形态，仅作回退参考。**
 
 **当前 `-v6` 单容器默认形态（2026-10-20 实读）**：三枚 BenchLocal 校验器（bugfind-15／cli-40／hermesagent-20）不再是三个独立容器，而是 `gpustack/layers/panel/panel-sidecar.py:143-187` 在模型容器内拉起的三个本地网关进程（`gateway.mjs`，端口 4211／4212／4213，`SM75_BENCH_VERIFIERS` 指向 `127.0.0.1`）。每个网关再拉起自己的 verifier 子进程；`SM75_EXTENSIONS` 含 `benchlocal` 时随面板自动启动。它们以 `NVIDIA_VISIBLE_DEVICES=void`、`CUDA_VISIBLE_DEVICES=` 运行，但**这只是环境变量标记，不是设备隔离**：2026-10-20 实测 `verifier` 与 `ubuntu` 用户仍能 `nvidia-smi -L` 看到 8 卡，恶意／失控题包仍可能占 GPU。另有进程级隔离（独立网关／角色目录／临时工作目录），但没有容器级隔离，共享模型容器的文件系统与网络。
 
@@ -724,7 +753,12 @@ SM75_CONSOLE_HOST=0.0.0.0
 SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
 SM75_CONSOLE_PORT=1615
 SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
+SM75_BENCH_VERIFIERS_MODE=external
+SM75_BENCH_VERIFIER_CONFIG_FILE=/var/lib/gpustack/benchlocal/benchlocal.env
+SM75_BENCH_VERIFIER_STATE_DIR=/var/lib/gpustack/benchlocal
 ```
+
+后三格只在 v7 生效；v7 的三容器与开关见 11c。
 
 ### 13.4 后端版本入口（一格，写在后端版本里，不在模型行）
 
@@ -741,7 +775,9 @@ entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
 | `docker build --file gpustack/Dockerfile.v1 --target panel-layer …` | 第二段构建（四层全上） |
 | `gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt` | 自检两块粘贴块（末行 `LINT_PASTE_OK env=25 args=24`） |
 | `gpustack/set-panel-autostart-v1.sh` | 一次性把后端 entrypoint ＋ 面板五格 env 写进平台（默认 dry-run，`--apply` 才改） |
-| `docker/benchlocal.sh start/status/stop/connect` | 三枚校验容器 |
+| `gpustack/benchlocal-containers-v1.sh start/stop/status/sync` | v7 三容器默认形态（自动 IPAM、发现 IP/网关、写共享配置） |
+| `gpustack/systemd/sm75-bench-verifiers.{service,timer}` | 面板开关→三容器 start/stop 的 sync timer |
+| `docker/benchlocal.sh start/status/stop/connect` | 旧 bench 镜像三容器（v6/回退参考） |
 | `gpustack/verify-gpustack-form-v1.sh` | GPUStack 形态的只读验收（按需） |
 
 ### 11b 如何更新 DSH（工作台）版本

@@ -4,7 +4,9 @@
 # 做三件事：
 #   ① 后端版本 0.1.7-sm75.1-fast-custom（默认最快档，镜像 -v6）的 entrypoint 指到 panel-sidecar 包装；
 #   ② 模型行 env 追加 SM75_PANEL_AUTOSTART=1 / SM75_CONSOLE_HOST=0.0.0.0 / SM75_CONSOLE_ROOT=/var/lib/gpustack/panel / SM75_CONSOLE_PORT=1615；
-#   ③ 模型行 env 追加 SM75_EXTENSIONS（默认 panel,harness,benchlocal,speedtest,sql，可整体覆盖）。
+#   ③ 模型行 env 追加 SM75_EXTENSIONS（默认 panel,harness,benchlocal,speedtest,sql，可整体覆盖）；
+#   ④ 追加 BenchLocal external 三格（v7 镜像生效；v6 镜像会忽略并继续本地校验器）：
+#      SM75_BENCH_VERIFIERS_MODE / SM75_BENCH_VERIFIER_CONFIG_FILE / SM75_BENCH_VERIFIER_STATE_DIR。
 #      扩展依赖与两套测试资产已烘进镜像；不需要时把 EXTENSIONS 设为 panel 或删掉该变量。
 #
 # 用法：
@@ -55,12 +57,15 @@ env = dict(m.get("env") or {})
 want = {"SM75_PANEL_AUTOSTART": "1", "SM75_CONSOLE_HOST": "0.0.0.0",
         "SM75_CONSOLE_ROOT": "/var/lib/gpustack/panel",
         "SM75_CONSOLE_PORT": "1615",
-        "SM75_EXTENSIONS": extensions}
+        "SM75_EXTENSIONS": extensions,
+        "SM75_BENCH_VERIFIERS_MODE": "external",
+        "SM75_BENCH_VERIFIER_CONFIG_FILE": "/var/lib/gpustack/benchlocal/benchlocal.env",
+        "SM75_BENCH_VERIFIER_STATE_DIR": "/var/lib/gpustack/benchlocal"}
 for k, v in want.items():
     print("  env %-22s %r -> %r" % (k, env.get(k), v))
     env[k] = v
 # PUT /v2/models 会清掉未提交的 image_name（10-18 实撞）；必须显式带回。
-image_name = (m.get("image_name") or os.environ.get("IMAGE_NAME")
+image_name = (os.environ.get("IMAGE_NAME") or m.get("image_name")
               or (vc.get(ver) or {}).get("image_name"))
 if not image_name:
     sys.exit("拒绝提交：模型行与后端版本都没有 image_name，先在后端版本里补")

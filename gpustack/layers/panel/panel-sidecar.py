@@ -140,9 +140,81 @@ def copy_baked_extensions(root, extensions):
             print("EXTENSION_SKIP %s: %s" % (kind, exc), file=sys.stderr)
 
 
+VERIFIER_CONFIG_DEFAULT = "/run/sm75-bench/benchlocal.env"
+VERIFIER_STATE_DEFAULT = "/run/sm75-bench"
+
+
+def read_verifier_config(path):
+    values = {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                name, value = line.split("=", 1)
+                if name in {
+                    "SM75_BENCH_VERIFIER_KEY",
+                    "SM75_BENCH_VERIFIERS",
+                    "SM75_BENCH_PROXY_BASE",
+                }:
+                    values[name] = value.strip()
+    except OSError:
+        pass
+    return values
+
+
+def start_external_verifiers(env, root):
+    """Use host-managed verifier containers instead of spawning local gateways."""
+    config_path = str(
+        env.get("SM75_BENCH_VERIFIER_CONFIG_FILE") or VERIFIER_CONFIG_DEFAULT
+    )
+    values = read_verifier_config(config_path)
+    key = values.get("SM75_BENCH_VERIFIER_KEY") or str(
+        env.get("SM75_BENCH_VERIFIER_KEY") or ""
+    )
+    verifiers = values.get("SM75_BENCH_VERIFIERS") or str(
+        env.get("SM75_BENCH_VERIFIERS") or ""
+    )
+    proxy_base = values.get("SM75_BENCH_PROXY_BASE") or str(
+        env.get("SM75_BENCH_PROXY_BASE") or ""
+    )
+    if len(key) < 32 or not verifiers or not proxy_base:
+        print(
+            "BENCH_VERIFIERS_EXTERNAL_MISSING config=%s" % config_path,
+            file=sys.stderr,
+        )
+        return
+    try:
+        parsed = json.loads(verifiers)
+    except ValueError as exc:
+        print("BENCH_VERIFIERS_EXTERNAL_INVALID %s" % exc, file=sys.stderr)
+        return
+    if not isinstance(parsed, dict) or not all(
+        isinstance(value, str) and value.startswith(("http://", "https://"))
+        for value in parsed.values()
+    ):
+        print("BENCH_VERIFIERS_EXTERNAL_INVALID urls", file=sys.stderr)
+        return
+    state_dir = str(
+        env.get("SM75_BENCH_VERIFIER_STATE_DIR")
+        or os.path.dirname(config_path)
+        or VERIFIER_STATE_DEFAULT
+    )
+    env["SM75_BENCH_VERIFIER_KEY"] = key
+    env["SM75_BENCH_VERIFIERS"] = verifiers
+    env["SM75_BENCH_PROXY_BASE"] = proxy_base
+    env["SM75_BENCH_VERIFIER_STATE_DIR"] = state_dir
+    print("BENCH_VERIFIERS_EXTERNAL %s" % verifiers, file=sys.stderr)
+
+
 def start_verifiers(env, root, extensions):
     """Run the three BenchLocal gateways inside this container (no GPU access)."""
     if "benchlocal" not in extensions:
+        return
+    mode = str(env.get("SM75_BENCH_VERIFIERS_MODE") or "local").strip().lower()
+    if mode == "external":
+        start_external_verifiers(env, root)
         return
     key = str(env.get("SM75_BENCH_VERIFIER_KEY") or "")
     if len(key) < 32:
