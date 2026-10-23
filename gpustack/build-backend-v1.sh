@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# build-backend-v1.sh —— 一条命令从上游 vLLM 基座构建到自定义后端镜像（默认最快档，单次构建）
+# build-backend-v1.sh —— 一条命令从上游 vLLM 基座构建到自定义后端镜像（默认最快档；默认两段构建）
 #
-# 默认（吸收式）：由 gpustack/gen-allinone-dockerfile-v1.py 生成 gpustack/Dockerfile.allinone
-#   （上游 docker/Dockerfile 原文＋本仓五层），一次 docker build 从 vllm/vllm-openai 基座走到末端，
-#   不产生中间基座 tag。上游原文仍是冻结文件；生成物由仓库掌握，可审计。
+# 默认：两段构建（先建 vllm-sm75 基座，再叠 Dockerfile.v1；已验证）。
+# 可选 --allinone（吸收式）：生成 gpustack/Dockerfile.allinone，一次 docker build 从基座到末端，
+#   不产生中间基座 tag；上游原文仍是冻结文件；该路径待完整验收。
 #
 # 用法：
 #   bash gpustack/build-backend-v1.sh                 # 默认：两段构建，产出钉 5.15.1/0.22.2 的 -v7
@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
     --rebuild-base) REBUILD_BASE=1; shift ;;
     --drop-base) DROP_BASE=1; shift ;;
     --no-tf-pin) TF_PIN=0; shift ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "未知参数：$1" >&2; exit 2 ;;
   esac
 done

@@ -1,4 +1,4 @@
-# vLLM-SM75 × GPUStack 自定义后端（v0.1.7-beta2 线）
+# vLLM-SM75 × GPUStack 自定义后端（v0.1.7-beta2 线；GPUStack 2.3.0 实测兼容）
 
 把 SM75 版 vLLM 做成 GPUStack 的自定义后端，让 T4 / T10 这类 Turing 老卡在 GPUStack 里跑大模型。
 本仓只服务这一条线；上游的 Ultra／面板独立部署形态不在本仓的交付范围内（见文末"与上游的关系"）。
@@ -14,7 +14,7 @@
 
 另有一组环境变量把底座已有的 QSA、FlashQLA、自建调度器打开——那是**启用**，不是我们实现。
 
-**交付默认路线（2026-10-20 定）= 一条命令从 vLLM 基座构建的最快档（`-v6`）**：在既有四层链末端加一层运行期包钉版，把 transformers/tokenizers 钉到 **5.15.1/0.22.2**；同机同尺 GPUStack 面板直连 **56.79/57.15/57.17（均值 57.04）**（A 路线，输出 1024，并发 1，SMT Off），达到历史 AutoRound 57.04。**同一枚镜像两种用法**：GPUStack 后端（入口 `panel-sidecar.py vllm serve`）或单独面板（入口 `runtime-entrypoint.py`，见 run-book §11）。回退：`--no-tf-pin` 产出基座原版 v4（56.26/56.97）；有旧 Ultra 镜像的机器也可用 `build-oldpanel-backend-v1.sh` 薄层路线（57.15，等价备选）。
+**交付默认路线（2026-10-21 定）= 一条命令从 vLLM 基座构建的最快档（`-v7`）**：在既有四层链末端加一层运行期包钉版，把 transformers/tokenizers 钉到 **5.15.1/0.22.2**；同机同尺 GPUStack 面板直连 **56.83–57.04**（A 路线，输出 1024，并发 1，SMT Off；2026-10-21 同引擎层复核），与历史 AutoRound 57.04 同档。**同一枚镜像两种用法**：GPUStack 后端（入口 `panel-sidecar.py vllm serve`）或单独面板（入口 `runtime-entrypoint.py`，见 run-book §11）。回退：`--no-tf-pin` 产出基座原版 v4（56.26/56.97）；有旧 Ultra 镜像的机器也可用 `build-oldpanel-backend-v1.sh` 薄层路线（57.15，等价备选）。
 
 ## 2 运行环境（实测下限，不保证兼容上限）
 
@@ -25,13 +25,15 @@
 | Docker | 29.8.0（storage `overlayfs`，cgroup v2） |
 | containerd | 2.3.5 |
 | NVIDIA Container Toolkit | 1.20.0 |
-| GPUStack | quay.io/gpustack/gpustack:v2.2.3 |
+| GPUStack | quay.io/gpustack/gpustack:v2.3.0（2026-10-23 实测；上一版 v2.2.3 可回退） |
 | 硬件 | 8×Tesla T10 16 GiB ＋ 251 GiB 主机内存 |
 | CPU/内存 | 高单核 CPU ＋ 高频内存；参考 EPYC 7402 24C/24T、8×32 GB DDR4-2400；PLE 表常驻主机内存，容量要覆盖 PLE 表＋KV＋系统 |
 | SMT | BIOS **SMT=Off**；同镜像同档 8192 54.69→59.35 tok/s（2026-10-20），代价逻辑核 48→24 |
 | P2P/虚拟化 | **物理机直装 Ubuntu** 才实测（56/56、13.1–13.2 GB/s）；G292-Z20 的 PLX switch 整体直通 VM 仅理论、未实操 |
 
 低于上表我们不保证、也未验证；高于它同样不保证，请自行实测。逐项说明见 `gpustack/run-book-v1.md` 第 0 节。
+
+> **v2.3.0 升级实测（2026-10-23）**：同一枚 `-v7` 镜像、同一模型定义原样迁移；8 卡与入口覆盖保持，实例端口由平台重新分配（本机 40052→40000）。**worker 必须保留 `--runtime=nvidia --privileged --security-opt label=disable` 这三项**，缺整组就会 `gpu_devices=[]`（整组缺失对照；逐项未验），调度器报 “does not support backend version”。升级与回退见 run-book §0.1。
 
 ## 3 快速开始（照做即可）
 
@@ -40,19 +42,18 @@
 ```bash
 # 0) 先把两枚基础镜像拉下来（否则首次构建会卡在约 42 GiB 的上游基座拉取上）
 docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688
-docker pull quay.io/gpustack/gpustack:v2.2.3
+docker pull quay.io/gpustack/gpustack:v2.3.0
 
 # 1) 拉本仓
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
 
-# 2) 一条命令：上游 vLLM 基座 → 自定义后端（默认最快档，单次构建）
-#    仓库把上游 docker/Dockerfile 原文与五层合成 gpustack/Dockerfile.allinone（生成器可复现），
-#    一次 docker build 从 vllm/vllm-openai 基座走到末端，不产生中间基座 tag。
+# 2) 一条命令：上游 vLLM 基座 → 自定义后端（默认最快档）
+#    默认 --two-stage（已验证，会产出 vllm-sm75 中间基座 tag）；
+#    --allinone 为单次构建可选路径（生成器可复现，未完整验收）。
 #    默认在最后一层把 transformers/tokenizers 钉到 5.15.1/0.22.2（实测 56.83–57.04 tok/s）；
-#    产物 tag：vllm-sm75-gpustack:v0.1.7-beta2-v6。
+#    产物 tag：vllm-sm75-gpustack:v0.1.7-beta2-v7。
 #    回退基座原版 5.17.0/0.23.2（56.26/56.97）：bash gpustack/build-backend-v1.sh --no-tf-pin（产物 -v4-nopin）
-#    旧两段构建仅作排错回退：bash gpustack/build-backend-v1.sh --two-stage
 bash gpustack/preflight-sources-v1.sh
 bash gpustack/build-backend-v1.sh --two-stage
 
@@ -60,10 +61,10 @@ bash gpustack/build-backend-v1.sh --two-stage
 #    同机部署 worker 不需要 token；跨机用 GET /v2/clusters/1/registration-token 取
 
 # 4) 注册后端版本（默认 = 最快档）
-#    版本名 0.1.7-sm75.1-fast-custom，镜像填上一步产物 vllm-sm75-gpustack:v0.1.7-beta2-v6，
+#    版本名 0.1.7-sm75.1-fast-custom，镜像填上一步产物 vllm-sm75-gpustack:v0.1.7-beta2-v7，
 #    入口覆盖填：python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
 #    （也可以用 gpustack/set-panel-autostart-v1.sh 一次写好后端入口、面板 env 与 SM75_EXTENSIONS）
-#    回退路径：版本 0.1.7-sm75.1-custom ＋ 镜像 vllm-sm75-gpustack:v0.1.7-beta2-v4
+#    回退路径：版本 0.1.7-sm75.1-custom ＋ 镜像 vllm-sm75-gpustack:v0.1.7-beta2-v4-nopin
 
 # 5) 部署模型：表单里整块粘
 #    gpustack/args-paste-videooff-v1.txt（24 行，A 路线：保留图像、关闭视频）＋ env-paste-v1.txt（25 行）
@@ -103,6 +104,7 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 | 只想复制粘贴 | run-book **第 13 节** ＋ `gpustack/args-paste-videooff-v1.txt`（默认 A 路线）／`args-paste-v1.txt`（纯文本）／`env-paste-v1.txt` |
 | 后端注册表单逐项 | `gpustack/backend-version-card-v1.md` |
 | 能力落点与"为什么不是验收线" | `gpustack/compat-matrix-v1.md` |
+| GPUStack 2.3.0 升级与新特性 | `gpustack/release-notes-v2.3.0-v1.md` |
 | 面板自启一键接线 | `gpustack/set-panel-autostart-v1.sh`（默认 dry-run，`--apply` 才改） |
 
 ## 6 速度参考（面板形态，不是 GPUStack 形态的验收线）
@@ -125,14 +127,14 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 
 | 口径 | 8192 | 16384 | 32768 | 均值 |
 |---|---:|---:|---:|---:|
-| **默认交付 `-v6`（v4 栈＋运行期钉 5.15.1/0.22.2）＋A 路线** | **56.79** | **57.15** | **57.17** | **57.04** |
+| **`-v6` 批次（2026-10-20；v4 栈＋运行期钉 5.15.1/0.22.2）＋A 路线** | **56.79** | **57.15** | **57.17** | **57.04** |
 | 备选：旧引擎薄层后端（transformers 5.15.1）＋A 路线（image4/video0） | 56.92 | 57.57 | 56.96 | 57.15 |
 | 旧引擎薄层后端、text-only，两轮 | 57.56 / 57.07 | 56.98 / 58.11 | 57.22 / 58.04 | 57.25 / 57.74 |
 | v4 后端（transformers 5.17.0）panel sidecar 直连，六档 | 56.97 | — | — | 56.26 |
 | v4 后端 8180 网关，四档 | 53.57 | — | — | 54.71 |
 | 旧 Ultra 面板镜像 text-only 直连（独立容器），五档 | 59.35 | 58.73 | 59.43 | 58.59（五档） |
 
-- **默认档 `-v6` 由仓库一条命令从 vLLM 基座构建**：在四层链末端加层 5，把 `transformers==5.15.1`、`tokenizers==0.22.2` 成对钉住；与 v4 的完整 pip 清单差集恰为这两项。实测 **57.04**，与历史 AutoRound 57.04 一致。
+- **上表是 `-v6` 批次；当前默认 `-v7`**：同一构建链在四层链末端加层 5，把 `transformers==5.15.1`、`tokenizers==0.22.2` 成对钉住；与 v4 的完整 pip 清单差集恰为这两项。v7 同引擎层复核为 **56.83–57.04**（run-book §2 的 2026-10-21 定版说明），与历史 AutoRound 57.04 同档；不要把 v6 批次的三格与 v7 的范围当同一读数混算。
 - **归因口径**：关键变量是**这两个包成对钉版**，不是“旧镜像整包”。证据：v4 栈钉对＝57.04；旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36；v4 栈只换 transformers 5.15.1（tokenizers 未配对）＝51.1；v5 的反向结果因此不能当作“旧包更慢”的证据。**不要单独改 transformers，必须两项一起。**
 - **3% 未归因**：旧面板独立容器同模型 text-only 8192 59.35 / 五档 58.59，比 GPUStack 面板直连高约 3%。候选只剩 `pstate-supervisor`（旧容器有、GPUStack sidecar 没起；采样 99.3% P0，只解释极小部分）与 `cudagraph_capture_sizes [1,2,4]` vs `[1,2,4,8,16]`；`--auto-sleep-idle-timeout` 经用户判定不影响、已撤。**不得写成已解释。**
 - **A 路线首次启动要 JIT 编译 FlashInfer 多模态 kernel**：`init engine` 211 s、总启动约 9–10 分钟；缓存 `/root/.cache/flashinfer/0.6.18/75/` 不持久，重建即重编。
@@ -151,7 +153,16 @@ vllm/            上游 SM75 适配源码与我们回填的 attention overlay
 ## 8 与上游的关系、许可
 
 - 基座：`vllm/vllm-openai:v0.30.0-cu129`（按 tag＋digest 双钉），上游 SM75 适配见 `vllm/` 与 `docker/`。
-- 本仓新增的交付物在 `gpustack/`；上游文件受 `gpustack/gate-tree-unchanged-v1.sh` 的 551 件冻结门保护，改动需在 `NOTICE` 登记例外。
+- 本仓新增的交付物在 `gpustack/`；上游文件受 `gpustack/gate-tree-unchanged-v1.sh` 的冻结表保护（当前基线表条目数见 `gpustack/SHA256SUMS-upstream-20261019-v2.txt`；历史 551 件见 `NOTICE`），改动需在 `NOTICE` 登记例外。
 - 许可：Apache-2.0（见 `LICENSE`）；第三方件的许可与来源见 `NOTICE` 与 `gpustack/backend-version-card-v1.md`。
+
+## 9 GPUStack 2.3.0 新特性与边界（2026-10-23 实测）
+
+- **已实测**：离线文档 `/docs`、Anthropic 原生 `/v1/messages`、模型 YAML 导出/导入、部署 revision/回滚。
+- **API 已验证、待窗口实测**：定时伸缩（只验证接受与持久化，未执行真实时间窗口）。
+- **已跑通 3 请求 smoke**：智能 Benchmark 首次需拉 `gpustack/benchmark-runner:v0.0.9`；本机拉完后 3/3 成功（output 107.53 tok/s、TTFT 937 ms、TPOT 28.70 ms；单点，不代表负载曲线）。
+- **当前不适用**：PD 分离（运行时常驻约 96 GB ×2 套需 16 卡；权重文件 168.8 GiB，含 CPU offload）、共享 KV（单副本）、vGPU/MIG（T10 无 MIG）、多副本负载路由。
+- **升级硬要求**：worker 保留 `--runtime=nvidia --privileged --security-opt label=disable`；回退必须恢复 `postgresql/data` 备份，不能只起旧容器。
+- 详细证据与未实测项见 run-book §0.1 与 `gpustack/release-notes-v2.3.0-v1.md`。
 
 [English](README.en.md)

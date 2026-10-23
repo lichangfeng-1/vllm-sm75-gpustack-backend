@@ -29,9 +29,10 @@ export LC_ALL=C
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
-# 2026-10-19：DSH 0.2 与面板修复后重录的基线；旧 SHA256SUMS-upstream.txt 保留为历史证据。
-# 需要复核旧基线时：SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream.txt bash gpustack/gate-tree-unchanged-v1.sh
-TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261019-v2.txt}"
+# 2026-10-19：DSH 0.2 与面板修复后重录的基线（v2）；旧 SHA256SUMS-upstream.txt 保留为历史证据。
+# 2026-10-23：v3 纳入 10 个自有提交的 8 改+2 新增（C3/速度缓存/external/性能档位/docs），v2 保留历史。
+# 需要复核旧基线时：SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream-20261019-v2.txt bash gpustack/gate-tree-unchanged-v1.sh
+TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261023-v3.txt}"
 TABLE_REL=${TABLE#"$REPO_ROOT"/}
 SELF=${0##*/}
 cd "$REPO_ROOT" || exit 6

@@ -221,3 +221,22 @@ NOTICE —— vllm-sm75-gpustack-backend
   gpustack/backend-version-card-v1.md 与 gpustack/compat-matrix-v1.md 各加"性能实测的适用面"一节，
   统一说明这三档是面板／Ultra 形态的读数、不得当 GPUStack 形态的验收线。
   以上均为我方文件，未再触碰任何上游件。
+
+  例外登记（10-23，用户批准）：v3 冻结基线纳入 8 改 + 2 新增
+  2026-10-23 将冻结表升级为 gpustack/SHA256SUMS-upstream-20261023-v3.txt
+  （559 条；v2 的 557 条原表保留不改写）。纳入的 10 件均为本仓自有改动：
+    - ultra/source/profiles/flash-next-tp8-256k-{nomtp,mtp3}.json — 82f0286（10-19）
+      补 NCCL_P2P_LEVEL=SYS、VLLM_FIREFLY=auto、VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC=1。
+    - ultra/source/console/original-tests.mjs — bca9322（10-19）、6ece40f（10-21）、b9ce369（10-21）
+      速度页默认地址随引擎 URL 刷新；旧 40xx 端口 localStorage 清理；C3 审查。
+    - ultra/source/console/public/app.js — 6ece40f、b9ce369
+      speedtest/sql iframe 加 &v= 缓存戳，避免旧端口页面。
+    - ultra/source/console/server.mjs — 463f72b/cc303f9（10-20）、6ece40f/b9ce369（10-21）
+      扩展 FORCE/复制、benchlocal enabled 标志、v7 external 模式、session 不泄 engineUrl。
+    - docs/flash-next-tp8.md — 463f72b（10-20）
+      benchmark 容器改用 host.docker.internal 转发。
+    - ultra/source/console/test/speed-reset.test.mjs — 6ece40f（10-21，新增）
+    - ultra/source/console/test/session-no-engine-url.test.mjs — b9ce369（10-21，新增）
+    - README.md / README.en.md — 10-20 文档提交 + 9b8d0af（10-23 v2.3.0）
+      README 两枚沿用 10-14 既有例外；v3 表已按当前版本重取 sha。
+  除这 10 件外，上游树其余文件与 v2 表逐字节一致；v3 表生成后门 rc=0。

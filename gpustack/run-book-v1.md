@@ -1,6 +1,6 @@
 # run-book v1 —— 从零到模型可推理（Linux 宿主）
 
-适用范围：8×Tesla T10（sm_75，16 GiB/卡）＋ GPUStack v2.2.3 ＋ 我们自己构建的 vLLM 后端镜像。
+适用范围：8×Tesla T10（sm_75，16 GiB/卡）＋ GPUStack v2.2.3（历史取证）／v2.3.0（2026-10-23 实测兼容）＋ 我们自己构建的 vLLM 后端镜像。
 本文件只给"照做能跑"的最小命令序列；每条参数为什么这么设、换硬件怎么改，见 `gpustack/backend-version-card-v1.md` 与 `gpustack/compat-matrix-v1.md`。
 
 **标注约定**：`【待实跑复核】`＝该命令由源码行号与既有实跑记录推出，尚未在本机复跑；其余步骤为实跑验证过的形制。
@@ -16,7 +16,7 @@
 | 网卡 | 记下宿主内网 IP，下面统一用 `HOST_IP` | worker 与浏览器都要能到达它。`export HOST_IP=192.0.2.10` 换成你的地址 |
 | 数据目录 | 下面统一用 `GS_DATA_DIR`（示例值 `/data/gpustack-data`），`export GS_DATA_DIR=/你的路径`；并且要在起容器**之前**先建好、容器要能写 | `--mount type=bind` 的源目录不存在时，失败发生在 `docker create` 而不是 `docker start`，原文 `invalid mount config for type "bind": bind source path does not exist`。另注意 GPUStack 会以 root 写这枚目录，事后普通账号删不掉 |
 
-**版本基线（2026-10-19 本机现读，当下限用、不保证上限）**
+**版本基线（2026-10-19 首读；2026-10-23 补 GPUStack v2.3.0 实测，仍当下限用、不保证上限）**
 
 | 件 | 本次实测通过的版本 | 说明 |
 |---|---|---|
@@ -25,9 +25,69 @@
 | Docker | **29.8.0**（storage `overlayfs`，cgroup **v2**） | cgroup v1 未验证 |
 | containerd | **2.3.5** | |
 | NVIDIA Container Toolkit | **1.20.0**（`libnvidia-container` 1.20.0-1） | `--runtime nvidia` 依赖它 |
-| GPUStack | **quay.io/gpustack/gpustack:v2.2.3** | 本仓所有 API/字段/行号取证都按 2.2.3 这一版 |
+| GPUStack | **quay.io/gpustack/gpustack:v2.3.0**（2026-10-23 实测；v2.2.3 为上一版） | 本文件其余 API/字段/旧行号取证仍按 2.2.3；2.3.0 兼容面见 §0.1 |
 
 **读法**：上表是"我们实际跑通的那一组"，**只作为下限**——低于它我们不保证、也未验证；高于它同样不保证（版本组合可能有行为差异），请使用者自行实测后再上生产。
+
+### 0.1 从 2.2.3 升到 2.3.0（2026-10-23 本机实测）
+
+> 下列命令使用 §1 定义的 `HOST_IP` 与 `GS_DATA_DIR`；先把 §1 的两个 `export` 设好再照抄。
+
+**结论**：同一枚 `vllm-sm75-gpustack:v0.1.7-beta2-v7`、同一模型定义原样迁移；平台侧只换 GPUStack server/worker 镜像。**worker 必须保留旧容器的运行时参数** `--runtime=nvidia --privileged --security-opt label=disable`；缺整组，容器内没有 `/dev/nvidia*`（整组缺失对照；逐项归因未做），worker 上报 `gpu_devices=[]`，调度器会报 `Worker ... does not support backend version ...`。
+
+**升级前**
+
+1. 先把模型 `replicas` 调到 0，或停掉模型实例的 `run`/`pause` 容器（worker 停不会自动带走它），确认八卡释放；再停 server/worker，备份 `${GS_DATA_DIR}/postgresql/data`（宿主路径；容器内为 `/var/lib/gpustack/postgresql/data`；本机 69 MB、1523 个文件）及 `jwt_secret_key`、`postgres_root_pass`、`bootstrap_version`、worker 身份文件。
+2. 旧容器改名保留，并 `docker update --restart=no`；不要删，回退要用。
+3. 拉 `quay.io/gpustack/gpustack:v2.3.0`；本机镜像内版本 `v2.3.0 (63a03ba)`，digest `sha256:3d2734fa…`。
+
+**升 server（先）**
+
+```bash
+docker run -d --name sm75-gpustack-server-v3 --restart unless-stopped \
+  -e TZ=Asia/Shanghai -p ${HOST_IP}:8180:80 \
+  -v ${GS_DATA_DIR}:/var/lib/gpustack \
+  quay.io/gpustack/gpustack:v2.3.0
+# 等 http://${HOST_IP}:8180/healthz 200；日志出现 Database migration completed
+```
+
+本机迁移后 Alembic 为 `a7e2c9d4f681`，耗时 <1 s；模型 1 条、后端 14 条、worker 1 条原样保留。
+
+**升 worker（后）**
+
+```bash
+# 跨机：把 registration-token 写进 600 的 env 文件，设 WORKER_ENV_FILE；
+# 同机：可删掉 --env-file 这一行，让 worker 从 data_dir 读 token（§5）。
+WORKER_ENV_FILE=/path/to/worker-token.env
+docker run -d --name sm75-gpustack-worker --restart unless-stopped \
+  --runtime=nvidia --privileged --security-opt label=disable --network host \
+  -v ${GS_DATA_DIR}:/var/lib/gpustack \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --env-file "$WORKER_ENV_FILE" -e TZ=Asia/Shanghai \
+  quay.io/gpustack/gpustack:v2.3.0 \
+  --server-url http://${HOST_IP}:8180 --advertise-address ${HOST_IP} \
+  --worker-name sm75-gpustack-worker
+```
+
+**验收（本机 2026-10-23）**
+
+| 项 | 读数 |
+|---|---|
+| worker | READY、v2.3.0、`gpu_devices=8`（均 cuda） |
+| 模型 | `0.1.7-sm75.1-fast-custom` 原样；41 个 env、TP8 参数不变 |
+| 实例 | RUNNING、端口 40000（本机；以平台分配为准）、GPU 0–7；八卡 14,454 MiB |
+| 管理面 | 8180 `/healthz` 200、`/` 200、`/docs` 200 |
+| 推理 | `/health` 200、`/v1/models` 200、chat 200、Anthropic `/v1/messages` 200 |
+| 面板 | 1615 `/` 200 |
+| 速度冒烟 | 8K/16K/27.5K 实际 prompt：58.75/58.46/65.13 tok/s（SSE、output 1024、并发 1；与历史九档不是同一把尺） |
+
+**DSH（可选）**：模型端口变化后，把 DSH 两份配置的 `baseURL` 从旧端口改到新端口（本机 40052→40000，两份回读一致，备份 `.bak-时间戳`）；本机用工作区的 `sync-dsh-port-v1.py <port> --apply`，该脚本不在本仓。
+
+**回退**：先停模型实例，再停 v2.3.0 server/worker → 恢复 `postgresql/data` 备份 → 起旧容器 → `docker update --restart=unless-stopped` 恢复自启。**不能把旧容器直接接到已迁移的库上**；旧容器已置 `restart=no`。
+
+**新特性**：离线文档、Anthropic、YAML 导出/导入、revision/回滚已实测；定时伸缩只验证 API 接受与持久化（真实窗口未执行）；智能 Benchmark 预拉 `gpustack/benchmark-runner:v0.0.9` 后跑通 3 请求 smoke（3/3、output 107.53 tok/s、TTFT 937 ms、TPOT 28.70 ms；单点，不代表负载曲线）。PD/共享 KV/vGPU/多副本路由当前不适用。
+
+**行号**：本节是 2.3.0 的兼容面复核；本文件其余章节的行号仍是 2.2.3，未逐行复核 2.3.0，不要混用。
 
 **下文命令里"你这台机器"的值，统一由 `HOST_IP` 与 `GS_DATA_DIR` 两个变量给**（在 §1 的 export 之后照抄即可）。
 
@@ -35,7 +95,7 @@
 
 ```bash
 docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688   # 上游基座，落盘约 42 GiB（构建后 SM75 后端约 64 GB）
-docker pull quay.io/gpustack/gpustack:v2.2.3                                                                                  # 平台本体，约 1 GB
+docker pull quay.io/gpustack/gpustack:v2.3.0                                                                                  # 平台本体，约 1 GB
 ```
 
 ## 1 拉仓
@@ -52,7 +112,7 @@ cd vllm-sm75-gpustack-backend
 
 ## 2 探活并构建后端镜像
 
-**从上游 vLLM 基座到自定义后端是“一次构建”，不是两个产品。** 基座是 `vllm/vllm-openai:v0.30.0-cu129`（钉在 `docker/Dockerfile:3`）。默认入口把上游 Dockerfile 原文与我们的五层合成一份 `gpustack/Dockerfile.allinone`，`build-backend-v1.sh` 用它**一次 `docker build` 从基座走到末端**，不再产生中间基座 tag：
+**从上游 vLLM 基座到自定义后端可以是一条链。** 基座是 `vllm/vllm-openai:v0.30.0-cu129`（钉在 `docker/Dockerfile:3`）。**默认交付用 `--two-stage`**（已验证，会产出 `vllm-sm75` 中间基座 tag）；可选 `--allinone` 单次入口把上游 Dockerfile 原文与我们的五层合成一份 `gpustack/Dockerfile.allinone`，用**一次 `docker build` 从基座走到末端**（未完整验收）：
 
 ```text
 vllm/vllm-openai:v0.30.0-cu129
@@ -88,7 +148,7 @@ docker build --file gpustack/Dockerfile.allinone --target runtime-pin-layer \
 
 四条会踩的：
 
-- `--two-stage` 才会产出 `vllm-sm75:v…` 中间镜像，**它不是后端镜像**；默认单次构建没有这一层。
+- `--two-stage` 才会产出 `vllm-sm75:v…` 中间镜像，**它不是后端镜像**；单次 allinone 构建没有这一层。
 - 末端 target 取 `--target runtime-pin-layer`（文件末段＝最终层）。取 `panel-layer` 得到不含运行期钉版的 v4（5.17/0.23），取 `pcieipc-layer` 只得到层 1，缺 incple 与 tzdata。
 - 仅 `--two-stage` 的 `BASE_TAG` 必须是**没被本线加装过**的那层。层 1 的装机脚本是追加型的，见到自己的 marker 就退 3（`gpustack/layers/pcieipc/install-pcieipc.sh:35`），拿已含层 1 的 tag 当基座会把构建直接打红。
 - 基座 tag 与 digest 钉在 `docker/Dockerfile:3` 与 `docker/build.sh:21`，现值 `vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb…`。单次构建下改 `docker/Dockerfile` 的 `ARG BASE_IMAGE`（或生成器参数）后重生成 allinone。**要注意换的到底是什么**：上游那几行按 `--index …/cu129` 重装 `torch==2.13.0+cu129` 并断言 `torch.version.cuda == "12.9"`（`docker/Dockerfile:15-17`），只换基座时 torch 与 triton 不变，变的是 CUDA 工具链；要让 torch 跟着换档，得连这几行一起动。
@@ -102,7 +162,7 @@ docker create --name sm75-gpustack-server --hostname sm75-gpustack-server \
   --network bridge --restart unless-stopped --env TZ=Asia/Shanghai \
   -p ${HOST_IP}:8180:80 \
   --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
-  quay.io/gpustack/gpustack:v2.2.3
+  quay.io/gpustack/gpustack:v2.3.0
 docker start sm75-gpustack-server
 ```
 
@@ -110,7 +170,7 @@ docker start sm75-gpustack-server
 
 **两个坑，都是实跑撞过的**：
 
-先说一句指路约定：本节与后文凡指向 Python／mjs 源码并带行号的——无论写成 `gpustack/xxx.py:行号` 还是只写 `xxx.py:行号`——指的都是**上游 GPUStack v2.2.3 的源码路径与行号**，这个仓里没有这些文件。我们自己写的件集中在 `gpustack/` 目录与仓根文档：多数带版本后缀（如 `run-book-v1.md`），也有不带的（如 `layers/incple/patch_ple_inc.py`、`layers/pcieipc/install-pcieipc.sh`），所以按路径区分，别按后缀猜。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核。
+先说一句指路约定：本节与后文凡指向 Python／mjs 源码并带行号的——无论写成 `gpustack/xxx.py:行号` 还是只写 `xxx.py:行号`——指的都是**上游 GPUStack v2.2.3 的源码路径与行号**，这个仓里没有这些文件。我们自己写的件集中在 `gpustack/` 目录与仓根文档：多数带版本后缀（如 `run-book-v1.md`），也有不带的（如 `layers/incple/patch_ple_inc.py`、`layers/pcieipc/install-pcieipc.sh`），所以按路径区分，别按后缀猜。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核；v2.3.0 只复核了 §0.1 的兼容面，旧行号未逐行复核，别把 2.2.3 行号当 2.3.0 用。
 
 - **不要加 `--system-default-container-registry`**。加了它，后端注册表里不含 registry 段的镜像名会被拼成 `quay.io/vllm-sm75-gpustack:…` 去远端拉，报 `Failed to pull image`，而本地明明有这枚镜像；表现是"参数块一行都没被执行"。拼接规则 `gpustack/utils/config.py:87-108`。已经设过就清掉：`PUT /v2/config {"system_default_container_registry":""}`（该字段在运行时白名单 `gpustack/utils/config.py:9-12`，可热改；这条 PUT 要带鉴权，无 token 直接 401）。
 
@@ -136,10 +196,10 @@ docker exec sm75-gpustack-server cat /var/lib/gpustack/initial_admin_password
 ```bash
 docker create --name sm75-gpustack-worker --hostname sm75-gpustack-worker \
   --restart unless-stopped --env TZ=Asia/Shanghai \
-  --privileged --network host --runtime nvidia \
+  --runtime=nvidia --privileged --security-opt label=disable --network host \
   --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
   --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
-  quay.io/gpustack/gpustack:v2.2.3 \
+  quay.io/gpustack/gpustack:v2.3.0 \
   --server-url http://${HOST_IP}:8180 \
   --advertise-address ${HOST_IP} \
   --worker-name sm75-gpustack-worker
@@ -161,6 +221,8 @@ curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/clusters/1/registrat
 
 返回五格 `token / server_url / image / env / args`。本机 2026-10-18 现读：`server_url` ＝ `http://172.17.100.10:8180`，`image` ＝ `quay.io/gpustack/gpustack:v2.2.3`，`env` 里一条 `GPUSTACK_TOKEN`（58 字符），`args` 是空数组。这一格的结构体注释逐字写着它是"The arguments of docker run command to register a worker"（`gpustack/schemas/clusters.py:696-706`），所以 `-e GPUSTACK_TOKEN=…` 与命令行 `--token …` 两种写法都算照用途用。
 
+> 该段 `image`/`server_url` 是 2.2.3 历史读数；v2.3.0 升级后未重取。
+
 两条注意：
 
 - **这条 token 是写凭据**，拿到它的人能往这个集群里注册 worker（`gpustack/routes/clusters.py:733-734` 的注释就是这么定性的，接口因此按"可写"权限把关）。它会出现在 `ps` 和 shell 历史里，跨机跑完就轮换。
@@ -181,6 +243,8 @@ curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/inference-backends
 ```
 
 `version_configs` 是**以版本名为键的字典**。本机现读 vLLM 那一行（`id=1`、`backend_source=built_in`、`built_in_version_configs` 30 格、`version_configs` 只有我们这一格）：
+
+> 该段是 2.2.3 历史读数；v2.3.0 实测 vLLM 行内有 5 个 `-custom` 版本（custom / fast-custom / v4tf515-custom / oldpanel-custom / oldpanel-tf517-custom）。
 
 ```json
 {"0.1.7-sm75.1-custom": {"image_name": "vllm-sm75-gpustack:v0.1.7-beta2-v1", "run_command": null, "entrypoint": null, "built_in_frameworks": null, "custom_framework": "cuda", "env": null}}
@@ -306,7 +370,7 @@ docker run -d --name sm75-bench-cli \
 
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
-**默认路线（`-v7`；同引擎层读数，2026-10-20，SMT Off，AutoRound，output 1024，并发 1，面板直连）**：8192/16384/32768 = **56.79 / 57.15 / 57.17（均值 57.04）**，A 路线（image4/video0），与历史 AutoRound 57.04 一致。关键变量是**transformers/tokenizers 成对钉到 5.15.1/0.22.2**：v4 栈钉对＝57.04，旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36，v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers。** 同机对照：不钉版 v4 **56.26/56.97**；旧面板独立容器 59.35（text-only，不可与 A 路线相减）。**仓库从 vLLM 基座一条命令构建的就是 v7，不需要任何历史镜像。**
+**`-v6` 批次（2026-10-20；同引擎层读数，SMT Off，AutoRound，output 1024，并发 1，面板直连）**：8192/16384/32768 = **56.79 / 57.15 / 57.17（均值 57.04）**，A 路线（image4/video0），与历史 AutoRound 57.04 一致；**v7 同引擎层复核（2026-10-21）为 56.83–57.04**。关键变量是**transformers/tokenizers 成对钉到 5.15.1/0.22.2**：v4 栈钉对＝57.04，旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36，v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers。** 同机对照：不钉版 v4 **56.26/56.97**；旧面板独立容器 59.35（text-only，不可与 A 路线相减）。**仓库从 vLLM 基座一条命令构建的就是 v7，不需要任何历史镜像。**
 
 仓根 `README.md` 的性能节挂着三张测速表：基线档 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出）。
 
