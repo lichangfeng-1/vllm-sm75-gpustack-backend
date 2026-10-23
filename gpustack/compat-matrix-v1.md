@@ -2,6 +2,8 @@
 
 这张表回答一个问题：上游为 SM75 做的那些能力，接到 GPUStack 上之后各自落在哪里、还剩下哪些。"怎么给"是配置位置，"结论"是在 GPUStack 形态下实测或推导的结果。源码行号取 GPUStack v2.2.3 正式版。
 
+> **v2.3.0 增补（2026-10-23 实测）**：`0.1.7-sm75.1-fast-custom`、入口 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`、41 个 env 与 TP8 参数在 v2.3.0 下原样可用；8 卡均识别为 `cuda`；实例 RUNNING、端口 40000。**worker 必须保留 `--runtime=nvidia --privileged --security-opt label=disable`**，否则 `gpu_devices=[]`，调度器报 “does not support backend version”。新特性：离线文档、Anthropic `/v1/messages`、YAML 导出/导入、revision/回滚已实测；定时伸缩仅 API 接受与持久化（真实窗口未执行）；智能 Benchmark 预拉 `gpustack/benchmark-runner:v0.0.9` 后完成 3 请求 smoke（单点，auto-tune 未跑）。PD/共享 KV/vGPU/多副本路由当前不适用。本表其余行号仍按 v2.2.3，未逐行复核 v2.3.0。
+
 | 能力 | 落点 | 规格原判 | 本轮定稿 |
 |---|---|---|---|
 | 速度环境变量 22 条（pcieipc 卡间通信开关、QSA 量化注意力一族） | 模型 env 粘贴块 `gpustack/env-paste-v1.txt`（2.2.3 `base.py:457`：模型 env 优先于宿主 env） | 不需要改启动入口 | 能用，不用改入口 |
@@ -111,14 +113,14 @@ incple AutoRound 量化白名单），加上靠环境变量打开的底座能力
 **最后一条**：这三个数是面板形态的，不是 GPUStack 形态的验收线。GPUStack 形态要另测，
 方法见 `gpustack/run-book-v1.md` 第 10 节。
 
-## 五、2026-10-20 默认交付档与同平台 A/B（不替换上面三张表）
+## 五、2026-10-20 `-v6` 批次与同平台 A/B（不替换上面三张表；当前默认 `-v7`）
 
 这一节只回答一个问题：**同一台机器、同一个 GPUStack、同一把尺，什么组合能把速度拉回 57+。**
 三张历史表（43.31／57.73／57.04）仍只属于面板形态，没有被本节的数替换。
 
 | 形态（SMT Off、AutoRound、output 1024、并发 1、面板直连） | 8192 | 16384 | 32768 | 均值 |
 |---|---:|---:|---:|---:|
-| **默认 `-v6`（v4 栈＋钉 5.15.1/0.22.2）＋A 路线 image4/video0** | **56.79** | **57.15** | **57.17** | **57.04** |
+| **`-v6` 批次（2026-10-20；当前默认 `-v7`）＋A 路线 image4/video0** | **56.79** | **57.15** | **57.17** | **57.04** |
 | 备选：旧引擎薄层（transformers 5.15.1）＋A 路线 | 56.92 | 57.57 | 56.96 | 57.15 |
 | 旧引擎薄层＋text-only（两轮） | 57.56/57.07 | 56.98/58.11 | 57.22/58.04 | 57.25/57.74 |
 | v4 后端（transformers 5.17.0）panel sidecar，六档 | 56.97 | — | — | 56.26 |
