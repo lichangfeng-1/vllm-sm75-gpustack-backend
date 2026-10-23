@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # 在服务器侧（带 v7 父镜像）构建 v8 薄层：只替换 console/public/app.js。
+# 布局：件在 gpustack/layers/panel/，Dockerfile 在 gpustack/，本脚本在 gpustack/。
 # 逻辑审查：已逐行检查；实机：2026-10-23 已跑（v8 薄层构建成功）。
-# 用法：在包含 app.js / Dockerfile / verify-settings-v1.py 的目录执行本脚本。
 set -euo pipefail
 
-CTX=$(cd -- "$(dirname -- "$0")" && pwd)
+REPO=$(cd -- "$(dirname -- "$0")/.." && pwd)
+CTX=$REPO/gpustack/layers/panel/public
+VERIFY=$REPO/gpustack/layers/panel/verify-settings-v1.py
+DF=$REPO/gpustack/Dockerfile.panel-settings-v1
 PARENT=${PARENT:-vllm-sm75-gpustack:v0.1.7-beta2-v7}
 IMAGE=${IMAGE:-vllm-sm75-gpustack:v0.1.7-beta2-v8}
 
-for f in app.js Dockerfile verify-settings-v1.py; do
-  test -s "$CTX/$f" || { echo "BLOCK: missing $CTX/$f" >&2; exit 3; }
+for f in "$CTX/app.js" "$DF" "$VERIFY"; do
+  test -s "$f" || { echo "BLOCK: missing $f" >&2; exit 3; }
 done
 docker image inspect "$PARENT" >/dev/null
-python3 "$CTX/verify-settings-v1.py" "$CTX/app.js"
-docker build --pull=false --build-arg PARENT="$PARENT" -f "$CTX/Dockerfile" -t "$IMAGE" "$CTX"
+python3 "$VERIFY" "$CTX/app.js"
+docker build --pull=false --build-arg PARENT="$PARENT" -f "$DF" -t "$IMAGE" "$CTX"
 
 want=$(sha256sum "$CTX/app.js" | cut -d' ' -f1)
 got=$(docker run --rm --entrypoint sha256sum "$IMAGE" /opt/sm75-workbench/console/public/app.js | cut -d' ' -f1)
