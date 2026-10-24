@@ -21,9 +21,10 @@ docker build --pull=false --build-arg PARENT="$PARENT" -f "$DF" -t "$IMAGE" "$CT
 want=$(sha256sum "$CTX/app.js" | cut -d' ' -f1)
 got=$(docker run --rm --entrypoint sha256sum "$IMAGE" /opt/sm75-workbench/console/public/app.js | cut -d' ' -f1)
 test "$got" = "$want" || { echo "FAIL: in-image app.js sha $got != $want" >&2; exit 7; }
-tabs=$(docker run --rm --entrypoint sh "$IMAGE" -c "grep -c 'data-settings-tab' /opt/sm75-workbench/console/public/index.html")
+# 注：grep -c 计数不符时退出码非 0，set -e 会先中断；|| true 让下面的 FAIL 文案能打出来。
+tabs=$(docker run --rm --entrypoint sh "$IMAGE" -c "grep -c 'data-settings-tab' /opt/sm75-workbench/console/public/index.html" || true)
 test "$tabs" = "6" || { echo "FAIL: settings tabs=$tabs, want 6" >&2; exit 8; }
-button=$(docker run --rm --entrypoint sh "$IMAGE" -c "grep -c 'openUnifiedSettings' /opt/sm75-workbench/console/public/index.html")
+button=$(docker run --rm --entrypoint sh "$IMAGE" -c "grep -c 'openUnifiedSettings' /opt/sm75-workbench/console/public/index.html" || true)
 test "$button" = "1" || { echo "FAIL: settings button count=$button, want 1" >&2; exit 9; }
 
 docker image inspect "$IMAGE" --format 'IMAGE_ID={{.Id}} SIZE={{.Size}}'
