@@ -1,0 +1,4 @@
+ARG PARENT=vllm-sm75-gpustack:v0.1.7-beta2-v7
+FROM ${PARENT}
+COPY app.js /opt/sm75-workbench/console/public/app.js
+LABEL io.sm75.panel.settings="v1"

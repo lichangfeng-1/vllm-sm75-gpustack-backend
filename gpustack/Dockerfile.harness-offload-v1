@@ -1,0 +1,4 @@
+ARG PARENT=vllm-sm75-gpustack:v0.1.7-beta2-v8
+FROM ${PARENT}
+COPY dsh-llm-pi-ai-index.js /opt/harness/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js
+LABEL io.sm75.harness.offload="v1"
