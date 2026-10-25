@@ -61,37 +61,50 @@
       </div>
       <div id="authPending" role="status">正在加载工作区…</div>
       <section id="login" class="login-card" hidden>
-        <img
-          class="login-mark"
-          src="/brand/favicon.svg"
-          width="72"
-          height="72"
-          alt="VLLM-SM75"
-        /><span class="eyebrow">LOCAL MODEL WORKBENCH</span>
-        <h2>登录模型工作台</h2>
-        <p>在局域网中管理模型、对话与性能。</p>
-        <label id="loginUsernameLabel" for="loginUsername" hidden>管理员账号</label>
-        <input id="loginUsername" autocomplete="username" hidden disabled />
-        <label id="loginSecretLabel" for="token">登录 token</label
-        ><input
-          id="token"
-          type="password"
-          autocomplete="current-password"
-          placeholder="输入登录 token"
-          disabled
-        /><button id="signin" disabled>登录</button>
-        <p id="authStatus" role="status">正在确认登录状态…</p>
-        <button id="retryAuth" hidden>重新连接</button>
-        <details>
-          <summary>首次使用如何获取 token？</summary>
-          <p>
-            token 已随机生成并保存在控制台数据目录的 key 文件。宿主机上可直接读取（自动定位当前模型容器）：
-          </p>
-          <code>docker exec "$(docker ps -q --filter name=run-0 | head -1)" cat /var/lib/gpustack/panel/key; echo</code>
-          <p>已进入容器时：</p>
-          <code>node /opt/sm75-workbench/console/auth-cli.mjs show</code>
-          <p>升级会保留已有 token；登录 token 与模型 API Key 分开管理。</p>
-        </details>
+        <div class="login-aside">
+          <img
+            class="login-mark"
+            src="/brand/mark-transparent.svg"
+            width="88"
+            height="88"
+            alt=""
+          />
+          <span class="eyebrow">LOCAL MODEL WORKBENCH</span>
+          <h2>SM75 模型工作台</h2>
+          <p class="login-lead">在局域网中管理模型、对话与性能评测。</p>
+          <ul class="login-points">
+            <li><b>模型</b><span>GPUStack 模型统一入口</span></li>
+            <li><b>对话</b><span>DeepSeek Harness 直连</span></li>
+            <li><b>评测</b><span>面板测速与完整雷达</span></li>
+          </ul>
+          <span class="login-foot">本地部署 · 数据不出内网</span>
+        </div>
+        <div class="login-form">
+          <h3>登录</h3>
+          <p class="login-hint">使用首次启动生成的 token 进入工作台。</p>
+          <label id="loginUsernameLabel" for="loginUsername" hidden>管理员账号</label>
+          <input id="loginUsername" autocomplete="username" hidden disabled />
+          <label id="loginSecretLabel" for="token">登录 token</label
+          ><input
+            id="token"
+            type="password"
+            autocomplete="current-password"
+            placeholder="输入登录 token"
+            disabled
+          /><button id="signin" disabled>登录</button>
+          <p id="authStatus" role="status">正在确认登录状态…</p>
+          <button id="retryAuth" hidden>重新连接</button>
+          <details>
+            <summary>首次使用如何获取 token？</summary>
+            <p>
+              token 已随机生成并保存在控制台数据目录的 key 文件。宿主机上可直接读取（自动定位当前模型容器）：
+            </p>
+            <code>docker exec "$(docker ps -q --filter name=run-0 | head -1)" cat /var/lib/gpustack/panel/key; echo</code>
+            <p>已进入容器时：</p>
+            <code>node /opt/sm75-workbench/console/auth-cli.mjs show</code>
+            <p>升级会保留已有 token；登录 token 与模型 API Key 分开管理。</p>
+          </details>
+        </div>
       </section>
       <section id="models" hidden>
         <div id="modelLaunch" hidden>

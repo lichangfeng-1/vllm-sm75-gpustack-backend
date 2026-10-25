@@ -76,6 +76,13 @@
   --gpu-elevated: #b45309;
   --gpu-high: #c62828;
 }
+/* The login card fills its section box; the generic section rule adds padding
+   and vertical scrolling that clip the two-pane card. This override must live
+   outside the @scope block to win the cascade. */
+body > main > section#login.login-card {
+  padding: 0 !important;
+  overflow: hidden !important;
+}
 @scope (body) to (.dsh-surface, body > :not(aside):not(main):not(script):not(style)) {
 * {
   box-sizing: border-box;
@@ -2002,23 +2009,127 @@ main:not([data-auth="authenticated"]) {
   display: grid;
   place-content: center;
   padding: 24px !important;
+  background:
+    radial-gradient(60% 55% at 50% 0%, color-mix(in srgb, var(--blue) 12%, transparent), transparent 70%);
 }
 main:not([data-auth="authenticated"]) > section:not(#login),
 main:not([data-auth="authenticated"]) > #taskDrawer {
   display: none !important;
 }
 .login-card {
-  width: min(max(440px, calc(440px * var(--ui-fs, 1))), calc(100vw - 48px));
+  width: min(960px, calc(100vw - 48px));
   box-sizing: border-box;
-  padding: clamp(22px, calc(36px * var(--ui-fs, 1)), 48px);
-  border: 1px solid var(--line);
-  border-radius: 20px;
+  display: grid;
+  grid-template-columns: minmax(300px, 0.88fr) minmax(0, 1.12fr);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: 24px;
   background: var(--card);
-  box-shadow: 0 20px 70px #0002;
+  box-shadow: 0 28px 80px rgba(15, 28, 48, 0.16), 0 2px 10px rgba(15, 28, 48, 0.06);
 }
-.login-card h2 {
-  font-size: calc(26px * var(--ui-fs, 1));
-  margin: 12px 0;
+.login-aside {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: clamp(28px, 3vw, 44px);
+  padding-right: clamp(36px, 5vw, 72px);
+  color: #eef4ff;
+  background:
+    radial-gradient(90% 80% at 0% 0%, rgba(41, 153, 245, 0.20) 0%, transparent 58%),
+    linear-gradient(100deg, #0a1422 0%, #0d1a2c 52%, rgba(13, 26, 44, 0) 97%);
+}
+.login-aside::after {
+  content: "";
+  position: absolute;
+  right: -70px;
+  bottom: -90px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #2999f5 0%, transparent 65%);
+  opacity: 0.22;
+  pointer-events: none;
+}
+.login-mark {
+  display: block;
+  width: clamp(64px, 5vw, 88px);
+  height: auto;
+  filter: drop-shadow(0 10px 24px #0006);
+}
+.login-aside .eyebrow {
+  color: #9db6d6;
+  margin-top: 26px;
+}
+.login-aside h2 {
+  margin: 10px 0 0;
+  color: #fff;
+  font-size: clamp(24px, 2.2vw, 32px);
+  line-height: 1.22;
+  letter-spacing: 0.01em;
+}
+.login-lead {
+  margin: 12px 0 0;
+  color: #b7c7dc !important;
+  font-size: max(14px, calc(14px * var(--ui-fs, 1)));
+  line-height: 1.6;
+}
+.login-points {
+  list-style: none;
+  margin: auto 0 0;
+  padding: 28px 0 0;
+  display: grid;
+  gap: 12px;
+  color: #cfdcf0;
+  font-size: max(13px, calc(13px * var(--ui-fs, 1)));
+}
+.login-points li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.login-points li::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2999f5;
+  transform: translateY(-2px);
+}
+.login-points b {
+  flex: none;
+  min-width: 2.4em;
+  color: #fff;
+  font-weight: 600;
+}
+.login-foot {
+  margin-top: 22px;
+  color: #8fa6c4;
+  font-size: max(12px, calc(12px * var(--ui-fs, 1)));
+  letter-spacing: 0.04em;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: clamp(28px, 3.2vw, 48px);
+  background: linear-gradient(200deg, color-mix(in srgb, var(--blue) 4%, transparent), transparent 45%);
+}
+.login-form h3 {
+  margin: 0 0 6px;
+  font-size: max(18px, calc(18px * var(--ui-fs, 1)));
+}
+.login-hint {
+  margin: 0 0 22px;
+  color: var(--muted);
+  font-size: max(13px, calc(13px * var(--ui-fs, 1)));
+}
+.login-form label {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: max(13px, calc(13px * var(--ui-fs, 1)));
 }
 .login-card p, .login-card summary {
   color: var(--muted);
@@ -2028,17 +2139,27 @@ main:not([data-auth="authenticated"]) > #taskDrawer {
 .login-card #signin {
   width: 100%;
   box-sizing: border-box;
-  margin: 10px 0;
-  min-height: 44px;
+  margin: 8px 0 0;
+  min-height: 46px;
+}
+.login-card input {
+  font-size: max(14px, calc(14px * var(--ui-fs, 1)));
 }
 .login-card #signin {
+  margin-top: 18px;
+  border-radius: 10px;
   background: var(--blue) !important;
   color: var(--on-primary) !important;
   font-weight: 650;
 }
+.login-card #retryAuth {
+  margin-top: 12px;
+}
 .login-card details {
-  margin-top: 24px;
-  font-size: calc(12px * var(--ui-fs, 1));
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: max(12px, calc(12px * var(--ui-fs, 1)));
 }
 .login-card code {
   display: block;
@@ -2047,7 +2168,7 @@ main:not([data-auth="authenticated"]) > #taskDrawer {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--field);
-  font-size: calc(12px * var(--ui-fs, 1));
+  font-size: max(12px, calc(12px * var(--ui-fs, 1)));
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2056,7 +2177,7 @@ main:not([data-auth="authenticated"]) > #taskDrawer {
 .eyebrow {
   display: block;
   letter-spacing: 0.13em;
-  font-size: calc(10px * var(--ui-fs, 1));
+  font-size: max(10px, calc(10px * var(--ui-fs, 1)));
   color: var(--muted);
   margin-top: 20px;
 }
@@ -2109,6 +2230,35 @@ select:focus-visible {
     min-width: 0;
   }
   .login-card {
+    grid-template-columns: 1fr;
+    width: min(560px, calc(100vw - 32px));
+    border-radius: 20px;
+  }
+  .login-aside {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    padding: 22px 24px;
+  }
+  .login-mark {
+    width: 48px;
+  }
+  .login-aside .eyebrow,
+  .login-points,
+  .login-foot {
+    display: none;
+  }
+  .login-aside h2 {
+    margin: 0;
+    font-size: max(19px, calc(19px * var(--ui-fs, 1)));
+  }
+  .login-lead {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: max(12px, calc(12px * var(--ui-fs, 1)));
+  }
+  .login-form {
     padding: 24px;
   }
 }
