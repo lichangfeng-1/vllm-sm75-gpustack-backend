@@ -160,6 +160,31 @@ class RankShards(unittest.TestCase):
         (self.root / "manifest.json").unlink(missing_ok=True)
         self.assertIsNone(self._select())
 
+    def test_auto_round_expert_suffixes_are_filtered(self):
+        import importlib.util
+
+        import re as _re
+
+        sys.modules.setdefault("regex", _re)  # 容器里有 regex 包；本机用 re 顶替
+        path = ROOT / "vllm/model_executor/model_loader/ep_weight_filter.py"
+        spec = importlib.util.spec_from_file_location("epf", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        local = {0, 1, 2, 3}
+        for suffix in ("weight", "weight_packed", "qweight", "qzeros"):
+            self.assertTrue(
+                mod.should_skip_weight(f"m.layers.0.mlp.experts.9.down_proj.{suffix}", local),
+                suffix,
+            )
+            self.assertFalse(
+                mod.should_skip_weight(f"m.layers.0.mlp.experts.1.down_proj.{suffix}", local),
+                suffix,
+            )
+        # 量表不跳（某些后端要全体专家的 scales 算全局 amax）
+        self.assertFalse(mod.should_skip_weight("m.layers.0.mlp.experts.9.down_proj.scales", local))
+        self.assertFalse(mod.should_skip_weight("m.layers.0.self_attn.q_proj.weight", local))
+        self.assertFalse(mod.should_skip_weight("m.layers.0.mlp.experts.9.down_proj.qweight", None))
+
     def test_loader_hook_is_wired_once(self):
         text = LOADER.read_text(encoding="utf-8")
         self.assertEqual(text.count("select_rank_files(model_name_or_path)"), 1)

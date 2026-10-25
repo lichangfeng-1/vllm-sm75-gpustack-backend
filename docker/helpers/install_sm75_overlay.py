@@ -45,6 +45,7 @@ def main() -> None:
         "model_executor/kernels/linear/mixed_precision/marlin.py",
         "model_executor/model_loader/default_loader.py",
         "model_executor/model_loader/sm75_rank_shards.py",
+        "model_executor/model_loader/ep_weight_filter.py",
         "model_executor/kernels/linear/scaled_mm/marlin.py",
         "model_executor/kernels/linear/scaled_mm/cutlass.py",
         "model_executor/kernels/linear/scaled_mm/humming.py",

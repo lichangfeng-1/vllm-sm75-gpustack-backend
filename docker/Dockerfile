@@ -102,6 +102,8 @@ COPY vllm/model_executor/model_loader/default_loader.py \
     /tmp/sm75-overlay/model_executor/model_loader/default_loader.py
 COPY vllm/model_executor/model_loader/sm75_rank_shards.py \
     /tmp/sm75-overlay/model_executor/model_loader/sm75_rank_shards.py
+COPY vllm/model_executor/model_loader/ep_weight_filter.py \
+    /tmp/sm75-overlay/model_executor/model_loader/ep_weight_filter.py
 COPY vllm/model_executor/layers/quantization/utils/marlin_utils_fp8.py \
     /tmp/sm75-overlay/model_executor/layers/quantization/utils/marlin_utils_fp8.py
 COPY vllm/v1/attention/backends/flashinfer.py \
