@@ -98,6 +98,10 @@ COPY vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py \
     /tmp/sm75-overlay/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py
 COPY vllm/model_executor/layers/quantization/kv_cache.py \
     /tmp/sm75-overlay/model_executor/layers/quantization/kv_cache.py
+COPY vllm/model_executor/model_loader/default_loader.py \
+    /tmp/sm75-overlay/model_executor/model_loader/default_loader.py
+COPY vllm/model_executor/model_loader/sm75_rank_shards.py \
+    /tmp/sm75-overlay/model_executor/model_loader/sm75_rank_shards.py
 COPY vllm/model_executor/layers/quantization/utils/marlin_utils_fp8.py \
     /tmp/sm75-overlay/model_executor/layers/quantization/utils/marlin_utils_fp8.py
 COPY vllm/v1/attention/backends/flashinfer.py \
