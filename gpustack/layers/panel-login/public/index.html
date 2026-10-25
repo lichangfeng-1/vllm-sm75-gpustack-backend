@@ -87,7 +87,7 @@
           <p>
             token 已随机生成并保存在控制台数据目录的 key 文件。宿主机上可直接读取（自动定位当前模型容器）：
           </p>
-          <code>docker exec "$(docker ps -q --filter name=run-0 | head -1)" cat /var/lib/gpustack/panel/key</code>
+          <code>docker exec "$(docker ps -q --filter name=run-0 | head -1)" cat /var/lib/gpustack/panel/key; echo</code>
           <p>已进入容器时：</p>
           <code>node /opt/sm75-workbench/console/auth-cli.mjs show</code>
           <p>升级会保留已有 token；登录 token 与模型 API Key 分开管理。</p>
