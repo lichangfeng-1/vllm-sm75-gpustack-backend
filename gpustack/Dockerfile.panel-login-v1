@@ -1,0 +1,5 @@
+ARG PARENT=vllm-sm75-gpustack:v0.1.7-beta2-v9
+FROM ${PARENT}
+COPY index.html /opt/sm75-workbench/console/public/index.html
+COPY style.css /opt/sm75-workbench/console/public/style.css
+LABEL io.sm75.panel.login="v1"
