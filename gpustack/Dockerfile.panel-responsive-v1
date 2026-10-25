@@ -1,0 +1,5 @@
+ARG PARENT=vllm-sm75-gpustack:v0.1.7-beta2-v10
+FROM ${PARENT}
+COPY style.css /opt/sm75-workbench/console/public/style.css
+COPY speedtest.html /opt/sm75-workbench/extensions/speedtest/LLM_Speed_Test_v3_Python_Backend.html
+LABEL io.sm75.panel.responsive="v1"
