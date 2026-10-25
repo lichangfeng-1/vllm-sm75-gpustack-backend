@@ -1,0 +1,24 @@
+{
+  "package": "vllm_sm75",
+  "version": "0.1.0",
+  "base_image": "vllm-sm75-gpustack:v0.1.7-beta2-v13",
+  "base_image_id": "b4ec911c88b7",
+  "gate_order": [
+    "compute_capability == (7, 5)",
+    "VLLM_SM75_OPT in {auto, 0, 1}",
+    "per-item VLLM_SM75_<ITEM> in {auto, 0, 1}",
+    "explicit launch arguments"
+  ],
+  "defaults": {
+    "VLLM_SM75_OPT": "auto"
+  },
+  "items": {
+    "hc_fuse": {"default": "off", "status": "not implemented", "l4_gain_pct": null},
+    "gdn_fuse": {"default": "off", "status": "not implemented", "l4_gain_pct": null},
+    "qsa_merge": {"default": "off", "status": "not implemented", "l4_gain_pct": null}
+  },
+  "auto_enabled": [],
+  "verified_items": [],
+  "baseline_equivalent_when_off": true,
+  "note": "Skeleton only. No item has passed L4 yet; AUTO_ENABLED is intentionally empty. The one verified change so far is a baseline configuration change (VLLM_FIREFLY_AR=0), documented in the 2026-10-26 deterministic-optimization report."
+}
