@@ -221,3 +221,8 @@ def run():
 if __name__ == "__main__":
     run()
     print("\nall gemv dispatch checks passed")
+
+
+def test_gemv_dispatch():
+    """pytest entry point (run() is the standalone runner)."""
+    run()

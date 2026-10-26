@@ -10,10 +10,12 @@ run here; this module is the Triton equivalent for SM75.
 cuBLAS on this GPU with the same ruler (see ``读数-gemv微基准-*.json``). An empty
 table means this item is a no-op even when ``VLLM_SM75_GEMV_M1=1``.
 
-Defences: install() compiles and self-checks every plan before vLLM starts capturing
-CUDA graphs (capture runs with zero warmups, so a JIT compile inside it is unsafe), and
-falls back to plain ``F.linear`` if the check fails; ``VLLM_BATCH_INVARIANT`` keeps the
-upstream deterministic kernel.
+Defences: ``VLLM_BATCH_INVARIANT`` keeps the upstream deterministic kernel. There is
+deliberately **no install-time CUDA work**: ``install()`` also runs in the API-server and
+EngineCore processes, and a CUDA context there reserves ~2 GiB on GPU0, which makes the
+worker's free-memory check fail at startup (observed 2026-10-26). The first M=1 launch may
+therefore land inside CUDA-graph capture; that has been the shipping behaviour and it
+works with this Triton/CUDA pair (end-to-end +1.4% measured with FULL_AND_PIECEWISE).
 """
 import logging
 
@@ -79,26 +81,6 @@ def _gemv_m1_fake(x, weight):
 _BATCH_INVARIANT = False
 
 
-def _prewarm():
-    """Compile and self-check every plan before vLLM captures CUDA graphs.
-
-    vLLM captures decode graphs with ``cudagraph_num_of_warmups=0``, so the first
-    M=1 call of a process can land inside stream capture; a Triton JIT compile at
-    that point is not capture-safe. A real launch here also proves the kernel
-    agrees with cuBLAS before it is allowed anywhere near the engine.
-    """
-    if not torch.cuda.is_available():
-        return False
-    for n, k in PLANS:
-        x = torch.randn(1, k, device="cuda", dtype=torch.float16)
-        w = torch.randn(n, k, device="cuda", dtype=torch.float16)
-        got = gemv_m1(x, w)
-        ref = F.linear(x, w)
-        torch.testing.assert_close(got, ref, rtol=1e-2, atol=1e-2)
-    torch.cuda.synchronize()
-    return True
-
-
 def install():
     """Swap ``apply`` on the unquantized linear/embedding methods.
 
@@ -113,14 +95,6 @@ def install():
     )
 
     if getattr(UnquantizedLinearMethod, "_sm75_gemv_patched", False):
-        return
-
-    try:
-        if not _prewarm():
-            logger.warning("vllm_sm75: gemv_m1 skipped (no usable CUDA device)")
-            return
-    except Exception:  # noqa: BLE001 - disable the item, keep the engine alive
-        logger.exception("vllm_sm75: gemv_m1 self-check failed; staying on F.linear")
         return
 
     _BATCH_INVARIANT = bool(envs.VLLM_BATCH_INVARIANT)

@@ -66,9 +66,22 @@ def main():
         assert res["is_callable"] and res["installed"], res
         print("PASS metadata discovery -> install() executed")
 
-        assert res["cc_cache"] is None, \
-            "capability probe cached %r on a CUDA-less box" % (res["cc_cache"],)
-        print("PASS no CUDA leaves _CC_OK unset (transient failure not cached)")
+        assert res["cc_cache"] in (None, False), res
+        assert res["cc_cache"] is not True, "capability probe said True without a GPU"
+        print("PASS no CUDA does not enable the gate (_CC_OK=%r)" % (res["cc_cache"],))
+
+        poisoned = os.path.join(tmp, "poison")
+        os.makedirs(poisoned)
+        with open(os.path.join(poisoned, "torch.py"), "w", encoding="utf-8") as fh:
+            fh.write("raise ImportError('poisoned torch for the capability-cache test')\n")
+        env2 = dict(env, PYTHONPATH=poisoned + os.pathsep + site)
+        r = subprocess.run([sys.executable, "-c", CHECK],
+                           capture_output=True, text=True, env=env2)
+        assert r.returncode == 0, r.stderr[-800:]
+        res2 = json.loads(r.stdout.strip().splitlines()[-1])
+        assert res2["cc_cache"] is None, \
+            "a failed torch import was cached as %r" % (res2["cc_cache"],)
+        print("PASS failed torch import leaves _CC_OK unset (not cached)")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -76,3 +89,8 @@ def main():
 if __name__ == "__main__":
     main()
     print("\nentry point activation verified")
+
+
+def test_install_entrypoint():
+    """pytest entry point (main() is the standalone runner)."""
+    main()
