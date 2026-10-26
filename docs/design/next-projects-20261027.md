@@ -14,8 +14,9 @@ all-reduce 在 NCCL 流上跑，反之亦然。理论上可把 36% 的 AR 藏进
 1. 42 MB all-reduce vs 单个约 1 ms GEMM：并发 7.30 ms（和 7.51）→ 只藏住 20%；
 2. 但真实比例是"6.4 ms 的 AR 对约 30 ms 的层计算窗"：**32×1 ms GEMM 循环 + 一次 AR 并发 31.93 ms
    （GEMM 单独 30.18、AR 6.38、和 36.57）→ 藏住 73%**。
-3. 结论：**SBO 在本硬件成立**；改动面＝model_runner 把 batch 切两半、两条 CUDA 流、QSA/GDN 的流安全与 KV 写入顺序。
-   上限估计：AR 占预填 36%，藏 73% ⇒ 预填最多约 **−25%**（打折后 10–15% 量级）。
+3. 结论：**硬件层面可重叠（73%）**，但**对单请求不成立**——同一请求的 token 有因果依赖，不能把 batch 切两半并行；
+   SBO 只对"多请求混合批"有效。我们的目标是单流 agent，故 SBO **不作为单流主线**，仅在并发>1 的场景保留。
+   单流预填目前剩下的可测浪费只有热态 trace 里的 8.7% 空隙（见方向 C）。
 
 ## 方向 B：解码的 out_proj + all-reduce + residual 融合（借 vLLM Kimi K3 / Flint 思路）
 
@@ -27,3 +28,11 @@ all-reduce 在 NCCL 流上跑，反之亦然。理论上可把 36% 的 AR 藏进
 ## 顺序
 
 先做 A 的并发微基准（1 小时内可出结论）；A 不成立再做 B。两者都需独立镜像层与 L2/L3 门禁。
+
+
+## 方向 C（单流主线）：定位预填的 8.7% 空隙
+
+已知：32K 热态 51 段 ≥1 ms 间隙、共 779 ms，几乎全在 `_selected_subpages` 之前、每层一次、约 18 ms；
+已排除：选页 `run/_prepare`（全部 <2 ms）、切片放大（无收益）、模块懒加载（仅 9 ms）。
+下一步：把计时探针扩到短预填路径 `qsa_flashinfer_prefill.run` 与索引器 `qsa_indexer.qsa_select_paged_prefill`，
+并在 32K 上抓日志；若两者都 <2 ms，则空隙在 QSA 层 forward 的 Python 或调度侧，需要按层埋点。
