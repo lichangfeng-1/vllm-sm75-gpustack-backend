@@ -13,9 +13,10 @@
     "VLLM_SM75_OPT": "auto"
   },
   "items": {
-    "hc_fuse": {"default": "off", "status": "not implemented", "l4_gain_pct": null},
-    "gdn_fuse": {"default": "off", "status": "not implemented", "l4_gain_pct": null},
-    "qsa_merge": {"default": "off", "status": "not implemented", "l4_gain_pct": null}
+    "hc_fuse": {"default": "off", "status": "already_fused_upstream", "note": "_hc_combine_norm already fuses combine+norm", "l4_gain_pct": null},
+    "gdn_fuse": {"default": "off", "status": "already_fused_upstream", "note": "fused_recurrent_gated_delta_rule_packed_decode", "l4_gain_pct": null},
+    "qsa_merge": {"default": "off", "status": "already_fused_upstream", "note": "_qsa_pre_indexer_kernel is active", "l4_gain_pct": null},
+    "gemv_m1": {"default": "off", "status": "not implemented", "note": "only item with measured headroom: small-matrix GEMV 76% of 403 GB/s vs large 92-94%", "l4_gain_pct": null}
   },
   "auto_enabled": [],
   "verified_items": [],

@@ -13,15 +13,16 @@ AUTO_ENABLED = set()
 
 ITEMS = {
     # name: {"module": str, "default": "off", "status": str, "l4_gain_pct": float|None}
-    "hc_fuse": {"module": "hc_fuse", "default": "off", "status": "not implemented", "l4_gain_pct": None},
-    "gdn_fuse": {"module": "gdn_fuse", "default": "off", "status": "not implemented", "l4_gain_pct": None},
-    "qsa_merge": {"module": "qsa_merge", "default": "off", "status": "not implemented", "l4_gain_pct": None},
+    "hc_fuse": {"module": "hc_fuse", "default": "off", "status": "already_fused_upstream", "l4_gain_pct": None},
+    "gdn_fuse": {"module": "gdn_fuse", "default": "off", "status": "already_fused_upstream", "l4_gain_pct": None},
+    "qsa_merge": {"module": "qsa_merge", "default": "off", "status": "already_fused_upstream", "l4_gain_pct": None},
+    "gemv_m1": {"module": "gemv_m1", "default": "off", "status": "not implemented", "l4_gain_pct": None},
 }
 
 
 def install_all(enabled_fn):
     for name, meta in ITEMS.items():
-        if meta["status"] == "not implemented":
+        if meta["status"] in ("not implemented", "already_fused_upstream"):
             continue
         if not enabled_fn(name):
             continue
