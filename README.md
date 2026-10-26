@@ -1,7 +1,7 @@
 # vLLM-SM75 × GPUStack 自定义后端（v0.1.7-beta2 线；GPUStack 2.3.0 实测兼容）
 
 把 SM75 版 vLLM 做成 GPUStack 的自定义后端，让 T4 / T10 这类 Turing 老卡在 GPUStack 里跑大模型。
-本仓只服务这一条线；上游的 Ultra／面板独立部署形态不在本仓的交付范围内（见文末"与上游的关系"）。
+**本仓兼得两种形态**：既交付 **GPUStack 自定义后端**（模型行里跑 `vllm serve`），也交付 **Ultra／面板独立部署形态**（同一枚镜像用 `runtime-entrypoint.py` 单独起面板与 Ultra 工作台）。两者共用同一条构建链、同一套 SM75 适配与扩展；选哪种只取决于入口与 env（见 §1、§3、§4 与文末"与上游的关系"）。
 
 ---
 

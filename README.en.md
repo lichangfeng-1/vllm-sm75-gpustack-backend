@@ -1,8 +1,10 @@
 # vLLM-SM75 x GPUStack custom backend (v0.1.7-beta2 line; GPUStack 2.3.0 tested)
 
 Turns SM75 vLLM into a GPUStack custom backend so Turing cards (T4 / T10) can serve large models
-inside GPUStack. This repo covers that line only; the upstream standalone Ultra / workbench
-deployment is out of scope here (see "Relationship to upstream" at the end).
+inside GPUStack. **The same repo also ships the standalone Ultra / panel deployment**: one image,
+one build chain, two entry points (`vllm serve` for a GPUStack model row, or
+`runtime-entrypoint.py` for a standalone panel / Ultra workbench). See sections 1, 3, 4 and
+"Relationship to upstream" at the end.
 
 ---
 
