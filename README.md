@@ -37,6 +37,8 @@
 | 项 | 开关 | 状态 | 说明 |
 |---|---|---|---|
 | `gemv_m1` | `VLLM_SM75_GEMV_M1` | ✅ verified，`auto` 生效 | decode 的 M=1 GEMV，3 个形状换用 Triton 内核；L2 相对误差 5e-6/1.9e-4/0，端到端 **64.32 → 65.24 tok/s（+1.4%）** |
+| `gdn_tc` | `VLLM_SM75_GDN_TC` | ✅ verified，`auto` 生效 | GDN 预填换成张量核内核（`mma.sync m16n8k8`）。**必须同时加 `--gdn-prefill-backend=triton`**（该项替换的是 FLA 的 chunk 内核）；预填 +6.5%/+12.0%/+10.1%（8K/32K/126K），logprob 差 0.0035 nats |
+| `ar_prefill` | `VLLM_SM75_AR_PREFILL` | ❌ 已判负（默认关） | 让 PCIe-IPC 也服务预填的 21 MB all-reduce：实测反而慢 15–22%，NCCL ring 在这个尺寸更好 |
 | `hc_fuse` / `gdn_fuse` / `qsa_merge` | 同名 | 已融合，永不加载 | 复核证明上游已经融合好，不需要重写 |
 
 新增改动一律遵守：**只新增、不覆盖**镜像里已有文件；每项独立开关；默认关；全关等于原基线。

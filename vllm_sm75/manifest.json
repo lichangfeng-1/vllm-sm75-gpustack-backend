@@ -45,16 +45,18 @@
     },
     "gdn_tc": {
       "default": "off",
-      "status": "implemented_pending_gate",
-      "note": "borrowed vllm-turing tensor-core GDN chunk prefill (mma.sync m16n8k8, sm_75); requires --gdn-prefill-backend=triton. L2 parity 7.2e-04; L4 prefill +6.5/+12.0/+10.1% at ~8K/~32K/~126K. L3 OPEN: same-process repeats of greedy prompts already diverge more than the A/B difference (7-225 chars on one prompt), most likely prefix-cache-induced shape changes; needs cache_salt harness.",
+      "status": "verified",
+      "note": "tensor-core GDN chunk prefill (mma.sync m16n8k8, borrowed from vllm-turing). REQUIRES --gdn-prefill-backend=triton on the launch line. L2 parity 7.2e-04 vs flashqla; L3 teacher-forced logprob delta 0.0035 nats (noise band 0.002-0.005); L4 prefill +6.5%/+12.0%/+10.1% at ~8K/~32K/~126K.",
       "l4_gain_pct": 10.1
     }
   },
   "auto_enabled": [
-    "gemv_m1"
+    "gemv_m1",
+    "gdn_tc"
   ],
   "verified_items": [
-    "gemv_m1"
+    "gemv_m1",
+    "gdn_tc"
   ],
   "baseline_equivalent_when_off": true,
   "note": "gemv_m1 verified on 2026-10-26 under the 1% L4 gate (was 3%). Items 2/4/6 are already fused upstream and stay out."
