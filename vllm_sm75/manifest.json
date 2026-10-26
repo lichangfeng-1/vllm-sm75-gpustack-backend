@@ -36,6 +36,12 @@
       "status": "verified",
       "note": "Triton M=1 GEMV on 3 shapes; L2 rel err 5e-6/1.9e-4/0; L4 same-tool A/B 64.32 -> 65.24 tok/s (+1.4%), 5 vs 3 runs, 512 prompt/1024 out",
       "l4_gain_pct": 1.4
+    },
+    "ar_prefill": {
+      "default": "off",
+      "status": "rejected",
+      "note": "tried to size the PCIe-IPC workspace for prefill batches (it is max(capture_sizes)*hidden=16*2560 today, so every prefill AR falls back to NCCL). Enlarging the allocation only (no extra tuning) made prefill SLOWER: 2824 tok/s @7909 and 2612 @31595 vs baseline 3612 @8192 and 3074 @32768 (-15~22%). Root cause: the decode-tuned configs do not transfer to 21MB messages. Rejected 2026-10-26.",
+      "l4_gain_pct": -18.5
     }
   },
   "auto_enabled": [
