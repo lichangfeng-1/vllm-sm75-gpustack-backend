@@ -54,6 +54,12 @@
       "status": "rejected",
       "note": "chunk RowParallelLinear over tokens and issue async all-reduce per chunk so the next chunk's GEMM overlaps the collective; return_bias layers (GDN out_proj) included. Same-image A/B on 2026-10-26: on 2306.6/10081.5 ms vs off 2266.7/10021.7 ms at ~7.9K/~31.6K (5-run medians) - no gain, slightly slower. Only ~48 of ~98 AR launches per prefill step are reachable here; MoE reduce (48) and embedding/PLE stay outside. Rejected under the 1% gate and left default-off.",
       "l4_gain_pct": -0.05
+    },
+    "ar_q8_probe": {
+      "default": "off",
+      "status": "probe",
+      "note": "MEASUREMENT ONLY, not an optimization. Quantizes the row-parallel prefill output to fp8-e4m3 (per token) while the all-reduce itself stays fp16, to measure the precision cost an 8-bit collective would pay. Gate: run L3 teacher-forced logprobs with VLLM_SM75_AR_Q8_PROBE=0/1 and compare against the 0.002-0.005 nats noise band before writing any collective kernel.",
+      "l4_gain_pct": null
     }
   },
   "auto_enabled": [
@@ -65,5 +71,5 @@
     "gdn_tc"
   ],
   "baseline_equivalent_when_off": true,
-  "note": "gemv_m1 verified on 2026-10-26 under the 1% L4 gate (was 3%). Items 2/4/6 are already fused upstream and stay out."
+  "note": "gemv_m1 verified on 2026-10-26 under the 1% L4 gate (was 3%). Items 2/4/6 are already fused upstream and stay out. ar_q8_probe is a measurement gate, never auto-enabled."
 }
