@@ -46,7 +46,7 @@
     "gdn_tc": {
       "default": "off",
       "status": "implemented_pending_gate",
-      "note": "borrowed vllm-turing tensor-core GDN chunk prefill (mma.sync m16n8k8, sm_75). Requires --gdn-prefill-backend=triton. L2 parity 7.2e-04 vs flashqla; L4 prefill +6.5%/+12.0%/+10.1% at ~8K/~32K/~126K. L3 fingerprint still to re-run before this may be auto-enabled.",
+      "note": "borrowed vllm-turing tensor-core GDN chunk prefill (mma.sync m16n8k8, sm_75); requires --gdn-prefill-backend=triton. L2 parity 7.2e-04; L4 prefill +6.5/+12.0/+10.1% at ~8K/~32K/~126K. L3 OPEN: same-process repeats of greedy prompts already diverge more than the A/B difference (7-225 chars on one prompt), most likely prefix-cache-induced shape changes; needs cache_salt harness.",
       "l4_gain_pct": 10.1
     }
   },

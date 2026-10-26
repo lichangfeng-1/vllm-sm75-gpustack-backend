@@ -46,6 +46,12 @@ def install():
     tokens = int(os.environ.get("VLLM_SM75_AR_PREFILL_TOKENS", "4096"))
     orig_init = ws_cls.__init__
 
+    # HAZARD (learned the hard way, 2026-10-26): the autotuner benchmarks a
+    # COLLECTIVE kernel. Every rank tunes its own config list, so a rank that
+    # sees an extra batch size hangs while the others wait inside the collective
+    # (observed: 8 workers at ~90% CPU for >13 min, engine never healthy).
+    # Therefore this patch changes only the allocation (max_numel) and MUST NOT
+    # touch tune_batches. Keep it that way.
     def __init__(self, *args, **kwargs):
         # setup() passes max_numel = max(capture_sizes) * hidden and the same
         # list as tune_batches. Enlarging the *allocation* alone is what we want:
