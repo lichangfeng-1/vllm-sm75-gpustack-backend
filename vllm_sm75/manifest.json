@@ -48,6 +48,12 @@
       "status": "verified",
       "note": "tensor-core GDN chunk prefill (mma.sync m16n8k8, borrowed from vllm-turing). REQUIRES --gdn-prefill-backend=triton on the launch line. L2 parity 7.2e-04 vs flashqla; L3 teacher-forced logprob delta 0.0035 nats (noise band 0.002-0.005); L4 prefill +6.5%/+12.0%/+10.1% at ~8K/~32K/~126K.",
       "l4_gain_pct": 10.1
+    },
+    "ar_overlap": {
+      "default": "off",
+      "status": "implemented_pending_gate",
+      "note": "chunk RowParallelLinear over tokens and issue async all-reduce per chunk so the next chunk's GEMM overlaps the collective. Off unless VLLM_SM75_AR_OVERLAP=1; split=2, min_tokens=1024; skipped during graph capture.",
+      "l4_gain_pct": null
     }
   },
   "auto_enabled": [
