@@ -1,0 +1,186 @@
+"""L1 gate tests for vllm_sm75 — runs on CPU, no GPU needed.
+
+Run:  python -m pytest tests/test_sm75_gate.py -q
+ or:  python tests/test_sm75_gate.py
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import vllm_sm75 as m  # noqa: E402
+
+
+def _reset():
+    m._INSTALLED = False
+    m._CC_OK = None
+    os.environ.pop("VLLM_SM75_OPT", None)
+    for k in list(os.environ):
+        if k.startswith("VLLM_SM75_") and k != "VLLM_SM75_OPT":
+            os.environ.pop(k)
+    # Keep the CPU-only suite importable: an auto-enabled item would otherwise be
+    # imported by install(), and its module needs torch/triton.
+    from vllm_sm75 import registry
+    for name in registry.ITEMS:
+        os.environ["VLLM_SM75_" + name.upper()] = "0"
+
+
+def _force_cc(ok):
+    m._CC_OK = ok
+
+
+def test_opt_zero_disables_everything():
+    _reset()
+    _force_cc(True)
+    os.environ["VLLM_SM75_OPT"] = "0"
+    os.environ["VLLM_SM75_HC_FUSE"] = "1"
+    assert m.opt_mode() == "0"
+    assert m.enabled("hc_fuse") is False
+
+
+def test_bad_capability_disables_everything():
+    _reset()
+    _force_cc(False)
+    os.environ["VLLM_SM75_OPT"] = "1"
+    os.environ["VLLM_SM75_HC_FUSE"] = "1"
+    assert m.enabled("hc_fuse") is False
+
+
+def test_auto_off_when_not_in_auto_enabled():
+    _reset()
+    _force_cc(True)
+    m.opt_mode()  # default auto
+    assert m.enabled("hc_fuse") is False  # AUTO_ENABLED only lists verified items
+
+
+def test_explicit_item_flag_wins_over_auto():
+    _reset()
+    _force_cc(True)
+    os.environ["VLLM_SM75_HC_FUSE"] = "1"
+    assert m.enabled("hc_fuse") is True
+    os.environ["VLLM_SM75_HC_FUSE"] = "0"
+    assert m.enabled("hc_fuse") is False
+
+
+def test_install_with_opt_zero_loads_no_submodule():
+    _reset()
+    _force_cc(True)
+    os.environ["VLLM_SM75_OPT"] = "0"
+    before = {k for k in sys.modules if k.startswith("vllm_sm75.")}
+    m.install()
+    after = {k for k in sys.modules if k.startswith("vllm_sm75.")}
+    assert after == before, "submodules loaded while OPT=0: %s" % (after - before)
+
+
+def test_install_idempotent():
+    _reset()
+    _force_cc(True)
+    m.install()
+    m.install()
+    assert m._INSTALLED is True
+
+
+def test_registry_never_installs_unimplemented():
+    _reset()
+    _force_cc(True)
+    os.environ["VLLM_SM75_OPT"] = "1"
+    from vllm_sm75 import registry
+    names = registry.installable(lambda name: True)
+    for name in names:
+        assert registry.ITEMS[name].get("status") not in (
+            "not implemented", "already_fused_upstream"), \
+            "unimplemented item would be installed: %s" % name
+    assert "hc_fuse" not in names and "gdn_fuse" not in names and "qsa_merge" not in names
+
+
+def test_auto_enabled_requires_l4_gain():
+    """AUTO_ENABLED may only hold items that passed L4 with >= 1% same-ruler gain."""
+    from vllm_sm75 import registry
+    for name in registry.AUTO_ENABLED:
+        meta = registry.ITEMS[name]
+        assert meta.get("status") == "verified", "%s auto-enabled at status %r" % (
+            name, meta.get("status"))
+        gain = meta.get("l4_gain_pct")
+        assert gain is not None and gain >= 1.0, "%s auto-enabled with gain %r" % (name, gain)
+
+
+def test_gemv_allowlist_is_empty_by_default():
+    """gemv_m1 must stay a no-op until a shape is measured to beat cuBLAS."""
+    import json
+    from vllm_sm75 import registry
+    path = os.path.join(os.path.dirname(registry.__file__), "manifest.json")
+    with open(path, encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    assert manifest["items"]["gemv_m1"]["status"] in (
+        "implemented_pending_gate", "verified", "rejected")
+    if manifest["items"]["gemv_m1"]["status"] != "verified":
+        assert "gemv_m1" not in manifest["auto_enabled"]
+
+
+def test_invalid_opt_fails_closed():
+    _reset()
+    _force_cc(True)
+    for bad in ("off", "false", "yes", "2"):
+        os.environ["VLLM_SM75_OPT"] = bad
+        assert m.opt_mode() == "0", "VLLM_SM75_OPT=%r must fail closed, got %r" % (
+            bad, m.opt_mode())
+        assert m.enabled("gdn_tc") is False
+
+
+def test_item_modules_do_not_read_their_own_switch():
+    """The gate lives in registry.py only; a second env check inside an item is a
+    silent no-op generator (gdn_tc shipped with exactly that bug on 2026-10-26)."""
+    import json
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1] / "vllm_sm75"
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    for item in manifest["items"]:
+        path = root / (item + ".py")
+        if not path.exists():
+            path = root / item / "__init__.py"
+        if not path.exists():
+            continue
+        src = path.read_text(encoding="utf-8")
+        env = "VLLM_SM75_" + item.upper()
+        for quoted in ('"%s"' % env, "'%s'" % env):
+            assert quoted not in src, (
+                "%s reads its own switch %s; move the gate to registry.py" % (path.name, env))
+
+
+def test_install_isolates_item_failures():
+    """Upstream calls install() unguarded: one broken item must not abort startup."""
+    from vllm_sm75 import registry
+    names = registry.installable(lambda name: True)
+    assert "gdn_tc" in names and len(names) >= 2, names
+    calls = []
+
+    class _Stub:
+        def __init__(self, name):
+            self.name = name
+
+        def install(self):
+            calls.append(self.name)
+            if self.name == "gdn_tc":
+                raise RuntimeError("boom")
+
+    class _Importer:
+        def __call__(self, path):
+            return _Stub(path.rsplit(".", 1)[-1])
+
+    failed = registry.install_all(lambda name: True, importer=_Importer())
+    assert failed == ["gdn_tc"], failed
+    assert set(calls) == set(names), "a failing item stopped the others: %s" % calls
+
+
+if __name__ == "__main__":
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    failed = 0
+    for fn in fns:
+        try:
+            fn()
+            print("PASS", fn.__name__)
+        except AssertionError as e:
+            failed += 1
+            print("FAIL", fn.__name__, e)
+    print("\n%d passed, %d failed" % (len(fns) - failed, failed))
+    sys.exit(1 if failed else 0)

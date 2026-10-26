@@ -1,0 +1,17 @@
+# Thin experiment layer: v13 baseline + the gated vllm_sm75 package.
+#
+# Used for L4 A/B before the package is folded into the main image recipe.
+# All items default to off, so this image with VLLM_SM75_OPT unset is meant to be
+# behaviour-identical to v13.
+#
+#   docker build -f docker/Dockerfile.sm75opt-thin -t vllm-sm75-gpustack:v0.1.7-beta2-v13-opt1 .
+FROM vllm-sm75-gpustack:v0.1.7-beta2-v13
+
+COPY vllm_sm75 /opt/vllm-sm75/pkg/vllm_sm75
+COPY docker/helpers/install_vllm_sm75.py /tmp/install_vllm_sm75.py
+
+RUN python3 /tmp/install_vllm_sm75.py /opt/vllm-sm75/pkg && \
+    rm -f /tmp/install_vllm_sm75.py && \
+    python3 -c "import vllm_sm75, importlib.metadata as m; \
+print('vllm_sm75', vllm_sm75.__file__); \
+print([ (e.name, e.value) for e in m.entry_points(group='vllm.general_plugins') ])"

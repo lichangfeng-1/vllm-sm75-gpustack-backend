@@ -1,0 +1,69 @@
+{
+  "package": "vllm_sm75",
+  "version": "0.1.0",
+  "base_image": "vllm-sm75-gpustack:v0.1.7-beta2-v13",
+  "base_image_id": "b4ec911c88b7",
+  "gate_order": [
+    "compute_capability == (7, 5)",
+    "VLLM_SM75_OPT in {auto, 0, 1}",
+    "per-item VLLM_SM75_<ITEM> in {auto, 0, 1}",
+    "explicit launch arguments"
+  ],
+  "defaults": {
+    "VLLM_SM75_OPT": "auto"
+  },
+  "items": {
+    "hc_fuse": {
+      "default": "off",
+      "status": "already_fused_upstream",
+      "note": "_hc_combine_norm already fuses combine+norm",
+      "l4_gain_pct": null
+    },
+    "gdn_fuse": {
+      "default": "off",
+      "status": "already_fused_upstream",
+      "note": "fused_recurrent_gated_delta_rule_packed_decode",
+      "l4_gain_pct": null
+    },
+    "qsa_merge": {
+      "default": "off",
+      "status": "already_fused_upstream",
+      "note": "_qsa_pre_indexer_kernel is active",
+      "l4_gain_pct": null
+    },
+    "gemv_m1": {
+      "default": "off",
+      "status": "verified",
+      "note": "Triton M=1 GEMV on 3 shapes; L2 rel err 5e-6/1.9e-4/0; L4 same-tool A/B 64.32 -> 65.24 tok/s (+1.4%), 5 vs 3 runs, 512 prompt/1024 out PLANS holds TP8-local (N, K) shapes (16384/8, K/8, 1280/8).",
+      "l4_gain_pct": 1.4
+    },
+    "ar_prefill": {
+      "default": "off",
+      "status": "rejected",
+      "note": "tried to size the PCIe-IPC workspace for prefill batches (it is max(capture_sizes)*hidden=16*2560 today, so every prefill AR falls back to NCCL). Enlarging the allocation only (no extra tuning) made prefill SLOWER: 2824 tok/s @7909 and 2612 @31595 vs baseline 3612 @8192 and 3074 @32768 (-15~22%). Root cause: the decode-tuned configs do not transfer to 21MB messages. Rejected 2026-10-26.",
+      "l4_gain_pct": -18.5
+    },
+    "gdn_tc": {
+      "default": "off",
+      "status": "verified",
+      "note": "tensor-core GDN chunk prefill (mma.sync m16n8k8, borrowed from vllm-turing). REQUIRES --gdn-prefill-backend=triton on the launch line. L2 parity 7.2e-04 vs flashqla; L3 teacher-forced logprob delta 0.0035 nats (noise band 0.002-0.005); L4 prefill +6.5%/+12.0%/+10.1% at ~8K/~32K/~126K.",
+      "l4_gain_pct": 10.1
+    },
+    "ar_overlap": {
+      "default": "off",
+      "status": "rejected",
+      "note": "chunk RowParallelLinear over tokens and issue async all-reduce per chunk so the next chunk's GEMM overlaps the collective; return_bias layers (GDN out_proj) included. Same-image A/B on 2026-10-26: on 2306.6/10081.5 ms vs off 2266.7/10021.7 ms at ~7.9K/~31.6K (5-run medians) - no gain, slightly slower. Only ~48 of ~98 AR launches per prefill step are reachable here; MoE reduce (48) and embedding/PLE stay outside. Rejected under the 1% gate and left default-off.",
+      "l4_gain_pct": -0.05
+    }
+  },
+  "auto_enabled": [
+    "gemv_m1",
+    "gdn_tc"
+  ],
+  "verified_items": [
+    "gemv_m1",
+    "gdn_tc"
+  ],
+  "baseline_equivalent_when_off": true,
+  "note": "gemv_m1 verified on 2026-10-26 under the 1% L4 gate (was 3%). Items 2/4/6 are already fused upstream and stay out."
+}

@@ -163,6 +163,18 @@ EXTENSIONS: dict[str, object] = {
     "VLLM_AUTO_SLEEP_PAGE_CACHE_KEEP_INTERVAL": lambda: float(
         os.getenv("VLLM_AUTO_SLEEP_PAGE_CACHE_KEEP_INTERVAL", "600")
     ),
+    # 按 rank 只读自己那组权重文件(启动加速)。1 = 开; 默认 0 = 完全走上游
+    # 加载路径(等于现基线)。开关只改"读哪些文件", 不改张量内容与名字; 任何
+    # 不匹配(模型 index sha、tp_size、分片缺失)都自动回退原路径并打 warning。
+    # 见 model_executor/model_loader/sm75_rank_shards.py。此处用 os.getenv 直读,
+    # 注册是为了让 validate_environ 不告警。
+    "VLLM_SM75_EP_SHARDED_LOAD": lambda: os.getenv(
+        "VLLM_SM75_EP_SHARDED_LOAD", "0"
+    ),
+    # 离线重排产物根目录(宿主 /home 下), 每个 rank 一个子目录。
+    "VLLM_SM75_EP_SHARD_ROOT": lambda: os.getenv(
+        "VLLM_SM75_EP_SHARD_ROOT", "/home/laryyli/flashnext-ep8-shards"
+    ),
 }
 
 

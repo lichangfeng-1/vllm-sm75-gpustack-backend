@@ -1,7 +1,7 @@
 # vLLM-SM75 × GPUStack 自定义后端（v0.1.7-beta2 线；GPUStack 2.3.0 实测兼容）
 
 把 SM75 版 vLLM 做成 GPUStack 的自定义后端，让 T4 / T10 这类 Turing 老卡在 GPUStack 里跑大模型。
-本仓只服务这一条线；上游的 Ultra／面板独立部署形态不在本仓的交付范围内（见文末"与上游的关系"）。
+**本仓兼得两种形态**：既交付 **GPUStack 自定义后端**（模型行里跑 `vllm serve`），也交付 **Ultra／面板独立部署形态**（同一枚镜像用 `runtime-entrypoint.py` 单独起面板与 Ultra 工作台）。两者共用同一条构建链、同一套 SM75 适配与扩展；选哪种只取决于入口与 env（见 §1、§3、§4 与文末"与上游的关系"）。
 
 ---
 
@@ -15,6 +15,34 @@
 另有一组环境变量把底座已有的 QSA、FlashQLA、自建调度器打开——那是**启用**，不是我们实现。
 
 **交付默认路线（2026-10-21 定）= 一条命令从 vLLM 基座构建的最快档（`-v7`）**：在既有四层链末端加一层运行期包钉版，把 transformers/tokenizers 钉到 **5.15.1/0.22.2**；同机同尺 GPUStack 面板直连 **56.83–57.04**（A 路线，输出 1024，并发 1，SMT Off；2026-10-21 同引擎层复核），与历史 AutoRound 57.04 同档。**同一枚镜像两种用法**：GPUStack 后端（入口 `panel-sidecar.py vllm serve`）或单独面板（入口 `runtime-entrypoint.py`，见 run-book §11）。回退：`--no-tf-pin` 产出基座原版 v4（56.26/56.97）；有旧 Ultra 镜像的机器也可用 `build-oldpanel-backend-v1.sh` 薄层路线（57.15，等价备选）。
+
+### 1.1 门控优化包 `vllm_sm75`（2026-10-26 起）
+
+镜像里多了一个与 `vllm` 同级的顶层包 `site-packages/vllm_sm75/`，它自己注册了
+`vllm.general_plugins` 入口点，所以**不需要改 vLLM 任何文件**，引擎每次启动会自动调用
+`vllm_sm75.install()`。全关时它一行子模块都不加载，行为与没有这个包完全一致。
+
+四级门控（逐级短路）：
+
+| 级 | 条件 | 关掉的办法 |
+|---|---|---|
+| ① | 计算能力必须是 7.5（Turing） | 非 7.5 的卡自动跳过 |
+| ② | `VLLM_SM75_OPT` = `auto` / `0` / `1` | `VLLM_SM75_OPT=0` 一刀全关＝现基线 |
+| ③ | 逐项开关 `VLLM_SM75_<ITEM>` = `auto` / `0` / `1` | 单项关：`VLLM_SM75_GEMV_M1=0` |
+| ④ | 启动参数显式指定 | 最高优先 |
+
+`auto` **不等于全开**：只开登记表里已经过 L4 性能门的项（门＝同尺 A/B ≥ **1%**、3–5 次中位）。
+登记表是包里的 `manifest.json`，当前状态：
+
+| 项 | 开关 | 状态 | 说明 |
+|---|---|---|---|
+| `gemv_m1` | `VLLM_SM75_GEMV_M1` | ✅ verified，`auto` 生效 | decode 的 M=1 GEMV，3 个形状换用 Triton 内核；L2 相对误差 5e-6/1.9e-4/0，端到端 **64.32 → 65.24 tok/s（+1.4%）** |
+| `gdn_tc` | `VLLM_SM75_GDN_TC` | ✅ verified，`auto` 生效 | GDN 预填换成张量核内核（`mma.sync m16n8k8`）。**必须同时加 `--gdn-prefill-backend=triton`**（该项替换的是 FLA 的 chunk 内核）；预填 +6.5%/+12.0%/+10.1%（8K/32K/126K），logprob 差 0.0035 nats |
+| `ar_prefill` | `VLLM_SM75_AR_PREFILL` | ❌ 已判负（默认关） | 让 PCIe-IPC 也服务预填的 21 MB all-reduce：实测反而慢 15–22%，NCCL ring 在这个尺寸更好 |
+| `ar_overlap` | `VLLM_SM75_AR_OVERLAP` | ❌ 已判负（默认关） | 把 `RowParallelLinear` 按 token 切块、异步 all-reduce，想用下一块 GEMM 盖住通信。同镜像 A/B：开 2306.6/10081.5 ms vs 关 2266.7/10021.7 ms（约 7.9K/31.6K 预填，5 次中位），无收益；且每步约 98 次 AR 里它只能碰到 48 次（MoE 的 48 次与 embedding/PLE 在外） |
+| `hc_fuse` / `gdn_fuse` / `qsa_merge` | 同名 | 已融合，永不加载 | 复核证明上游已经融合好，不需要重写 |
+
+新增改动一律遵守：**只新增、不覆盖**镜像里已有文件；每项独立开关；默认关；全关等于原基线。
 
 ## 2 运行环境（实测下限，不保证兼容上限）
 

@@ -98,6 +98,12 @@ COPY vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py \
     /tmp/sm75-overlay/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py
 COPY vllm/model_executor/layers/quantization/kv_cache.py \
     /tmp/sm75-overlay/model_executor/layers/quantization/kv_cache.py
+COPY vllm/model_executor/model_loader/default_loader.py \
+    /tmp/sm75-overlay/model_executor/model_loader/default_loader.py
+COPY vllm/model_executor/model_loader/sm75_rank_shards.py \
+    /tmp/sm75-overlay/model_executor/model_loader/sm75_rank_shards.py
+COPY vllm/model_executor/model_loader/ep_weight_filter.py \
+    /tmp/sm75-overlay/model_executor/model_loader/ep_weight_filter.py
 COPY vllm/model_executor/layers/quantization/utils/marlin_utils_fp8.py \
     /tmp/sm75-overlay/model_executor/layers/quantization/utils/marlin_utils_fp8.py
 COPY vllm/v1/attention/backends/flashinfer.py \
@@ -179,6 +185,9 @@ RUN python3 /tmp/verify_sm75_image.py && \
 COPY docker/next /opt/vllm-sm75/next
 RUN python3 /opt/vllm-sm75/next/install.py
 COPY docker/next/templates /opt/vllm-sm75/templates
+COPY vllm_sm75 /opt/vllm-sm75/pkg/vllm_sm75
+COPY docker/helpers/install_vllm_sm75.py /tmp/install_vllm_sm75.py
+RUN python3 /tmp/install_vllm_sm75.py /opt/vllm-sm75/pkg && rm /tmp/install_vllm_sm75.py
 
 COPY docker/speculative /opt/vllm-sm75/speculative
 COPY docker/helpers/install_speculative.py /tmp/install_speculative.py
