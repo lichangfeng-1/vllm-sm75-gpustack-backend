@@ -42,6 +42,12 @@
       "status": "rejected",
       "note": "tried to size the PCIe-IPC workspace for prefill batches (it is max(capture_sizes)*hidden=16*2560 today, so every prefill AR falls back to NCCL). Enlarging the allocation only (no extra tuning) made prefill SLOWER: 2824 tok/s @7909 and 2612 @31595 vs baseline 3612 @8192 and 3074 @32768 (-15~22%). Root cause: the decode-tuned configs do not transfer to 21MB messages. Rejected 2026-10-26.",
       "l4_gain_pct": -18.5
+    },
+    "gdn_tc": {
+      "default": "off",
+      "status": "implemented_pending_gate",
+      "note": "borrowed vllm-turing tensor-core GDN chunk prefill (mma.sync m16n8k8, sm_75). Requires --gdn-prefill-backend=triton. L2 parity 7.2e-04 vs flashqla; L4 prefill +6.5%/+12.0%/+10.1% at ~8K/~32K/~126K. L3 fingerprint still to re-run before this may be auto-enabled.",
+      "l4_gain_pct": 10.1
     }
   },
   "auto_enabled": [
