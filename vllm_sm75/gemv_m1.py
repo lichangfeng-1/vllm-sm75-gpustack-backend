@@ -20,7 +20,7 @@ PLANS = {}
 
 
 @triton.jit
-def _gemv_kernel(W, X, Y, N, K, stride_wn,
+def _gemv_kernel(X, W, Y, N, K, stride_wn,
                  BN: tl.constexpr, BK: tl.constexpr):
     pid = tl.program_id(0)
     offs_n = pid * BN + tl.arange(0, BN)
