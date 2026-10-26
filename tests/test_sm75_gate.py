@@ -80,9 +80,36 @@ def test_registry_never_installs_unimplemented():
     _force_cc(True)
     os.environ["VLLM_SM75_OPT"] = "1"
     from vllm_sm75 import registry
-    called = []
-    registry.install_all(lambda name: called.append(name) or True)
-    assert called == [], "unimplemented items were installed: %s" % called
+    names = registry.installable(lambda name: True)
+    for name in names:
+        assert registry.ITEMS[name].get("status") not in (
+            "not implemented", "already_fused_upstream"), \
+            "unimplemented item would be installed: %s" % name
+    assert "hc_fuse" not in names and "gdn_fuse" not in names and "qsa_merge" not in names
+
+
+def test_auto_enabled_requires_l4_gain():
+    """AUTO_ENABLED may only hold items that passed L4 with >= 3% same-ruler gain."""
+    from vllm_sm75 import registry
+    for name in registry.AUTO_ENABLED:
+        meta = registry.ITEMS[name]
+        assert meta.get("status") == "verified", "%s auto-enabled at status %r" % (
+            name, meta.get("status"))
+        gain = meta.get("l4_gain_pct")
+        assert gain is not None and gain >= 3.0, "%s auto-enabled with gain %r" % (name, gain)
+
+
+def test_gemv_allowlist_is_empty_by_default():
+    """gemv_m1 must stay a no-op until a shape is measured to beat cuBLAS."""
+    import json
+    from vllm_sm75 import registry
+    path = os.path.join(os.path.dirname(registry.__file__), "manifest.json")
+    with open(path, encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    assert manifest["items"]["gemv_m1"]["status"] in (
+        "implemented_pending_gate", "verified", "rejected")
+    if manifest["items"]["gemv_m1"]["status"] != "verified":
+        assert "gemv_m1" not in manifest["auto_enabled"]
 
 
 if __name__ == "__main__":

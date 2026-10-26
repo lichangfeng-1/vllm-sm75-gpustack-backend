@@ -27,7 +27,9 @@ def _capability_ok():
 
             _CC_OK = bool(torch.cuda.is_available()) and torch.cuda.get_device_capability() == (7, 5)
         except Exception:  # noqa: BLE001 - import-time environments can be odd
-            _CC_OK = False
+            # Do not cache a transient failure: a CPU-only utility process must not
+            # permanently disable the gate for the engine process that follows.
+            return False
     return _CC_OK
 
 

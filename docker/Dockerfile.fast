@@ -90,6 +90,9 @@ FROM runtime AS final
 COPY docker/next /opt/vllm-sm75/next
 RUN python3 /opt/vllm-sm75/next/install.py
 COPY docker/next/templates /opt/vllm-sm75/templates
+COPY vllm_sm75 /opt/vllm-sm75/pkg/vllm_sm75
+COPY docker/helpers/install_vllm_sm75.py /tmp/install_vllm_sm75.py
+RUN python3 /tmp/install_vllm_sm75.py /opt/vllm-sm75/pkg && rm /tmp/install_vllm_sm75.py
 # Inherit the official ENTRYPOINT ["vllm", "serve"] and unset CMD.
 # Keep upstream CLI startup presentation and default UI assets.
 

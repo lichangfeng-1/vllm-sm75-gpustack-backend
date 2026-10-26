@@ -185,6 +185,9 @@ RUN python3 /tmp/verify_sm75_image.py && \
 COPY docker/next /opt/vllm-sm75/next
 RUN python3 /opt/vllm-sm75/next/install.py
 COPY docker/next/templates /opt/vllm-sm75/templates
+COPY vllm_sm75 /opt/vllm-sm75/pkg/vllm_sm75
+COPY docker/helpers/install_vllm_sm75.py /tmp/install_vllm_sm75.py
+RUN python3 /tmp/install_vllm_sm75.py /opt/vllm-sm75/pkg && rm /tmp/install_vllm_sm75.py
 
 COPY docker/speculative /opt/vllm-sm75/speculative
 COPY docker/helpers/install_speculative.py /tmp/install_speculative.py
