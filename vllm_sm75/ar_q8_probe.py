@@ -30,7 +30,7 @@ def _capturing():
         return False
 
 
-def install():
+def _install_dense():
     from vllm.model_executor.layers.linear import RowParallelLinear
 
     if getattr(RowParallelLinear, "_sm75_q8_probe_patched", False):
@@ -47,3 +47,30 @@ def install():
 
     RowParallelLinear.forward = forward
     RowParallelLinear._sm75_q8_probe_patched = True
+
+
+def _install_moe():
+    """Sub-option VLLM_SM75_AR_Q8_PROBE_MOE=1: also price the MoE late reduce."""
+    import os
+
+    from vllm.model_executor.layers.fused_moe.runner.moe_runner import MoERunner
+
+    if getattr(MoERunner, "_sm75_q8_probe_moe_patched", False):
+        return
+    orig = MoERunner._maybe_reduce_final_output
+
+    def reduce(self, states, trunc_size, output_is_reduced=None):
+        out = orig(self, states, trunc_size, output_is_reduced)
+        if states.shape[0] < 1024 or _capturing():
+            return out
+        return _q8(out)
+
+    MoERunner._maybe_reduce_final_output = reduce
+    MoERunner._sm75_q8_probe_moe_patched = True
+
+
+def install():
+    _install_dense()
+    import os
+    if os.environ.get("VLLM_SM75_AR_Q8_PROBE_MOE", "0") == "1":
+        _install_moe()
