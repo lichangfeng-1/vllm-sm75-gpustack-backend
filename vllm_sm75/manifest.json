@@ -60,6 +60,18 @@
       "status": "probe",
       "note": "MEASUREMENT ONLY, not an optimization. Quantizes the row-parallel prefill output to fp8-e4m3 (per token) while the all-reduce itself stays fp16, to measure the precision cost an 8-bit collective would pay. Gate: run L3 teacher-forced logprobs with VLLM_SM75_AR_Q8_PROBE=0/1 and compare against the 0.002-0.005 nats noise band before writing any collective kernel.",
       "l4_gain_pct": null
+    },
+    "qsa_slice": {
+      "default": "off",
+      "status": "rejected",
+      "note": "Larger row slices in QSASelectedPrefillFP8.run (upstream fixed at 1024 rows). Each slice costs Python/launch overhead with the GPU idle; FlashInfer workspace_size is 0, the only cost is the pages buffer (2.1 MB -> 8.4 MB at 4096 rows). Env VLLM_SM75_QSA_SLICE_ROWS=2048/4096/8192. Math unchanged (same runner, same rows per attention call, only batched larger). Measured 2026-10-27 on row 26 (opt12): 8K 2019.1 -> 2000.7 ms (-0.9%), 32K 8643.5 -> 8646.1 ms (+0.0%); not the source of the prefill gaps. Default off, kept for reference.",
+      "l4_gain_pct": null
+    },
+    "qsa_timing": {
+      "default": "off",
+      "status": "probe",
+      "note": "MEASUREMENT ONLY. Wraps the QSA selected-page run/_prepare/runner.run with perf_counter and logs calls slower than VLLM_SM75_QSA_TIMING_MS (default 2 ms), to attribute the GPU-idle gaps seen before _selected_subpages. No behavior or precision change.",
+      "l4_gain_pct": null
     }
   },
   "auto_enabled": [
