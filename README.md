@@ -39,6 +39,7 @@
 | `gemv_m1` | `VLLM_SM75_GEMV_M1` | ✅ verified，`auto` 生效 | decode 的 M=1 GEMV，3 个形状换用 Triton 内核；L2 相对误差 5e-6/1.9e-4/0，端到端 **64.32 → 65.24 tok/s（+1.4%）** |
 | `gdn_tc` | `VLLM_SM75_GDN_TC` | ✅ verified，`auto` 生效 | GDN 预填换成张量核内核（`mma.sync m16n8k8`）。**必须同时加 `--gdn-prefill-backend=triton`**（该项替换的是 FLA 的 chunk 内核）；预填 +6.5%/+12.0%/+10.1%（8K/32K/126K），logprob 差 0.0035 nats |
 | `ar_prefill` | `VLLM_SM75_AR_PREFILL` | ❌ 已判负（默认关） | 让 PCIe-IPC 也服务预填的 21 MB all-reduce：实测反而慢 15–22%，NCCL ring 在这个尺寸更好 |
+| `ar_overlap` | `VLLM_SM75_AR_OVERLAP` | ❌ 已判负（默认关） | 把 `RowParallelLinear` 按 token 切块、异步 all-reduce，想用下一块 GEMM 盖住通信。同镜像 A/B：开 2306.6/10081.5 ms vs 关 2266.7/10021.7 ms（约 7.9K/31.6K 预填，5 次中位），无收益；且每步约 98 次 AR 里它只能碰到 48 次（MoE 的 48 次与 embedding/PLE 在外） |
 | `hc_fuse` / `gdn_fuse` / `qsa_merge` | 同名 | 已融合，永不加载 | 复核证明上游已经融合好，不需要重写 |
 
 新增改动一律遵守：**只新增、不覆盖**镜像里已有文件；每项独立开关；默认关；全关等于原基线。

@@ -19,7 +19,11 @@ Guards:
 
 Env: VLLM_SM75_AR_OVERLAP (auto|0|1), VLLM_SM75_AR_OVERLAP_SPLIT (default 2),
      VLLM_SM75_AR_OVERLAP_MIN_TOKENS (default 1024).
-Status: experimental. Must pass L2 (bitwise vs sync AR), L3 (logprob) and L4 (>=1%).
+Status: rejected 2026-10-26. Same-image A/B (split=2, min_tokens=1024) gave
+2306.6/10081.5 ms with the flag on vs 2266.7/10021.7 ms with it off at ~7.9K/~31.6K
+prefill (5-run medians) — no gain. Kept default-off for reference; only 48 of the
+~98 AR launches per prefill step are reachable from this insertion point (MoE's 48
+and the embedding/PLE reductions are elsewhere).
 """
 import os
 
