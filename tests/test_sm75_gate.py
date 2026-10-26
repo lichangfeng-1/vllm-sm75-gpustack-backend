@@ -50,7 +50,7 @@ def test_auto_off_when_not_in_auto_enabled():
     _reset()
     _force_cc(True)
     m.opt_mode()  # default auto
-    assert m.enabled("hc_fuse") is False  # AUTO_ENABLED is empty by design
+    assert m.enabled("hc_fuse") is False  # AUTO_ENABLED only lists verified items
 
 
 def test_explicit_item_flag_wins_over_auto():
@@ -115,6 +115,61 @@ def test_gemv_allowlist_is_empty_by_default():
         "implemented_pending_gate", "verified", "rejected")
     if manifest["items"]["gemv_m1"]["status"] != "verified":
         assert "gemv_m1" not in manifest["auto_enabled"]
+
+
+def test_invalid_opt_fails_closed():
+    _reset()
+    _force_cc(True)
+    for bad in ("off", "false", "yes", "2"):
+        os.environ["VLLM_SM75_OPT"] = bad
+        assert m.opt_mode() == "0", "VLLM_SM75_OPT=%r must fail closed, got %r" % (
+            bad, m.opt_mode())
+        assert m.enabled("gdn_tc") is False
+
+
+def test_item_modules_do_not_read_their_own_switch():
+    """The gate lives in registry.py only; a second env check inside an item is a
+    silent no-op generator (gdn_tc shipped with exactly that bug on 2026-10-26)."""
+    import json
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1] / "vllm_sm75"
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    for item in manifest["items"]:
+        path = root / (item + ".py")
+        if not path.exists():
+            path = root / item / "__init__.py"
+        if not path.exists():
+            continue
+        src = path.read_text(encoding="utf-8")
+        env = "VLLM_SM75_" + item.upper()
+        for quoted in ('"%s"' % env, "'%s'" % env):
+            assert quoted not in src, (
+                "%s reads its own switch %s; move the gate to registry.py" % (path.name, env))
+
+
+def test_install_isolates_item_failures():
+    """Upstream calls install() unguarded: one broken item must not abort startup."""
+    from vllm_sm75 import registry
+    names = registry.installable(lambda name: True)
+    assert "gdn_tc" in names and len(names) >= 2, names
+    calls = []
+
+    class _Stub:
+        def __init__(self, name):
+            self.name = name
+
+        def install(self):
+            calls.append(self.name)
+            if self.name == "gdn_tc":
+                raise RuntimeError("boom")
+
+    class _Importer:
+        def __call__(self, path):
+            return _Stub(path.rsplit(".", 1)[-1])
+
+    failed = registry.install_all(lambda name: True, importer=_Importer())
+    assert failed == ["gdn_tc"], failed
+    assert set(calls) == set(names), "a failing item stopped the others: %s" % calls
 
 
 if __name__ == "__main__":

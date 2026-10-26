@@ -11,9 +11,12 @@ With ``VLLM_SM75_OPT=0`` nothing in this package is imported beyond this module,
 engine must behave byte-identically to the baseline image.
 """
 
+import logging
 import os
 
 __all__ = ["install", "enabled", "opt_mode"]
+
+logger = logging.getLogger(__name__)
 
 _INSTALLED = False
 _CC_OK = None
@@ -35,7 +38,11 @@ def _capability_ok():
 
 def opt_mode():
     v = os.environ.get("VLLM_SM75_OPT", "auto").strip().lower()
-    return v if v in ("auto", "0", "1") else "auto"
+    if v in ("auto", "0", "1"):
+        return v
+    # Fail closed: a typo such as VLLM_SM75_OPT=off must not enable the auto items.
+    logger.warning("vllm_sm75: invalid VLLM_SM75_OPT=%r, treating it as '0'", v)
+    return "0"
 
 
 def enabled(item):

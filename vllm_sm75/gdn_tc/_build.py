@@ -48,8 +48,10 @@ def load(name, cutlass=False):
                 nvcc, cu13 = _nvcc()
                 inc = [f"-I{os.path.join(cu13, d)}" for d in ("include", "cccl") if os.path.isdir(os.path.join(cu13, d))]
                 extra = []
+            # Bound the build: a hung nvcc must not leave 8 workers waiting on the lock.
             subprocess.run([nvcc, "-O3", "-std=c++17", "-gencode=arch=compute_75,code=sm_75", "-shared",
-                            "-Xcompiler", "-fPIC", *extra, *inc, "-o", so + ".tmp", src], check=True)
+                            "-Xcompiler", "-fPIC", *extra, *inc, "-o", so + ".tmp", src],
+                           check=True, timeout=600)
             os.replace(so + ".tmp", so)
     _libs[name] = ctypes.CDLL(so)
     return _libs[name]

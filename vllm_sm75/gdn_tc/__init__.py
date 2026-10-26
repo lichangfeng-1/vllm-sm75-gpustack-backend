@@ -1,7 +1,7 @@
 """Tensor-core GDN chunked prefill (gdn_tc/csrc/gdn_chunk.cu).
 
 Borrowed from vllm-turing (cookjohn, commit 290fa9c), kept verbatim apart from the
-package path and the env-var gate. Only ADDED code: FLA and flashqla are untouched.
+package path and the switch wiring (the gate now lives in vllm_sm75.registry). Only ADDED code: FLA and flashqla are untouched.
 Original docstring follows.
 
 (Tensor-core GDN chunked prefill (csrc/gdn_chunk.cu) in place of FLA's Triton chunk_gated_delta_rule_fwd_h and
@@ -10,17 +10,26 @@ results; anything outside the supported case (fp16, K = 128, chunk 64, natural-e
 original Triton function. VLLM_SM75_GDN_TC=0 disables.
 chunk_gated_delta_rule_fwd itself is replaced too: the WY preparation (FLA's chunk_scaled_dot_kkt_fwd, solve_tril and
 recompute_w_u_fwd, three Triton kernels) runs as one kernel (gdn_wu) that keeps A and its inverse in shared memory;
-A is returned as None (the autograd forward does not use it). VLLM_SM75_GDN_TC_WU=0 keeps FLA's three kernels."""
+A is returned as None (the autograd forward does not use it). VLLM_SM75_GDN_TC_WU=0 keeps FLA's three kernels.
+
+The item switch itself (VLLM_SM75_GDN_TC / VLLM_SM75_OPT) is owned by ``vllm_sm75.registry``; this module is only
+imported when that gate says yes, so it must not read the item env again."""
+
 import ctypes
+import logging
 import os
 
 import torch
 
 from . import _build
 
+logger = logging.getLogger(__name__)
+
 _lib = None
 _orig = {}
-WU = os.environ.get("VLLM_SM75_GDN_TC_WU", "1") != "0"
+# Sub-option of this item (not a gate): read again in install() so the registry
+# stays the only place that decides whether gdn_tc runs at all.
+WU = True
 
 
 def lib():
@@ -155,12 +164,19 @@ def chunk_gated_delta_rule_fwd(q, k, v, g, beta, scale, initial_state, output_fi
 
 
 def install():
+    global WU
     from vllm.platforms import current_platform
     cap = current_platform.get_device_capability()
-    if cap is None or cap.to_int() != 75 or os.environ.get("VLLM_SM75_GDN_TC", "0") != "1":
+    if cap is None or cap.to_int() != 75:
         return
-    if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "GDN_TC_OFF")):  # off switch file
+    # Build now rather than inside the first prefill: a missing nvcc or a broken
+    # toolchain must degrade to the stock kernels, not 500 the first request.
+    try:
+        lib()
+    except Exception:  # noqa: BLE001 - optional item, keep FLA/flashqla working
+        logger.exception("vllm_sm75: gdn_tc preflight build failed; keeping the stock GDN kernels")
         return
+    WU = os.environ.get("VLLM_SM75_GDN_TC_WU", "1") != "0"
     from vllm.third_party.flash_linear_attention.ops import chunk as fla_chunk
     if "h" in _orig:
         return

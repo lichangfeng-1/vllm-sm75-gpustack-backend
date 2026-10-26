@@ -91,7 +91,13 @@ def _install_stubs():
 
     cuda = types.ModuleType("torch.cuda")
     cuda.get_device_capability = lambda _dev=None: (7, 5)
+    cuda.is_available = lambda: True
+    cuda.synchronize = lambda: None
     torch.cuda = cuda
+    torch.randn = lambda *shape, device=None, dtype=None: _Tensor(shape, dtype or "float16")
+    testing = types.ModuleType("torch.testing")
+    testing.assert_close = lambda got, ref, **kw: None
+    torch.testing = testing
 
     lib = types.ModuleType("torch.library")
     lib.custom_op = lambda name, mutates_args=(): (lambda fn: _CustomOp(fn))
@@ -133,10 +139,15 @@ def _install_stubs():
     linear.UnquantizedLinearMethod = UnquantizedLinearMethod
     vpe.UnquantizedEmbeddingMethod = UnquantizedEmbeddingMethod
 
+    vllm_envs = types.ModuleType("vllm.envs")
+    vllm_envs.VLLM_BATCH_INVARIANT = False
+    vllm.envs = vllm_envs
+
     mods = {
         "torch": torch, "torch.cuda": cuda, "torch.library": lib, "torch.nn": nn,
-        "torch.nn.functional": functional, "triton": triton, "triton.language": tl,
-        "vllm": vllm, "vllm.model_executor": mel,
+        "torch.nn.functional": functional, "torch.testing": testing,
+        "triton": triton, "triton.language": tl,
+        "vllm": vllm, "vllm.envs": vllm_envs, "vllm.model_executor": mel,
         "vllm.model_executor.layers": layers,
         "vllm.model_executor.layers.linear": linear,
         "vllm.model_executor.layers.vocab_parallel_embedding": vpe,
@@ -193,6 +204,11 @@ def run():
         out = LinM().apply(_Layer((12, 2560)), _Tensor((1, 2560)))
         assert out[0] == "orig_linear", out
         print("PASS non-allowlisted shape falls back")
+
+        mod._BATCH_INVARIANT = True
+        assert LinM().apply(layer, x)[0] == "orig_linear", "batch-invariant request bypassed"
+        mod._BATCH_INVARIANT = False
+        print("PASS VLLM_BATCH_INVARIANT keeps the upstream kernel")
     finally:
         for name, mod_ in saved.items():
             if mod_ is None:

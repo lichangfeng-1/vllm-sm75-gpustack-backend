@@ -34,7 +34,7 @@
     "gemv_m1": {
       "default": "off",
       "status": "verified",
-      "note": "Triton M=1 GEMV on 3 shapes; L2 rel err 5e-6/1.9e-4/0; L4 same-tool A/B 64.32 -> 65.24 tok/s (+1.4%), 5 vs 3 runs, 512 prompt/1024 out",
+      "note": "Triton M=1 GEMV on 3 shapes; L2 rel err 5e-6/1.9e-4/0; L4 same-tool A/B 64.32 -> 65.24 tok/s (+1.4%), 5 vs 3 runs, 512 prompt/1024 out PLANS holds TP8-local (N, K) shapes (16384/8, K/8, 1280/8).",
       "l4_gain_pct": 1.4
     },
     "ar_prefill": {

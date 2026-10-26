@@ -9,11 +9,20 @@ run here; this module is the Triton equivalent for SM75.
 ``PLANS`` starts **empty on purpose**: a shape is added only when the kernel beat
 cuBLAS on this GPU with the same ruler (see ``读数-gemv微基准-*.json``). An empty
 table means this item is a no-op even when ``VLLM_SM75_GEMV_M1=1``.
+
+Defences: install() compiles and self-checks every plan before vLLM starts capturing
+CUDA graphs (capture runs with zero warmups, so a JIT compile inside it is unsafe), and
+falls back to plain ``F.linear`` if the check fails; ``VLLM_BATCH_INVARIANT`` keeps the
+upstream deterministic kernel.
 """
+import logging
+
 import torch
 import torch.nn.functional as F
 import triton
 import triton.language as tl
+
+logger = logging.getLogger(__name__)
 
 # (N, K) -> (BN rows per program, BK columns per step, num_warps)
 # Filled 2026-10-26 from 读数-flashnext-gemv微基准-20261026.json: only shapes that
@@ -67,12 +76,37 @@ def _gemv_m1_fake(x, weight):
     return x.new_empty((*x.shape[:-1], weight.shape[0]))
 
 
+_BATCH_INVARIANT = False
+
+
+def _prewarm():
+    """Compile and self-check every plan before vLLM captures CUDA graphs.
+
+    vLLM captures decode graphs with ``cudagraph_num_of_warmups=0``, so the first
+    M=1 call of a process can land inside stream capture; a Triton JIT compile at
+    that point is not capture-safe. A real launch here also proves the kernel
+    agrees with cuBLAS before it is allowed anywhere near the engine.
+    """
+    if not torch.cuda.is_available():
+        return False
+    for n, k in PLANS:
+        x = torch.randn(1, k, device="cuda", dtype=torch.float16)
+        w = torch.randn(n, k, device="cuda", dtype=torch.float16)
+        got = gemv_m1(x, w)
+        ref = F.linear(x, w)
+        torch.testing.assert_close(got, ref, rtol=1e-2, atol=1e-2)
+    torch.cuda.synchronize()
+    return True
+
+
 def install():
     """Swap ``apply`` on the unquantized linear/embedding methods.
 
     Class-level so it also covers methods created before the plugin ran; the
     allowlist keeps every other shape on ``F.linear``.
     """
+    global _BATCH_INVARIANT
+    from vllm import envs
     from vllm.model_executor.layers.linear import UnquantizedLinearMethod
     from vllm.model_executor.layers.vocab_parallel_embedding import (
         UnquantizedEmbeddingMethod,
@@ -81,10 +115,20 @@ def install():
     if getattr(UnquantizedLinearMethod, "_sm75_gemv_patched", False):
         return
 
+    try:
+        if not _prewarm():
+            logger.warning("vllm_sm75: gemv_m1 skipped (no usable CUDA device)")
+            return
+    except Exception:  # noqa: BLE001 - disable the item, keep the engine alive
+        logger.exception("vllm_sm75: gemv_m1 self-check failed; staying on F.linear")
+        return
+
+    _BATCH_INVARIANT = bool(envs.VLLM_BATCH_INVARIANT)
     orig_linear = UnquantizedLinearMethod.apply
 
     def apply(self, layer, x, bias=None, **kw):
-        if bias is None and (weight := getattr(layer, "weight", None)) is not None \
+        if not _BATCH_INVARIANT and bias is None \
+                and (weight := getattr(layer, "weight", None)) is not None \
                 and weight.dim() == 2 and x.dim() == 2 \
                 and (weight.shape[0], weight.shape[1]) in PLANS:
             return gemv_m1(x, weight)
