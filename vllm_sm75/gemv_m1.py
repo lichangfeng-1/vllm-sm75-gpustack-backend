@@ -76,21 +76,23 @@ def install():
 
     orig_linear = UnquantizedLinearMethod.apply
 
-    def apply(self, layer, x, bias=None):
+    def apply(self, layer, x, bias=None, **kw):
         if bias is None and (weight := getattr(layer, "weight", None)) is not None \
                 and weight.dim() == 2 and x.dim() == 2 \
                 and (weight.shape[0], weight.shape[1]) in PLANS:
             return gemv_m1(x, weight)
-        return orig_linear(self, layer, x, bias)
+        return orig_linear(self, layer, x, bias, **kw)
 
     orig_embed = UnquantizedEmbeddingMethod.apply
 
-    def apply_embed(self, layer, x):
+    def apply_embed(self, layer, *args, **kw):
+        x = args[0] if args else kw.get("x")
         weight = getattr(layer, "weight", None)
-        if weight is not None and weight.dim() == 2 and x.dim() == 2 \
-                and (weight.shape[0], weight.shape[1]) in PLANS:
+        if (isinstance(x, torch.Tensor) and weight is not None
+                and weight.dim() == 2 and x.dim() == 2
+                and (weight.shape[0], weight.shape[1]) in PLANS):
             return gemv_m1(x, weight)
-        return orig_embed(self, layer, x)
+        return orig_embed(self, layer, *args, **kw)
 
     UnquantizedLinearMethod.apply = apply
     UnquantizedEmbeddingMethod.apply = apply_embed
