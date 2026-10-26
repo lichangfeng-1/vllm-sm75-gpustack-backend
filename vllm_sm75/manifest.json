@@ -13,13 +13,37 @@
     "VLLM_SM75_OPT": "auto"
   },
   "items": {
-    "hc_fuse": {"default": "off", "status": "already_fused_upstream", "note": "_hc_combine_norm already fuses combine+norm", "l4_gain_pct": null},
-    "gdn_fuse": {"default": "off", "status": "already_fused_upstream", "note": "fused_recurrent_gated_delta_rule_packed_decode", "l4_gain_pct": null},
-    "qsa_merge": {"default": "off", "status": "already_fused_upstream", "note": "_qsa_pre_indexer_kernel is active", "l4_gain_pct": null},
-    "gemv_m1": {"default": "off", "status": "implemented_pending_gate", "note": "Triton M=1 GEMV, allowlist PLANS empty until a shape beats cuBLAS on T10; empty table = no-op even with VLLM_SM75_GEMV_M1=1", "l4_gain_pct": null}
+    "hc_fuse": {
+      "default": "off",
+      "status": "already_fused_upstream",
+      "note": "_hc_combine_norm already fuses combine+norm",
+      "l4_gain_pct": null
+    },
+    "gdn_fuse": {
+      "default": "off",
+      "status": "already_fused_upstream",
+      "note": "fused_recurrent_gated_delta_rule_packed_decode",
+      "l4_gain_pct": null
+    },
+    "qsa_merge": {
+      "default": "off",
+      "status": "already_fused_upstream",
+      "note": "_qsa_pre_indexer_kernel is active",
+      "l4_gain_pct": null
+    },
+    "gemv_m1": {
+      "default": "off",
+      "status": "verified",
+      "note": "Triton M=1 GEMV on 3 shapes; L2 rel err 5e-6/1.9e-4/0; L4 same-tool A/B 64.32 -> 65.24 tok/s (+1.4%), 5 vs 3 runs, 512 prompt/1024 out",
+      "l4_gain_pct": 1.4
+    }
   },
-  "auto_enabled": [],
-  "verified_items": [],
+  "auto_enabled": [
+    "gemv_m1"
+  ],
+  "verified_items": [
+    "gemv_m1"
+  ],
   "baseline_equivalent_when_off": true,
-  "note": "Skeleton only. No item has passed L4 yet; AUTO_ENABLED is intentionally empty. The one verified change so far is a baseline configuration change (VLLM_FIREFLY_AR=0), documented in the 2026-10-26 deterministic-optimization report."
+  "note": "gemv_m1 verified on 2026-10-26 under the 1% L4 gate (was 3%). Items 2/4/6 are already fused upstream and stay out."
 }

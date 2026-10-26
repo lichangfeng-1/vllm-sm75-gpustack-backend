@@ -168,10 +168,12 @@ def run():
         mod.install()
         print("PASS install patches once and stays idempotent")
 
-        assert isinstance(mod.PLANS, dict) and not mod.PLANS, mod.PLANS
+        saved_plans = dict(mod.PLANS)
+        mod.PLANS.clear()
         assert LinM().apply(layer, x)[0] == "orig_linear"
+        assert mod.gemv_m1(x, layer.weight)[0] == "F.linear"
         print("PASS empty PLANS falls back to the original method")
-
+        mod.PLANS.update(saved_plans)
         mod.PLANS[(2048, 2560)] = (1, 256, 4)
         out = LinM().apply(layer, x)
         assert isinstance(out, _Tensor) and out.shape == (1, 2048), out

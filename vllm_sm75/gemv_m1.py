@@ -16,7 +16,14 @@ import triton
 import triton.language as tl
 
 # (N, K) -> (BN rows per program, BK columns per step, num_warps)
-PLANS = {}
+# Filled 2026-10-26 from 读数-flashnext-gemv微基准-20261026.json: only shapes that
+# beat cuBLAS by >= 5% in the same-input bench, at T10 full clocks with a 64 MB L2
+# flush between iterations. (512, 2560) won by 4.4% and was left out on purpose.
+PLANS = {
+    (2048, 2560): (1, 1024, 4),   # GDN fused QKVZ, 36x/token, cuBLAS 43.4 -> 38.9 us
+    (2560, 768): (1, 2048, 4),    # GDN/QSA out_proj, 48x/token, cuBLAS 20.6 -> 18.4 us
+    (160, 2560): (1, 4096, 4),    # shared-expert gate+up, 48x/token, cuBLAS 9.5 -> 8.2 us
+}
 
 
 @triton.jit

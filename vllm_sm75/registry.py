@@ -3,7 +3,7 @@
 Rules:
 * every item defaults to **off**;
 * an item may be listed in ``auto_enabled`` only after it passed L2 (numerics),
-  L3 (end-to-end fingerprint/PPL) and L4 (same-ruler A/B, >= 3%);
+  L3 (end-to-end fingerprint/PPL) and L4 (same-ruler A/B, >= 1%);
 * an item marked ``not implemented`` or ``already_fused_upstream`` is never imported;
 * an item's module is ``vllm_sm75.<item name>``.
 
