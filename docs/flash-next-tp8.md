@@ -1,6 +1,6 @@
 # Flash Next TP8 完整使用说明
 
-> **2026-10-27 增补**：GPUStack 形态的最新调优为批 8192 + triton(gdn_tc) + `VLLM_FIREFLY_AR=0`（`16384` 会 OOM）；带门控优化包 `vllm_sm75` 的镜像与读数见 [`tuning/flash-next-20261027.md`](tuning/flash-next-20261027.md) 与仓根 README §1.1。解码优先则用 FULL_AND_PIECEWISE + flashqla（2026-10-26 面板九档 62.28）；8192+triton 是预填优先档（8K/32K 2019/8643 ms，解码直测 59.6–61.6），两把尺不能相减。
+> **2026-10-27 增补**：GPUStack 形态的最新调优为批 8192 + triton(gdn_tc) + `VLLM_FIREFLY_AR=0`（`16384` 会 OOM）；带门控优化包 `vllm_sm75` 的镜像与读数见 [`tuning/flash-next-20261027.md`](tuning/flash-next-20261027.md) 与仓根 README §1.1。2026-10-27 生产行用 FULL_AND_PIECEWISE + 批 8192 + triton(gdn_tc) + AR=0：面板九档平均输出 **63.30**、平均预填 **3485.13**（8K/16K/32K/64K/128K TTFT 2013/4127/9200/19758/42595 ms，输出 63.52/63.15/63.00/62.48/61.50），优于 2026-10-26 行 4 的 62.28；直测尺 2019/8643 与 59.6–61.6 只作参数对照，不与面板 63.30 相减。
 
 适用版本：`vllm-sm75:v0.1.7-ultra-beta2`。目标模型：`albucino/Qwen3.8-Flash-Next-W4A16-FP8PLE`。本说明更新至2026-10-04的8×Tesla T10实测配置，包含构建、模型准备、1615面板及API启动、参数、工具调用和性能复核。
 
