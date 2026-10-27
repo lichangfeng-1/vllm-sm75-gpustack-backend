@@ -983,3 +983,28 @@ bash gpustack/build-oldpanel-backend-v1.sh
 ### 15.1 读数重复性提示（同窗口实测）
 
 同一实例、同一配置、连续 5 次 8192 单档：**51.76 / 55.56 / 54.77 / 53.75 / 57.05**（中位数 54.77）；引擎侧纯 decode 窗口也在 51.9–57.1 波动。⇒ **单次读数不足以判定 1–2 tok/s 的配置差异**；引用性能结论时用多次中位数，并注明测试窗口是否有后台构建/其他负载。
+
+## 16 2026-10-27 优化线（v13 + opt15）
+
+**镜像谱系**：`v0.1.7-beta2-v13` 基座 + 薄层 `opt9 … opt15`（装门控优化包 `vllm_sm75`）。
+`opt9` 起含审查加固版包；`opt12/13/15` 只是加了默认关闭的探针。
+
+**推荐设置**（在 v13 参数块上改这三处）：
+```
+--max-num-batched-tokens=8192      # 16384 会 CUDA OOM
+--gdn-prefill-backend=triton       # gdn_tc 生效前提
+VLLM_FIREFLY_AR=0                  # 关 fp8 allreduce（预填 +11.5%）
+VLLM_SM75_OPT=auto                 # 门控包：gemv_m1 + gdn_tc
+```
+
+**同尺实测**（直测脚本，随机前缀、ignore_eos、5 次中位）：
+| 指标 | 优化后 | 对照（4096+flashqla） | 变化 |
+|---|---:|---:|---:|
+| 预填 8K TTFT | 2019 ms | 2266.7 ms | −10.9% |
+| 预填 32K TTFT | 8643 ms | 10021.7 ms | −13.7% |
+| 解码 8K/256out | 59.6–61.6 tok/s | ≈60 | 持平（gemv_m1 +1.4%） |
+
+**判负与边界**（详见 [`../docs/tuning/flash-next-20261027.md`](../docs/tuning/flash-next-20261027.md)）：
+批 16384 OOM；ar_overlap / ar_prefill / qsa_slice / GDN_TC_WU=0 均无收益或更慢；
+HC 已在带宽地板；NCCL 调参无效；NCCL fp8 仅 sm90+；262K + MTP 需再腾 ~1.2 GiB/全卡，暂封存。
+

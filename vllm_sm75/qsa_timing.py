@@ -52,4 +52,31 @@ def install():
     cls._prepare = _prepare
     cls.run = runner_run
     m.run = layer_run
+
+    # Short-prefill path, indexer and the per-layer grouped call (patch module
+    # attributes: the call sites import these names per call).
+    import importlib
+    targets = [
+        ("vllm.models.qwen4_exp.nvidia.ops.qsa_flashinfer_prefill", "run"),
+        ("vllm.models.qwen4_exp.nvidia.ops.qsa_indexer", "qsa_select_paged_prefill"),
+        ("vllm.models.qwen4_exp.nvidia.ops.qsa_mixed_prefill", "try_grouped_attention"),
+        ("vllm.models.qwen4_exp.nvidia.ops.qsa_mixed_prefill", "try_grouped_indexer"),
+    ]
+    for mod_name, fn_name in targets:
+        try:
+            mod = importlib.import_module(mod_name)
+            orig = getattr(mod, fn_name)
+
+            def timed(*a, __orig=orig, __name=fn_name, **kw):
+                t = time.perf_counter()
+                try:
+                    return __orig(*a, **kw)
+                finally:
+                    dt = time.perf_counter() - t
+                    if dt >= threshold:
+                        logger.info("SM75 QSA timing: %s %.2f ms", __name, dt * 1e3)
+
+            setattr(mod, fn_name, timed)
+        except Exception:  # noqa: BLE001 - probing must never break the engine
+            logger.exception("SM75 QSA timing: could not wrap %s.%s", mod_name, fn_name)
     m._sm75_timing_patched = True

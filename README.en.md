@@ -20,6 +20,26 @@ two layers on top:
 A group of environment variables switches on capabilities the base already has (QSA, FlashQLA, the
 custom scheduler) - that is *enabling*, not our implementation.
 
+### 1.1 Gated optimization package `vllm_sm75` (since 2026-10-26)
+
+A top-level `site-packages/vllm_sm75/` registers a `vllm.general_plugins` entry point, so **no vLLM
+file is edited**; the engine calls `vllm_sm75.install()` at startup. With everything off it imports
+no submodule and behaviour equals the stock image.
+
+Gate order: compute capability 7.5 -> `VLLM_SM75_OPT` (`auto`/`0`/`1`) -> per-item
+`VLLM_SM75_<ITEM>` -> explicit launch arguments. `auto` enables only items that passed the L4 gate
+(same-ruler A/B >= 1%, 3-5 run median). Current status:
+
+| Item | Switch | Status | Notes |
+|---|---|---|---|
+| `gemv_m1` | `VLLM_SM75_GEMV_M1` | verified, in `auto` | M=1 Triton GEMV on 3 shapes; decode 64.32 -> 65.24 tok/s (+1.4%) |
+| `gdn_tc` | `VLLM_SM75_GDN_TC` | verified, in `auto` | tensor-core GDN chunk prefill; **requires `--gdn-prefill-backend=triton`**; prefill +6.5%/+12.0%/+10.1% (8K/32K/126K), logprob delta 0.0035 nats |
+| `ar_prefill`, `ar_overlap`, `qsa_slice` | same names | rejected, default off | measured slower or no gain; see `docs/tuning/flash-next-20261027.md` |
+| `qsa_timing`, `ar_q8_probe` | same names | measurement only, never auto | timing probe / quantization probe (the 8-bit collective idea is ruled out by the no-precision-loss rule) |
+
+Tuning baseline, negative results and hardware floors: [`docs/tuning/flash-next-20261027.md`](docs/tuning/flash-next-20261027.md).
+External technique mapping (vLLM/SGLang/DeepSeek): [`docs/design/external-techniques-20261027.md`](docs/design/external-techniques-20261027.md).
+
 ## 2 Runtime environment (tested lower bound, no upper-bound guarantee)
 
 | Item | Version we tested |
@@ -113,6 +133,23 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 | One-command console autostart | `gpustack/set-panel-autostart-v1.sh` (dry-run by default, `--apply` to write) |
 
 ## 6 Speed reference (panel form, not a GPUStack acceptance line)
+
+### 2026-10-27 optimization line (v13 + `opt15`, direct ruler, GPUStack form)
+
+On top of `v0.1.7-beta2-v13` with the gated package and `--max-num-batched-tokens=8192` +
+`--gdn-prefill-backend=triton` + `VLLM_FIREFLY_AR=0`, direct ruler (random prefix, `ignore_eos`,
+streaming TTFT, median of 5):
+
+| Metric | Optimized | Control (4096 + flashqla) | Delta |
+|---|---:|---:|---:|
+| Prefill 8K TTFT | **2019 ms** | 2266.7 ms | **-10.9%** |
+| Prefill 32K TTFT | **8643 ms** | 10021.7 ms | **-13.7%** |
+| Decode, 8K ctx / 256 out | **59.6-61.6 tok/s** | ~60 tok/s | flat (`gemv_m1` alone +1.4%) |
+
+Image `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15`; batch 16384 OOMs, `gdn_tc` needs the triton backend.
+
+> The tables below are the historical **panel ruler** (panel WebSocket, output 1024) and must not be
+> mixed with the direct-ruler numbers above.
 
 Same 8xT10, same ruler (Prefill & Decode benchmark v3, concurrency 1, nine tiers 512 to 131072):
 

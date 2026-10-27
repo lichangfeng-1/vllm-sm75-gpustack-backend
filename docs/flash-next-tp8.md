@@ -1,5 +1,7 @@
 # Flash Next TP8 完整使用说明
 
+> **2026-10-27 增补**：GPUStack 形态的最新调优为批 8192 + triton(gdn_tc) + `VLLM_FIREFLY_AR=0`（`16384` 会 OOM）；带门控优化包 `vllm_sm75` 的镜像与读数见 [`tuning/flash-next-20261027.md`](tuning/flash-next-20261027.md) 与仓根 README §1.1。
+
 适用版本：`vllm-sm75:v0.1.7-ultra-beta2`。目标模型：`albucino/Qwen3.8-Flash-Next-W4A16-FP8PLE`。本说明更新至2026-10-04的8×Tesla T10实测配置，包含构建、模型准备、1615面板及API启动、参数、工具调用和性能复核。
 
 推荐组合是 **TP8＋EP、QSA开启、FP8 KV、MTP3、单路256K、并发4混合长度**。基础运行与Ultra使用相同推理核心；下面以带完整面板的Ultra为主。
