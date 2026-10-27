@@ -41,8 +41,12 @@
 | `ar_prefill` | `VLLM_SM75_AR_PREFILL` | ❌ 已判负（默认关） | 让 PCIe-IPC 也服务预填的 21 MB all-reduce：实测反而慢 15–22%，NCCL ring 在这个尺寸更好 |
 | `ar_overlap` | `VLLM_SM75_AR_OVERLAP` | ❌ 已判负（默认关） | 把 `RowParallelLinear` 按 token 切块、异步 all-reduce，想用下一块 GEMM 盖住通信。同镜像 A/B：开 2306.6/10081.5 ms vs 关 2266.7/10021.7 ms（约 7.9K/31.6K 预填，5 次中位），无收益；且每步约 98 次 AR 里它只能碰到 48 次（MoE 的 48 次与 embedding/PLE 在外） |
 | `hc_fuse` / `gdn_fuse` / `qsa_merge` | 同名 | 已融合，永不加载 | 复核证明上游已经融合好，不需要重写 |
+| `qsa_slice` | `VLLM_SM75_QSA_SLICE_ROWS` | ❌ 已判负（默认关） | QSA 选页切片 1024→4096 行：8K 2019.1→2000.7 ms、32K 持平；不是预填空隙的来源 |
+| `qsa_timing` / `ar_q8_probe` | `VLLM_SM75_QSA_TIMING` / `VLLM_SM75_AR_Q8_PROBE` | 🔬 仅测量（默认关，永不 auto） | 前者给 QSA 路径计时（实测全部 <2 ms）；后者只量化不改通信，用于量 8-bit 集合通信的精度代价——按"不降精度"约束已作废，仅留档 |
 
 新增改动一律遵守：**只新增、不覆盖**镜像里已有文件；每项独立开关；默认关；全关等于原基线。
+
+调优基线与逐项判定（含 9 项负结果与硬件天花板）见 [`docs/tuning/flash-next-20261027.md`](docs/tuning/flash-next-20261027.md)；外部技术对照（vLLM/SGLang/DeepSeek）见 [`docs/design/external-techniques-20261027.md`](docs/design/external-techniques-20261027.md)。
 
 ## 2 运行环境（实测下限，不保证兼容上限）
 
@@ -136,6 +140,22 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 | 面板自启一键接线 | `gpustack/set-panel-autostart-v1.sh`（默认 dry-run，`--apply` 才改） |
 
 ## 6 速度参考（面板形态，不是 GPUStack 形态的验收线）
+
+### 2026-10-27 优化线（v13 + `opt15`，直测同尺，GPUStack 形态）
+
+在 `v0.1.7-beta2-v13` 基座上叠门控优化包与调参（`--max-num-batched-tokens=8192` +
+`--gdn-prefill-backend=triton` + `VLLM_FIREFLY_AR=0`），直测同尺（随机前缀绕缓存、`ignore_eos`、流式 TTFT，5 次中位）：
+
+| 指标 | 优化后 | 对照（4096 + flashqla） | 变化 |
+|---|---:|---:|---:|
+| 预填 8K TTFT | **2019 ms** | 2266.7 ms | **−10.9%** |
+| 预填 32K TTFT | **8643 ms** | 10021.7 ms | **−13.7%** |
+| 解码 8K 上下文 / 256 输出 | **59.6–61.6 tok/s** | ≈60 tok/s | 持平（`gemv_m1` 单独 +1.4%） |
+
+镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15`；`16384` 批会 CUDA OOM，`gdn_tc` 必须配 triton 后端。
+逐项读数、负结果与硬件下限见 [`docs/tuning/flash-next-20261027.md`](docs/tuning/flash-next-20261027.md)。
+
+> 下面 2026-10-07/08 与 10-20 的表是**历史面板尺**（面板 WebSocket、output 1024），与上面的直测尺不能混算。
 
 同一台 8×T10、同一套测法（"大模型 Prefill & Decode 性能测试工具 v3（chao 魔改版）"，并发 1，九档 512→131072）：
 

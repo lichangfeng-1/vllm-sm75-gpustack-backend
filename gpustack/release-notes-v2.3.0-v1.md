@@ -1,5 +1,7 @@
 # Release notes · GPUStack 2.3.0 × SM75（2026-10-23）
 
+> **2026-10-27 增补**：本线新增门控优化包 `vllm_sm75`（`VLLM_SM75_OPT` 总开关 + 逐项开关，全关等于原基线）与 `opt9…opt15` 薄层镜像；注册字段/入口不变。读数见 [`../docs/tuning/flash-next-20261027.md`](../docs/tuning/flash-next-20261027.md)。
+
 范围：把本仓的 SM75 自定义 vLLM 后端（镜像仍为 `vllm-sm75-gpustack:v0.1.7-beta2-v7`）接到 GPUStack **v2.3.0 正式版**，并在 8×Tesla T10 上完成兼容性与新特性实测。
 
 ## 1 版本与来源

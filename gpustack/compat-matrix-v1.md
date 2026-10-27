@@ -1,5 +1,7 @@
 # 能力适配矩阵 · SM75 能力在 GPUStack 下的落点（任务 7）
 
+> **2026-10-27 增补**：新增门控优化包 `vllm_sm75`（`VLLM_SM75_OPT` / 逐项开关，全关等于原基线）；Flash-Next 推荐批 8192 + triton(gdn_tc) + `VLLM_FIREFLY_AR=0`。实测与负结果见 [`../docs/tuning/flash-next-20261027.md`](../docs/tuning/flash-next-20261027.md)。
+
 这张表回答一个问题：上游为 SM75 做的那些能力，接到 GPUStack 上之后各自落在哪里、还剩下哪些。"怎么给"是配置位置，"结论"是在 GPUStack 形态下实测或推导的结果。源码行号取 GPUStack v2.2.3 正式版。
 
 > **v2.3.0 增补（2026-10-23 实测）**：`0.1.7-sm75.1-fast-custom`、入口 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`、41 个 env 与 TP8 参数在 v2.3.0 下原样可用；8 卡均识别为 `cuda`；实例 RUNNING、端口 40000。**worker 必须保留 `--runtime=nvidia --privileged --security-opt label=disable`**，否则 `gpu_devices=[]`，调度器报 “does not support backend version”。新特性：离线文档、Anthropic `/v1/messages`、YAML 导出/导入、revision/回滚已实测；定时伸缩仅 API 接受与持久化（真实窗口未执行）；智能 Benchmark 预拉 `gpustack/benchmark-runner:v0.0.9` 后完成 3 请求 smoke（单点，auto-tune 未跑）。PD/共享 KV/vGPU/多副本路由当前不适用。本表其余行号仍按 v2.2.3，未逐行复核 v2.3.0。
