@@ -72,7 +72,7 @@ cd vllm-sm75-gpustack-backend
 # 2) One command: upstream vLLM base -> custom backend (fastest profile by default)
 #    Default is --two-stage (verified; produces an intermediate vllm-sm75 base tag);
 #    --allinone is the optional single-build path (reproducible generator, not fully accepted).
-#    The last layer pins transformers/tokenizers to 5.15.1/0.22.2 (measured 56.83-57.04 tok/s).
+#    The last layer pins transformers/tokenizers to 5.15.1/0.22.2 (PIECEWISE historical: 56.83-57.04 tok/s; FULL graph: 62.28 avg, 2026-10-26).
 #    Output tag: vllm-sm75-gpustack:v0.1.7-beta2-v7.
 #    Rollback to base-image versions (5.17.0/0.23.2): --no-tf-pin (output tag -v4-nopin).
 bash gpustack/preflight-sources-v1.sh
@@ -134,9 +134,9 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 
 ## 6 Speed reference (panel form, not a GPUStack acceptance line)
 
-### 2026-10-27 optimization line (v13 + `opt15`, direct ruler, GPUStack form)
+### 2026-10-27 optimization line (SM75 base v13 + `opt15` thin layer, direct ruler, GPUStack form)
 
-On top of `v0.1.7-beta2-v13` with the gated package and `--max-num-batched-tokens=8192` +
+On top of the SM75 base `v0.1.7-beta2-v13` (built from upstream **vLLM 0.30.0**) with the gated package and `--max-num-batched-tokens=8192` +
 `--gdn-prefill-backend=triton` + `VLLM_FIREFLY_AR=0`, direct ruler (random prefix, `ignore_eos`,
 streaming TTFT, median of 5):
 
@@ -146,7 +146,9 @@ streaming TTFT, median of 5):
 | Prefill 32K TTFT | **8643 ms** | 10021.7 ms | **-13.7%** |
 | Decode, 8K ctx / 256 out | **59.6-61.6 tok/s** | ~60 tok/s | flat (`gemv_m1` alone +1.4%) |
 
-Image `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15`; batch 16384 OOMs, `gdn_tc` needs the triton backend.
+**Two trade-offs**: the 2019/8643 numbers above are **prefill-first** (batch 8192 + triton + AR=0), decode 59.6-61.6 on the direct ruler. If decode matters more, keep the default **FULL + flashqla + AR=0** (no triton), which measured **62.28** avg on the panel nine-tier ruler (2026-10-26; 8K/16K/32K 62.50/62.24/62.21). The two rulers are not subtractable.
+
+Measured image: `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15` (`v13` is built from upstream vLLM 0.30.0; `opt15` is the thin layer carrying the gated package). A default two-stage build from this repo already ships the same package in `-v7`; set the same three knobs to reproduce, and treat your own same-ruler numbers as authoritative. Batch 16384 OOMs; `gdn_tc` needs the triton backend.
 
 > The tables below are the historical **panel ruler** (panel WebSocket, output 1024) and must not be
 > mixed with the direct-ruler numbers above.
@@ -158,6 +160,15 @@ Same 8xT10, same ruler (Prefill & Decode benchmark v3, concurrency 1, nine tiers
 | VLLM-SM75 v0.1.7-beta2 (baseline, SM75 adaptation only) | 43.31 tok/s | 2742.54 |
 | Same weights + full optimization set, FP8PLE | 57.73 tok/s | 2749.96 |
 | Full optimization set, W4A16-AutoRound | 57.04 tok/s | 2762.51 |
+
+Rows 1-2 are the same FP8PLE weights; row 3 is another W4A16-AutoRound weight set (PLE in BF16 vs
+FP8 in the FP8PLE variant, so the delivered set is the higher-precision one). Using row 1 as the
+upstream baseline: same-weights FP8PLE is **+33.3%** (43.31 to 57.73, isolating the optimization
+set), while the delivered W4A16-AutoRound is **+31.7%** (43.31 to 57.04). The latter includes the
+weight change, so it cannot be attributed to a single mechanism, and it is not a
+precision-for-speed trade. The current default (FULL graph) is **62.28** on the 2026-10-26 panel
+nine-tier ruler, 9.2% above 57.04; 62.28 vs 43.31 crudely gives +43.8%, but the two are from
+different sessions and that figure is a magnitude reference only.
 
 +33.3% on the output side, prefill essentially unchanged. **These were measured in the panel form**,
 not in GPUStack form; for the GPUStack-form nine-tier numbers see run-book section 10a (52.81, with a
