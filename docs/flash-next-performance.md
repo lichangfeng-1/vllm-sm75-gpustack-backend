@@ -1,6 +1,6 @@
 # Flash Next：无MTP与混合负载优化
 
-> **2026-10-27 增补**：本页是 2026-10-04 的 Ultra/面板形态记录。GPUStack 形态的最新调优为批 8192 + triton(gdn_tc) + `VLLM_FIREFLY_AR=0`（`16384` 会 OOM）；读数与逐项判定见 [`tuning/flash-next-20261027.md`](tuning/flash-next-20261027.md)。解码优先则用 FULL_AND_PIECEWISE + flashqla（2026-10-26 面板九档 62.28）；8192+triton 是预填优先档（8K/32K 2019/8643 ms，解码直测 59.6–61.6），两把尺不能相减。
+> **2026-10-27 增补**：本页是 2026-10-04 的 Ultra/面板形态记录。GPUStack 形态的最新调优为批 8192 + triton(gdn_tc) + `VLLM_FIREFLY_AR=0`（`16384` 会 OOM）；读数与逐项判定见 [`tuning/flash-next-20261027.md`](tuning/flash-next-20261027.md)。2026-10-27 生产行用 FULL_AND_PIECEWISE + 批 8192 + triton(gdn_tc) + AR=0：面板九档平均输出 **63.30**、平均预填 **3485.13**（8K/16K/32K/64K/128K TTFT 2013/4127/9200/19758/42595 ms，输出 63.52/63.15/63.00/62.48/61.50），优于 2026-10-26 行 4 的 62.28；直测尺 2019/8643 与 59.6–61.6 只作参数对照，不与面板 63.30 相减。
 
 2026-10-04。本次补齐真正无MTP启动测试，并扩展SM75 TP8的QSA混合批次执行路径。使用同一个`vllm-sm75:v0.1.7-ultra-beta`镜像，模型、QSA、FP8 KV、256K和并发4均保留。
 

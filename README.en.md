@@ -72,7 +72,7 @@ cd vllm-sm75-gpustack-backend
 # 2) One command: upstream vLLM base -> custom backend (fastest profile by default)
 #    Default is --two-stage (verified; produces an intermediate vllm-sm75 base tag);
 #    --allinone is the optional single-build path (reproducible generator, not fully accepted).
-#    The last layer pins transformers/tokenizers to 5.15.1/0.22.2 (PIECEWISE historical: 56.83-57.04 tok/s; FULL graph: 62.28 avg, 2026-10-26).
+#    The last layer pins transformers/tokenizers to 5.15.1/0.22.2 (PIECEWISE historical: 56.83-57.04 tok/s; FULL graph production row: 63.30 avg, 2026-10-27; the 2026-10-26 FULL+flashqla row-4 run was 62.28).
 #    Output tag: vllm-sm75-gpustack:v0.1.7-beta2-v7.
 #    Rollback to base-image versions (5.17.0/0.23.2): --no-tf-pin (output tag -v4-nopin).
 bash gpustack/preflight-sources-v1.sh
@@ -146,7 +146,7 @@ streaming TTFT, median of 5):
 | Prefill 32K TTFT | **8643 ms** | 10021.7 ms | **-13.7%** |
 | Decode, 8K ctx / 256 out | **59.6-61.6 tok/s** | ~60 tok/s | flat (`gemv_m1` alone +1.4%) |
 
-**Two trade-offs**: the 2019/8643 numbers above are **prefill-first** (batch 8192 + triton + AR=0), decode 59.6-61.6 on the direct ruler. If decode matters more, keep the default **FULL + flashqla + AR=0** (no triton), which measured **62.28** avg on the panel nine-tier ruler (2026-10-26; 8K/16K/32K 62.50/62.24/62.21). The two rulers are not subtractable.
+**2026-10-27 panel nine-tier (production opt15, batch 8192 + triton + AR=0)**: average output **63.30 tok/s**, average prefill **3485.13**; 8K/16K/32K/64K/128K TTFT **2013/4127/9200/19758/42595 ms**, output **63.52/63.15/63.00/62.48/61.50**. Against the 2026-10-26 row-4 FULL+flashqla run (62.28): average output +1.64% (within single-run noise), average prefill +10.29%, 8K/32K/128K TTFT -11.35%/-13.73%/-14.00%. The new profile is clearly better on prefill and does not regress decode, so there is no need to fall back to flashqla. The 2019/8643 and 59.6-61.6 numbers above are direct-ruler values and cannot be subtracted from the panel 63.30.
 
 Measured image: `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15` (`v13` is built from upstream vLLM 0.30.0; `opt15` is the thin layer carrying the gated package). A default two-stage build from this repo already ships the same package in `-v7`; set the same three knobs to reproduce, and treat your own same-ruler numbers as authoritative. Batch 16384 OOMs; `gdn_tc` needs the triton backend.
 
@@ -166,9 +166,10 @@ FP8 in the FP8PLE variant, so the delivered set is the higher-precision one). Us
 upstream baseline: same-weights FP8PLE is **+33.3%** (43.31 to 57.73, isolating the optimization
 set), while the delivered W4A16-AutoRound is **+31.7%** (43.31 to 57.04). The latter includes the
 weight change, so it cannot be attributed to a single mechanism, and it is not a
-precision-for-speed trade. The current default (FULL graph) is **62.28** on the 2026-10-26 panel
-nine-tier ruler, 9.2% above 57.04; 62.28 vs 43.31 crudely gives +43.8%, but the two are from
-different sessions and that figure is a magnitude reference only.
+precision-for-speed trade. The current production row (2026-10-27, FULL + batch 8192 + triton + AR=0)
+is **63.30** on the panel nine-tier ruler, 11.0% above 57.04; 63.30 vs 43.31 crudely gives +46.2%,
+but the two are from different sessions and weight sets, so that figure is a magnitude reference
+only. The 2026-10-26 row-4 62.28 is historical.
 
 +33.3% on the output side, prefill essentially unchanged. **These were measured in the panel form**,
 not in GPUStack form; for the GPUStack-form nine-tier numbers see run-book section 10a (52.81, with a
