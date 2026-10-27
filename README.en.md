@@ -1,204 +1,136 @@
-# vLLM-SM75 x GPUStack custom backend (v0.1.7-beta2 line; GPUStack 2.3.0 tested)
+# vLLM-SM75 × GPUStack custom backend
 
-Turns SM75 vLLM into a GPUStack custom backend so Turing cards (T4 / T10) can serve large models
-inside GPUStack. **The same repo also ships the standalone Ultra / panel deployment**: one image,
-one build chain, two entry points (`vllm serve` for a GPUStack model row, or
-`runtime-entrypoint.py` for a standalone panel / Ultra workbench). See sections 1, 3, 4 and
-"Relationship to upstream" at the end.
+Turns SM75 vLLM into a GPUStack custom backend so T4 / T10 Turing cards can serve large models. The same image can also run the standalone Ultra / panel; both forms share one build chain and the SM75 adaptation.
 
----
+## What you get
 
-## 1 What this is, and what we add
+- **GPUStack custom backend**: `vllm serve` in a GPUStack model row; 8×T10, 262K, A route (images 4 / video 0).
+- **Standalone Ultra / panel**: same image, `runtime-entrypoint.py`, console + Ultra workbench + BenchLocal verifiers.
+- **Two SM75 layers**: pcieipc (8-GPU PCIe direct allreduce) and incple (AutoRound / INC quantization whitelist); upstream QSA / FlashQLA / scheduler are enabled by environment variables.
+- **Gated package `vllm_sm75`**: add-only, opt-in; `VLLM_SM75_OPT=auto` enables only verified items; `0` disables everything and equals the original baseline.
 
-Official vLLM has no acceleration path on Turing (Marlin and FP8 W8A8 are unsupported; 7.5 is merely
-the minimum compute capability it will run on). Upstream VLLM-SM75 did the SM75 adaptation. We add
-two layers on top:
+## Quick start
 
-- **pcieipc**: 8-GPU PCIe direct allreduce (backports FlashInfer 0.7.0's PCIe-IPC into the bundled 0.6.18);
-- **incple**: AutoRound / INC quantization whitelist patch.
+### 0 Prerequisites
 
-A group of environment variables switches on capabilities the base already has (QSA, FlashQLA, the
-custom scheduler) - that is *enabling*, not our implementation.
+- 8×Tesla T10 16 GiB each, host RAM ≥ 251 GiB, data disk ≥ 250 GB.
+- Ubuntu 24.04, NVIDIA driver 580.178.04 (CUDA 13.0), Docker 29.8, NVIDIA Container Toolkit 1.20, GPUStack 2.3.0.
+- Full versions: [Runtime environment](#runtime-environment).
 
-### 1.1 Gated optimization package `vllm_sm75` (since 2026-10-26)
+### 1 Pull base images
 
-A top-level `site-packages/vllm_sm75/` registers a `vllm.general_plugins` entry point, so **no vLLM
-file is edited**; the engine calls `vllm_sm75.install()` at startup. With everything off it imports
-no submodule and behaviour equals the stock image.
+```bash
+docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688
+docker pull quay.io/gpustack/gpustack:v2.3.0
+```
 
-Gate order: compute capability 7.5 -> `VLLM_SM75_OPT` (`auto`/`0`/`1`) -> per-item
-`VLLM_SM75_<ITEM>` -> explicit launch arguments. `auto` enables only items that passed the L4 gate
-(same-ruler A/B >= 1%, 3-5 run median). Current status:
+### 2 Build
 
-| Item | Switch | Status | Notes |
-|---|---|---|---|
-| `gemv_m1` | `VLLM_SM75_GEMV_M1` | verified, in `auto` | M=1 Triton GEMV on 3 shapes; decode 64.32 -> 65.24 tok/s (+1.4%) |
-| `gdn_tc` | `VLLM_SM75_GDN_TC` | verified, in `auto` | tensor-core GDN chunk prefill; **requires `--gdn-prefill-backend=triton`**; prefill +6.5%/+12.0%/+10.1% (8K/32K/126K), logprob delta 0.0035 nats |
-| `ar_prefill`, `ar_overlap`, `qsa_slice` | same names | rejected, default off | measured slower or no gain; see `docs/tuning/flash-next-20261027.md` |
-| `qsa_timing`, `ar_q8_probe` | same names | measurement only, never auto | timing probe / quantization probe (the 8-bit collective idea is ruled out by the no-precision-loss rule) |
+```bash
+git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
+cd vllm-sm75-gpustack-backend
+bash gpustack/preflight-sources-v1.sh
+bash gpustack/build-backend-v1.sh --two-stage
+```
 
-Tuning baseline, negative results and hardware floors: [`docs/tuning/flash-next-20261027.md`](docs/tuning/flash-next-20261027.md).
-External technique mapping (vLLM/SGLang/DeepSeek): [`docs/design/external-techniques-20261027.md`](docs/design/external-techniques-20261027.md).
+Starts from upstream vLLM 0.30.0; stage 1 produces the intermediate `vllm-sm75:v0.1.7-beta2` (cache only), stage 2 produces `vllm-sm75-gpustack:v0.1.7-beta2-v7`. Success marker: `BUILD_BACKEND_OK ... target=runtime-pin-layer mode=two-stage`.
 
-## 2 Runtime environment (tested lower bound, no upper-bound guarantee)
+### 3 Start GPUStack, register the backend version
 
-| Item | Version we tested |
+Full server / worker commands: [run-book §3/§5](gpustack/run-book-v1.md). Registration:
+
+- Version: `0.1.7-sm75.1-fast-custom`
+- Image: `vllm-sm75-gpustack:v0.1.7-beta2-v7`
+- Entrypoint: `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
+
+One-shot write of the entrypoint and panel env: `gpustack/set-panel-autostart-v1.sh --apply` (dry-run by default).
+
+### 4 Deploy the model
+
+Paste into the GPUStack model row:
+
+- Arguments: `gpustack/args-paste-videooff-v1.txt` (24 lines, A route; text-only `args-paste-v1.txt`).
+- Environment: `gpustack/env-paste-v1.txt` (25 lines).
+- Panel / verifiers: `gpustack/env-paste-panel-v1.txt` (8 lines, port 1615).
+
+Check:
+
+```bash
+bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt
+# must end with LINT_PASTE_OK env=25 args=24
+```
+
+For the 63.30 tok/s production profile, set `--compilation-config` to `FULL_AND_PIECEWISE`, add `--max-num-batched-tokens=8192`, `--gdn-prefill-backend=triton`, `VLLM_FIREFLY_AR=0`, `VLLM_SM75_OPT=auto`; see the [tuning doc](docs/tuning/flash-next-20261027.md).
+
+## Runtime environment
+
+| Item | Tested version |
 |---|---|
 | OS | Ubuntu 24.04.5 LTS (kernel 6.8.0-146-generic) |
 | NVIDIA driver | 580.178.04 (CUDA 13.0) |
-| Docker | 29.8.0 (storage `overlayfs`, cgroup v2) |
+| Docker | 29.8.0 (storage overlayfs, cgroup v2) |
 | containerd | 2.3.5 |
 | NVIDIA Container Toolkit | 1.20.0 |
-| GPUStack | quay.io/gpustack/gpustack:v2.3.0 (tested 2026-10-23; v2.2.3 remains the rollback version) |
-| Hardware | 8x Tesla T10 16 GiB + 251 GiB host RAM |
+| GPUStack | quay.io/gpustack/gpustack:v2.3.0 (v2.2.3 remains the rollback) |
+| Hardware | 8×Tesla T10 16 GiB + ≥ 251 GiB host RAM |
+| BIOS | SMT=Off; physical host with Ubuntu (P2P 13.1–13.2 GB/s) |
 
-Below this we do not guarantee (and have not tested); above it we do not guarantee either. Test your own combination.
+Below / above this table is not guaranteed; see [run-book §0](gpustack/run-book-v1.md).
 
-> **GPUStack 2.3.0 upgrade (tested 2026-10-23):** the same `-v7` image and model definition migrate as-is. The worker must keep all three of `--runtime=nvidia --privileged --security-opt label=disable`; omitting the group leaves `gpu_devices=[]` (group-only control; per-flag attribution not tested) and the scheduler reports "does not support backend version". See run-book section 0.1 for upgrade and rollback.
+> GPUStack 2.3.0 workers must keep `--runtime=nvidia --privileged --security-opt label=disable`; omitting the group leaves `gpu_devices=[]`. Upgrade / rollback: [release notes](gpustack/release-notes-v2.3.0-v1.md).
 
-## 3 Quick start
+## Performance
 
-Full steps and troubleshooting: **`gpustack/run-book-v1.md`**. Minimal sequence:
-
-```bash
-# 0) Pull the two base images first (otherwise the first build stalls on a ~42 GiB base-image pull)
-docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688
-docker pull quay.io/gpustack/gpustack:v2.3.0
-
-# 1) Clone this repo
-git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
-cd vllm-sm75-gpustack-backend
-
-# 2) One command: upstream vLLM base -> custom backend (fastest profile by default)
-#    Default is --two-stage (verified; produces an intermediate vllm-sm75 base tag);
-#    --allinone is the optional single-build path (reproducible generator, not fully accepted).
-#    The last layer pins transformers/tokenizers to 5.15.1/0.22.2 (PIECEWISE historical: 56.83-57.04 tok/s; FULL graph production row: 63.30 avg, 2026-10-27; the 2026-10-26 FULL+flashqla row-4 run was 62.28).
-#    Output tag: vllm-sm75-gpustack:v0.1.7-beta2-v7.
-#    Rollback to base-image versions (5.17.0/0.23.2): --no-tf-pin (output tag -v4-nopin).
-bash gpustack/preflight-sources-v1.sh
-bash gpustack/build-backend-v1.sh --two-stage
-
-# 3) Start GPUStack (server/worker commands: run-book sections 3 and 5)
-
-# 4) Register the backend version (default = fastest): 0.1.7-sm75.1-fast-custom,
-#    image = vllm-sm75-gpustack:v0.1.7-beta2-v7,
-#    entrypoint = python3 /opt/vllm-sm75/panel-sidecar.py vllm serve
-#    (set-panel-autostart-v1.sh also writes the panel env and SM75_EXTENSIONS)
-#    Rollback route: 0.1.7-sm75.1-custom + vllm-sm75-gpustack:v0.1.7-beta2-v4-nopin
-
-# 5) Deploy the model: paste the blocks
-#    gpustack/args-paste-videooff-v1.txt (24 lines, A route: images on, video off)
-#    + gpustack/env-paste-v1.txt (25 lines)
-#    add gpustack/env-paste-panel-v1.txt (5 lines, fixed port 1615) for the console and test suites
-bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt   # LINT_PASTE_OK env=25 args=24
-```
-
-**The chain end must target `runtime-pin-layer`** (default via build-backend-v1.sh): it is a superset
-(four layers + console payload + BenchLocal verifier runtime + vendored test assets + the runtime pin),
-so one image serves as model backend, console host and verifier host. `--target panel-layer` builds the
-unpinned v4 for rollback; `--no-tf-pin` does the same through the script.
-
-## 4 Optional web console (same image, same model row)
-
-The image already carries the console (node v22.23.2 + `/opt/sm75-workbench`). To start it together
-with the model, add these env vars to the model row:
-
-```
-SM75_PANEL_AUTOSTART=1
-SM75_CONSOLE_HOST=0.0.0.0
-SM75_CONSOLE_ROOT=/var/lib/gpustack/panel
-SM75_CONSOLE_PORT=1615
-SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
-```
-
-- Console listens on **1615** for both routes (the old-engine thin image defaults to 1615; pinning it here keeps the v4 rollback on the same port). Login token at `$SM75_CONSOLE_ROOT/key`; state lives under the worker data dir, so it survives restarts.
-- Without `SM75_PANEL_AUTOSTART` the wrapper is a transparent passthrough.
-- Standalone console, the three BenchLocal verifier containers and the radar steps: run-book section 11.
-
-> Known limit: the **usage / workbench / plugins** native pages and the BenchLocal **harness** depend on
-> the DSH workbench (`/opt/harness`, 585 MB), which today only runs in the Ultra workbench form. An
-> "extension switch" that starts it with the model is in progress; until then use the standalone
-> container path in run-book section 11.
-
-## 5 Docs map
-
-| Question | Where |
-|---|---|
-| Step-by-step from zero to inference | `gpustack/run-book-v1.md` |
-| What every parameter does and how to tune it | run-book **section 12** |
-| Just copy-paste | run-book **section 13** + the two `.txt` blocks |
-| Backend registration form, field by field | `gpustack/backend-version-card-v1.md` |
-| Capability mapping and why these numbers are not an acceptance line | `gpustack/compat-matrix-v1.md` |
-| GPUStack 2.3.0 upgrade and new features | `gpustack/release-notes-v2.3.0-v1.md` |
-| One-command console autostart | `gpustack/set-panel-autostart-v1.sh` (dry-run by default, `--apply` to write) |
-
-## 6 Speed reference (panel form, not a GPUStack acceptance line)
-
-### 2026-10-27 optimization line (SM75 base v13 + `opt15` thin layer, direct ruler, GPUStack form)
-
-On top of the SM75 base `v0.1.7-beta2-v13` (built from upstream **vLLM 0.30.0**) with the gated package and `--max-num-batched-tokens=8192` +
-`--gdn-prefill-backend=triton` + `VLLM_FIREFLY_AR=0`, direct ruler (random prefix, `ignore_eos`,
-streaming TTFT, median of 5):
-
-| Metric | Optimized | Control (4096 + flashqla) | Delta |
-|---|---:|---:|---:|
-| Prefill 8K TTFT | **2019 ms** | 2266.7 ms | **-10.9%** |
-| Prefill 32K TTFT | **8643 ms** | 10021.7 ms | **-13.7%** |
-| Decode, 8K ctx / 256 out | **59.6-61.6 tok/s** | ~60 tok/s | flat (`gemv_m1` alone +1.4%) |
-
-**2026-10-27 panel nine-tier (production opt15, batch 8192 + triton + AR=0)**: average output **63.30 tok/s**, average prefill **3485.13**; 8K/16K/32K/64K/128K TTFT **2013/4127/9200/19758/42595 ms**, output **63.52/63.15/63.00/62.48/61.50**. Against the 2026-10-26 row-4 FULL+flashqla run (62.28): average output +1.64% (within single-run noise), average prefill +10.29%, 8K/32K/128K TTFT -11.35%/-13.73%/-14.00%. The new profile is clearly better on prefill and does not regress decode, so there is no need to fall back to flashqla. The 2019/8643 and 59.6-61.6 numbers above are direct-ruler values and cannot be subtracted from the panel 63.30.
-
-Measured image: `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15` (`v13` is built from upstream vLLM 0.30.0; `opt15` is the thin layer carrying the gated package). A default two-stage build from this repo already ships the same package in `-v7`; set the same three knobs to reproduce, and treat your own same-ruler numbers as authoritative. Batch 16384 OOMs; `gdn_tc` needs the triton backend.
-
-> The tables below are the historical **panel ruler** (panel WebSocket, output 1024) and must not be
-> mixed with the direct-ruler numbers above.
-
-Same 8xT10, same ruler (Prefill & Decode benchmark v3, concurrency 1, nine tiers 512 to 131072):
+2026-10-27 production row (8×T10, SMT Off, 262K, A route, panel nine-tier 512→131072, output 1024, concurrency 1):
 
 | Configuration | Avg output | Avg prefill |
-|---|---|---|
-| VLLM-SM75 v0.1.7-beta2 (baseline, SM75 adaptation only) | 43.31 tok/s | 2742.54 |
-| Same weights + full optimization set, FP8PLE | 57.73 tok/s | 2749.96 |
-| Full optimization set, W4A16-AutoRound | 57.04 tok/s | 2762.51 |
+|---|---:|---:|
+| Upstream VLLM-SM75 v0.1.7-beta2 (SM75 adaptation only, FP8PLE weights, 2026-10-07/08) | 43.31 | 2742.54 |
+| Historical PIECEWISE profile (W4A16-AutoRound, 2026-10-07/08) | 57.04 | 2762.51 |
+| **Current production row (FULL + batch 8192 + triton/gdn_tc + AR=0, W4A16, 2026-10-27)** | **63.30** | **3485.13** |
 
-Rows 1-2 are the same FP8PLE weights; row 3 is another W4A16-AutoRound weight set (PLE in BF16 vs
-FP8 in the FP8PLE variant, so the delivered set is the higher-precision one). Using row 1 as the
-upstream baseline: same-weights FP8PLE is **+33.3%** (43.31 to 57.73, isolating the optimization
-set), while the delivered W4A16-AutoRound is **+31.7%** (43.31 to 57.04). The latter includes the
-weight change, so it cannot be attributed to a single mechanism, and it is not a
-precision-for-speed trade. The current production row (2026-10-27, FULL + batch 8192 + triton + AR=0)
-is **63.30** on the panel nine-tier ruler, 11.0% above 57.04; 63.30 vs 43.31 crudely gives +46.2%,
-but the two are from different sessions and weight sets, so that figure is a magnitude reference
-only. The 2026-10-26 row-4 62.28 is historical.
+- 8K/16K/32K/64K/128K output **63.52/63.15/63.00/62.48/61.50**; TTFT **2013/4127/9200/19758/42595 ms**.
+- Current vs upstream **+46.2%** (cross-session, different weights; delivered PLE is BF16 vs FP8 in the upstream FP8PLE set, so this is not a precision-for-speed trade); same-weights FP8PLE is +33.3% (57.73).
+- The direct-ruler 2019/8643 ms and 59.6–61.6 tok/s are a separate ruler; **do not subtract them from the panel 63.30**; details and negative results: [tuning doc](docs/tuning/flash-next-20261027.md).
+- 63.30 was measured on the 2026-10-27 opt15 thin layer; the `-v7` delivery image ships the same gated package and can reproduce it with the same production knobs (use your own same-ruler numbers). Without them it is the historical PIECEWISE profile (57.04).
 
-+33.3% on the output side, prefill essentially unchanged. **These were measured in the panel form**,
-not in GPUStack form; for the GPUStack-form nine-tier numbers see run-book section 10a (52.81, with a
-different configuration window). How to read the tables: `gpustack/compat-matrix-v1.md`, last section.
+## Gated package
 
-## 7 Repo layout
+The image ships `vllm_sm75`, auto-installed through `vllm.general_plugins`; with no switch set it equals the original baseline.
 
+- `VLLM_SM75_OPT=auto`: only items that passed the same-ruler A/B (≥1%, 3–5 run median); currently `gemv_m1` (decode +1.4%) and `gdn_tc` (prefill +6.5/12.0/10.1%, requires `--gdn-prefill-backend=triton`).
+- `VLLM_SM75_OPT=0`: disable all; per-item override with `VLLM_SM75_<ITEM>=0/1`.
+- Item status (2 verified, 4 rejected, 2 measurement-only) and negative results: [vllm_sm75/README.md](vllm_sm75/README.md), [tuning doc](docs/tuning/flash-next-20261027.md).
+
+## Docs
+
+- [docs/README.md](docs/README.md): docs index.
+- [run-book](gpustack/run-book-v1.md): zero-to-serving, paste blocks, troubleshooting.
+- [tuning](docs/tuning/flash-next-20261027.md): 63.30 baseline, negative results, hardware floors.
+- [backend card](gpustack/backend-version-card-v1.md): registration form, field by field.
+- [compat matrix](gpustack/compat-matrix-v1.md): capabilities and reading boundaries.
+- [release notes](gpustack/release-notes-v2.3.0-v1.md): GPUStack 2.3.0.
+- [design](docs/design/): design and research notes.
+- [vllm_sm75](vllm_sm75/README.md): gated package.
+
+## Repo layout
+
+```text
+gpustack/   deliverables: run-book, paste blocks, Dockerfile.v1, gates, scripts
+docker/     upstream build assets (base Dockerfile, helpers)
+ultra/      console + BenchLocal sources
+vllm/       upstream SM75 adaptation and attention overlay
+vllm_sm75/  gated optimization package
 ```
-gpustack/        everything this line delivers: run-book, paste blocks, Dockerfile.v1, gates, scripts
-docker/          upstream build assets (base Dockerfile, helpers) - protected by the freeze gate
-ultra/source/    console + BenchLocal sources (layer 4 copies from here)
-vllm/            upstream SM75 adaptation and our attention overlay
-```
 
-## 8 Relationship to upstream, license
+## Upstream and license
 
-- Base: `vllm/vllm-openai:v0.30.0-cu129` (tag + digest pinned).
-- New deliverables live in `gpustack/`; upstream files are protected by the freeze-table gate
-  (`gpustack/gate-tree-unchanged-v1.sh`; see `gpustack/SHA256SUMS-upstream-20261019-v2.txt` for the current baseline, historical 551 entries in `NOTICE`); exceptions are recorded in `NOTICE`.
-- License: Apache-2.0 (see `LICENSE`); third-party notices in `NOTICE` and `gpustack/backend-version-card-v1.md`.
+- Base: `vllm/vllm-openai:v0.30.0-cu129` (tag + digest pinned); upstream SM75 adaptation in `vllm/` and `docker/`.
+- New deliverables live in `gpustack/`; upstream files are protected by the freeze table, exceptions recorded in `NOTICE`.
+- License: Apache-2.0; third-party notices in `NOTICE` and `gpustack/backend-version-card-v1.md`.
 
-## 9 GPUStack 2.3.0 notes (tested 2026-10-23)
+## GPUStack 2.3.0
 
-- Same `-v7` image and model definition migrate as-is; the worker must keep `--runtime=nvidia --privileged --security-opt label=disable`, or `gpu_devices=[]` and the scheduler reports "does not support backend version".
-- Tested: offline docs, Anthropic `/v1/messages`, YAML export/import, deployment revisions/rollback.
-- API accepted but time window not executed: scheduled scaling.
-- Smart Benchmark smoke passed after pre-pulling `gpustack/benchmark-runner:v0.0.9`: 3/3 requests, 107.53 output tok/s, TTFT 937 ms, TPOT 28.70 ms (single point, not a load curve).
-- Not applicable on 8xT10: PD disaggregation, shared KV (single replica), vGPU/MIG (T10 has no MIG), multi-replica routing.
-- Rollback requires restoring the `postgresql/data` backup; starting the old container against the migrated DB is not a rollback.
-- See run-book section 0.1 and `gpustack/release-notes-v2.3.0-v1.md`.
+Tested offline docs, Anthropic `/v1/messages`, model YAML export/import, deployment revisions / rollback; PD disaggregation, shared KV, vGPU / MIG and multi-replica routing are not applicable here. Upgrade / rollback and untested items: [release notes](gpustack/release-notes-v2.3.0-v1.md) and run-book §0.1.
 
 [中文](README.md)
