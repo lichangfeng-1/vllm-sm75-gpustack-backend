@@ -14,7 +14,7 @@
 
 另有一组环境变量把底座已有的 QSA、FlashQLA、自建调度器打开——那是**启用**，不是我们实现。
 
-**交付默认路线（2026-10-21 定）= 一条命令从 vLLM 基座构建的最快档（`-v7`）**：在既有四层链末端加一层运行期包钉版，把 transformers/tokenizers 钉到 **5.15.1/0.22.2**；同机同尺 GPUStack 面板直连 **56.83–57.04**（A 路线，输出 1024，并发 1，SMT Off；2026-10-21 同引擎层复核），与历史 AutoRound 57.04 同档。**同一枚镜像两种用法**：GPUStack 后端（入口 `panel-sidecar.py vllm serve`）或单独面板（入口 `runtime-entrypoint.py`，见 run-book §11）。回退：`--no-tf-pin` 产出基座原版 v4（56.26/56.97）；有旧 Ultra 镜像的机器也可用 `build-oldpanel-backend-v1.sh` 薄层路线（57.15，等价备选）。
+**交付默认路线（2026-10-21 定）= 一条命令从上游 vLLM 0.30.0 构建的最快档（`-v7`）**：在既有四层链末端加一层运行期包钉版，把 transformers/tokenizers 钉到 **5.15.1/0.22.2**；同机同尺 GPUStack 面板直连 **56.83–57.04**（PIECEWISE 历史档，A 路线，输出 1024，并发 1，SMT Off；2026-10-21 复核）；生产行 4 改用 **FULL_AND_PIECEWISE** 后同尺九档均值 **62.28**（2026-10-26）。**同一枚镜像两种用法**：GPUStack 后端（入口 `panel-sidecar.py vllm serve`）或单独面板（入口 `runtime-entrypoint.py`，见 run-book §11）。回退：`--no-tf-pin` 产出基座原版 v4（56.26/56.97）；有旧 Ultra 镜像的机器也可用 `build-oldpanel-backend-v1.sh` 薄层路线（57.15，等价备选）。
 
 ### 1.1 门控优化包 `vllm_sm75`（2026-10-26 起）
 
@@ -141,9 +141,9 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 
 ## 6 速度参考（面板形态，不是 GPUStack 形态的验收线）
 
-### 2026-10-27 优化线（v13 + `opt15`，直测同尺，GPUStack 形态）
+### 2026-10-27 优化线（SM75 基座 v13 + `opt15` 薄层，直测同尺，GPUStack 形态）
 
-在 `v0.1.7-beta2-v13` 基座上叠门控优化包与调参（`--max-num-batched-tokens=8192` +
+在由上游 **vLLM 0.30.0** 构建的 SM75 基座 `v0.1.7-beta2-v13` 上叠门控优化包与调参（`--max-num-batched-tokens=8192` +
 `--gdn-prefill-backend=triton` + `VLLM_FIREFLY_AR=0`），直测同尺（随机前缀绕缓存、`ignore_eos`、流式 TTFT，5 次中位）：
 
 | 指标 | 优化后 | 对照（4096 + flashqla） | 变化 |
@@ -152,7 +152,9 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 | 预填 32K TTFT | **8643 ms** | 10021.7 ms | **−13.7%** |
 | 解码 8K 上下文 / 256 输出 | **59.6–61.6 tok/s** | ≈60 tok/s | 持平（`gemv_m1` 单独 +1.4%） |
 
-镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15`；`16384` 批会 CUDA OOM，`gdn_tc` 必须配 triton 后端。
+**两种取舍**：上面的 2019/8643 是**预填优先**档（批 8192 + triton + AR=0），解码在直测尺上 59.6–61.6；若更看重解码，用默认的 **FULL + flashqla + AR=0**（不换 triton），2026-10-26 生产行 4 面板九档均值 **62.28**，8K/16K/32K = **62.50/62.24/62.21**。两把尺不能相减。
+
+读数镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15`（`v13` 由上游 vLLM 0.30.0 构建，`opt15` 是装门控包的薄层）；`16384` 批会 CUDA OOM，`gdn_tc` 必须配 triton 后端。按本仓默认两段构建产出的 `-v7` 已内置同一门控包，把上面三处参数改齐即可复现，实际读数以本机同尺为准。
 逐项读数、负结果与硬件下限见 [`docs/tuning/flash-next-20261027.md`](docs/tuning/flash-next-20261027.md)。
 
 > 下面 2026-10-07/08 与 10-20 的表是**历史面板尺**（面板 WebSocket、output 1024），与上面的直测尺不能混算。
@@ -164,6 +166,8 @@ SM75_EXTENSIONS=panel,harness,benchlocal,speedtest,sql
 | VLLM-SM75 v0.1.7-beta2（基线，已含 SM75 适配） | 43.31 tok/s | 2742.54 |
 | 同一权重，叠上整组优化 · FP8PLE | 57.73 tok/s | 2749.96 |
 | 叠上整组优化 · W4A16-AutoRound | 57.04 tok/s | 2762.51 |
+
+前两行是同一枚 FP8PLE 权重；第三行是另一枚 W4A16-AutoRound（PLE 为 BF16，FP8PLE 档为 FP8，本交付精度更高）。**以第一行上游基座为基线**：同权重 FP8PLE 是 **+33.3%**（43.31→57.73，隔离整组优化的效果），历史 PIECEWISE 档是 **+31.7%**（43.31→57.04）；后者含权重差异，不能记到单一机制名下，也不是降精度换速度。当前默认已改为 FULL 图：2026-10-26 面板九档 **62.28**，比 57.04 高 **9.2%**；拿 62.28 对 43.31 粗算是 **+43.8%**，但两者不同场次，只作量级参考。
 
 输出侧 +33.3%，预填充几乎不动。**这三张表是在面板形态上量的**，不是 GPUStack 形态的验收线；GPUStack 形态的九档读数另见 run-book 第 10a/14 节（旧九档 52.81 与本次 6 档 56.26 不是同一路径/档位）。怎么读、哪些数不能互相比，见 `gpustack/compat-matrix-v1.md` 最后一节。
 

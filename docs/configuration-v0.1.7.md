@@ -1,6 +1,6 @@
 # v0.1.7 模型配置与启动
 
-> **2026-10-27 增补**：新增门控优化包 `vllm_sm75`（见仓根 README §1.1）；Flash-Next 推荐 `--max-num-batched-tokens=8192` + `--gdn-prefill-backend=triton` + `VLLM_FIREFLY_AR=0`，`16384` 会 OOM。读数见 [`tuning/flash-next-20261027.md`](tuning/flash-next-20261027.md)。
+> **2026-10-27 增补**：新增门控优化包 `vllm_sm75`（见仓根 README §1.1）；Flash-Next 推荐 `--max-num-batched-tokens=8192` + `--gdn-prefill-backend=triton` + `VLLM_FIREFLY_AR=0`，`16384` 会 OOM。读数见 [`tuning/flash-next-20261027.md`](tuning/flash-next-20261027.md)。解码优先则用 FULL_AND_PIECEWISE + flashqla（2026-10-26 面板九档 62.28）；8192+triton 是预填优先档（8K/32K 2019/8643 ms，解码直测 59.6–61.6），两把尺不能相减。
 
 v0.1.7 使用同一套推理实现运行 Qwen3.8 27B 和 Flash Next。标准镜像提供推理 API 与引擎监控，Ultra 增加完整管理面板。模型权重、推理参数、量化、MTP/DFlash2/DSpark 和工具解析支持共用。
 
