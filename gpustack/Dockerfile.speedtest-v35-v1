@@ -1,0 +1,12 @@
+# 测速扩展 v3.5 薄层：只替换 panel speedtest 扩展，不动推理层。
+# 父镜像默认现役 opt15；构建与验装见 build-speedtest-v35-v1.sh。
+ARG PARENT=vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15
+FROM ${PARENT}
+ARG SPEEDTEST_COMMIT=07895cffd90bb9ff4847695ed7f90d097832518c
+LABEL org.sm75.speedtest.upstream="${SPEEDTEST_COMMIT}"
+COPY LLM_Speed_Test_v3_Python_Backend.html /opt/sm75-workbench/extensions/speedtest/LLM_Speed_Test_v3_Python_Backend.html
+COPY LLM_Speed_Test_v3_Leaderboard.html /opt/sm75-workbench/extensions/speedtest/LLM_Speed_Test_v3_Leaderboard.html
+COPY llm_test_backend.py /opt/sm75-workbench/extensions/speedtest/llm_test_backend.py
+COPY deps /opt/sm75-workbench/extensions/speedtest/deps
+COPY manifest.json /opt/sm75-workbench/extensions/speedtest/manifest.json
+COPY UPSTREAM.md /opt/sm75-workbench/extensions/speedtest/UPSTREAM.md
