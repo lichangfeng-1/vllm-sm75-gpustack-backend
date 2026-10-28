@@ -1,0 +1,13 @@
+# SQL 提示词审计薄层：在 final-v1 上替换 SQL 扩展为 v20261029（财年/财季格式约束 + 工具结果截断）。
+# 构建上下文＝仓库根目录：
+#   docker build -f gpustack/Dockerfile.sql-prompt-audit-v20261029 -t <new-tag> .
+# 切换镜像会重启 console 与 vLLM（同容器）；测试运行期间不得切换。
+ARG PARENT=vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1
+FROM ${PARENT}
+LABEL org.sm75.sql.prompt_audit="v20261029"
+LABEL org.sm75.sql.scoring="sm75-finalanswer-v1"
+
+COPY gpustack/layers/panel/extensions/sql/sql_benchmark-v20261029.html /opt/sm75-workbench/extensions/sql/sql_benchmark.html
+COPY gpustack/layers/panel/extensions/sql/sql_benchmark-v20261029.html /opt/sm75-workbench/extensions/sql/sql_benchmark-v20261029.html
+COPY gpustack/layers/panel/extensions/sql/manifest-v20261029.json /opt/sm75-workbench/extensions/sql/manifest.json
+COPY gpustack/layers/panel/extensions/sql/UPSTREAM-v20261029.md /opt/sm75-workbench/extensions/sql/UPSTREAM-v20261029.md
