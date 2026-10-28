@@ -5,7 +5,7 @@
 
 **标注约定**：`【待实跑复核】`＝该命令由源码行号与既有实跑记录推出，尚未在本机复跑；其余步骤为实跑验证过的形制。
 
-> **2026-10-29 内部部署增补**：本文快速开始仍按公开交付镜像 v7；现役生产行使用 final-v1（后端版本 `0.1.7-sm75.1-final-v1-custom`）及 SQL 提示词审计子镜像，详见 [`backend-version-card-v1.md`](backend-version-card-v1.md) 的 2026-10-29 增补。注册/切换仍走 GPUStack API。
+> **2026-10-29 内部部署增补**：本文 0→1 基线仍按教程口径（上游 vLLM 0.30.0 → `vllm-sm75-gpustack:v0.1.7-beta2-v7`）；现役生产行使用 final-v1（后端版本 `0.1.7-sm75.1-final-v1-custom`）及 SQL 提示词审计子镜像，详见 [`backend-version-card-v1.md`](backend-version-card-v1.md) 的 2026-10-29 增补。注册/切换仍走 GPUStack API。
 
 ---
 

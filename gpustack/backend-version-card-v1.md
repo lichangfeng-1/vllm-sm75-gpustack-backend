@@ -2,7 +2,7 @@
 
 > **2026-10-27 增补**：在由上游 vLLM 0.30.0 构建的 SM75 基座 `v0.1.7-beta2-v13` 上，另有薄层优化镜像 `v0.1.7-beta2-v13-opt9…opt15`（装门控优化包 `vllm_sm75`）；注册字段与入口不变。调优与读数见 [`../docs/tuning/flash-next-20261027.md`](../docs/tuning/flash-next-20261027.md)。
 
-> **2026-10-29 内部部署增补**：现役生产行 26 使用后端版本 `0.1.7-sm75.1-final-v1-custom`，镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`（父 opt15；console maxTokens、测速 v3.5 配额/上传、SQL finalanswer）。同日已构建 SQL 提示词审计子镜像 `…-final-v1-sqlprompt-audit`（父 final-v1；SQL 页面 sha `6f8c836f…`、manifest `9acabdbc…`；财年/财季原样返回约束 + 工具结果单元格 500/整条 4,000 字符截断），**已构建、未注册、未切行**。切换会重启 console 与 vLLM（同容器），测试运行期间禁止；配方见 `gpustack/Dockerfile.final-v1-20261029` 与 `gpustack/Dockerfile.sql-prompt-audit-v20261029`，注册仍走 `PUT /v2/inference-backends/1`，新版本名建议 `0.1.7-sm75.1-sqlprompt-audit-custom`（未注册）。
+> **2026-10-29 内部部署增补**：现役生产行 26 使用后端版本 `0.1.7-sm75.1-final-v1-custom`，镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`（父 opt15；console maxTokens、测速 v3.5 配额/上传、SQL finalanswer）。同日已构建 SQL 提示词审计子镜像 `…-final-v1-sqlprompt-audit`（父 final-v1；SQL 页面 sha `6f8c836f…`、manifest `9acabdbc…`；财年/财季原样返回约束 + 工具结果单元格 500/整条 4,000 字符截断），**已构建、未注册、未切行**。切换会重启 console 与 vLLM（同容器），测试运行期间禁止；配方见 `gpustack/Dockerfile.final-v1-20261029` 与 `gpustack/Dockerfile.sql-prompt-audit-v20261029`，注册仍走 `PUT /v2/inference-backends/1`，新版本名建议 `0.1.7-sm75.1-sqlprompt-audit-custom`（未注册）。0→1 公共基线仍按教程口径：上游 `vllm/vllm-openai:v0.30.0-cu129` → `vllm-sm75-gpustack:v0.1.7-beta2-v7`；最新升级可用 `gpustack/build-latest-from-zero-v1.sh`（v7 上叠 final-v1/audit）或 opt15 两条薄层命令。v7/opt15 都是基座，不是上游。
 
 一句话：在 GPUStack 2.2.3／2.3.0 上注册一枚自定义 vLLM 后端，把 SM75 八卡档位原样带进平台，入口覆盖与执行命令都留空。
 

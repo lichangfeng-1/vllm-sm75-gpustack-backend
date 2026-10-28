@@ -26,6 +26,8 @@ docker pull quay.io/gpustack/gpustack:v2.3.0
 
 ### 2 构建后端
 
+**0→1（教程口径：上游 vLLM → SM75 基座 → GPUStack 后端）**
+
 ```bash
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
@@ -35,7 +37,12 @@ bash gpustack/build-backend-v1.sh --two-stage
 
 起点是上游 vLLM 0.30.0；第一段产出中间基座 `vllm-sm75:v0.1.7-beta2`（只是构建缓存），第二段产出公开一键镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v7`。成功标志：`BUILD_BACKEND_OK ... target=runtime-pin-layer mode=two-stage`。
 
-最新生产形态（final-v1 / SQL 提示词审计层）以私有优化基座 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15` 为父；在仓库根目录：
+**升级到最新生产层（可选；不是 0→1 上游）**
+
+0→1 的输出是 `vllm-sm75-gpustack:v0.1.7-beta2-v7`；v7/opt15 都是中间或交付基座，**不是上游**。按你的起点二选一：
+
+- 一条命令从上游到最新（0→1 + 升级）：`bash gpustack/build-latest-from-zero-v1.sh`（已有 v7 时 `SKIP_V7=1`），产出 `vllm-sm75-gpustack:v0.1.7-beta2-v7-final-v1` 与 `vllm-sm75-gpustack:v0.1.7-beta2-v7-final-v1-sqlprompt-audit`。
+- 已有 opt15（内部优化基座），在仓库根目录：
 
 ```bash
 docker build -f gpustack/Dockerfile.final-v1-20261029 \
@@ -46,14 +53,19 @@ docker build -f gpustack/Dockerfile.sql-prompt-audit-v20261029 \
 
 - `final-v1`：现役生产镜像（父 opt15；console maxTokens、测速 v3.5 配额/上传、SQL finalanswer）。
 - `sqlprompt-audit`：最新 SQL 提示词审计薄层（父 final-v1；财年/财季格式约束 + 工具结果截断）。
-- 没有 opt15 时用上面的公开一键 v7 路径；v7 已含同一门控包。
 
 ### 3 起 GPUStack，注册后端版本
 
 server / worker 的完整命令见 [run-book §3/§5](gpustack/run-book-v1.md)。注册后端时填：
 
-- 版本名：`0.1.7-sm75.1-sqlprompt-audit-custom`（最新构建；现役生产为 `0.1.7-sm75.1-final-v1-custom`）
-- 镜像：`vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-sqlprompt-audit`（最新构建；现役生产为 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`）
+**0→1 基线（教程口径）**
+- 版本名：`0.1.7-sm75.1-fast-custom`
+- 镜像：`vllm-sm75-gpustack:v0.1.7-beta2-v7`
+
+**最新升级层（可选）**
+- 版本名：`0.1.7-sm75.1-sqlprompt-audit-custom`
+- 镜像：0→1 路径 `vllm-sm75-gpustack:v0.1.7-beta2-v7-final-v1-sqlprompt-audit`；已有 opt15 用 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-sqlprompt-audit`
+- 现役生产：`0.1.7-sm75.1-final-v1-custom` + `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`
 - 入口覆盖：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
 
 一键写入入口与面板 env：`gpustack/set-panel-autostart-v1.sh --apply`（默认 dry-run；先看再执行）。

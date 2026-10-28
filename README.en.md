@@ -26,6 +26,8 @@ docker pull quay.io/gpustack/gpustack:v2.3.0
 
 ### 2 Build
 
+**0→1 (tutorial baseline: upstream vLLM → SM75 base → GPUStack backend)**
+
 ```bash
 git clone https://github.com/lichangfeng-1/vllm-sm75-gpustack-backend.git
 cd vllm-sm75-gpustack-backend
@@ -35,7 +37,12 @@ bash gpustack/build-backend-v1.sh --two-stage
 
 Starts from upstream vLLM 0.30.0; stage 1 produces the intermediate `vllm-sm75:v0.1.7-beta2` (cache only), stage 2 produces the public one-command image `vllm-sm75-gpustack:v0.1.7-beta2-v7`. Success marker: `BUILD_BACKEND_OK ... target=runtime-pin-layer mode=two-stage`.
 
-The latest production layers (final-v1 / SQL prompt audit) use the private optimized base `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15` as parent; from the repo root:
+**Upgrade to the latest production layers (optional; not the 0→1 upstream)**
+
+The 0→1 output is `vllm-sm75-gpustack:v0.1.7-beta2-v7`; v7/opt15 are intermediate or delivery bases, **not the upstream**. Choose one:
+
+- One command from upstream to latest (0→1 + upgrade): `bash gpustack/build-latest-from-zero-v1.sh` (use `SKIP_V7=1` if v7 already exists), producing `vllm-sm75-gpustack:v0.1.7-beta2-v7-final-v1` and `vllm-sm75-gpustack:v0.1.7-beta2-v7-final-v1-sqlprompt-audit`.
+- With opt15 (internal optimized base), from the repo root:
 
 ```bash
 docker build -f gpustack/Dockerfile.final-v1-20261029 \
@@ -46,14 +53,19 @@ docker build -f gpustack/Dockerfile.sql-prompt-audit-v20261029 \
 
 - `final-v1`: current production image (parent opt15; console maxTokens, speedtest v3.5 quota/upload, SQL finalanswer).
 - `sqlprompt-audit`: latest SQL prompt-audit layer (parent final-v1; fiscal-period format rule + tool-result truncation).
-- Without opt15, use the public v7 one-command path above; v7 already carries the same gated optimization pack.
 
 ### 3 Start GPUStack, register the backend version
 
 Full server / worker commands: [run-book §3/§5](gpustack/run-book-v1.md). Registration:
 
-- Version: `0.1.7-sm75.1-sqlprompt-audit-custom` (latest build; current production `0.1.7-sm75.1-final-v1-custom`)
-- Image: `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-sqlprompt-audit` (latest build; current production `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`)
+**0→1 baseline (tutorial):**
+- Version: `0.1.7-sm75.1-fast-custom`
+- Image: `vllm-sm75-gpustack:v0.1.7-beta2-v7`
+
+**Latest upgrade layers (optional):**
+- Version: `0.1.7-sm75.1-sqlprompt-audit-custom`
+- Image: 0→1 path `vllm-sm75-gpustack:v0.1.7-beta2-v7-final-v1-sqlprompt-audit`; opt15 path `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-sqlprompt-audit`
+- Current production: `0.1.7-sm75.1-final-v1-custom` + `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`
 - Entrypoint: `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
 
 One-shot write of the entrypoint and panel env: `gpustack/set-panel-autostart-v1.sh --apply` (dry-run by default).
