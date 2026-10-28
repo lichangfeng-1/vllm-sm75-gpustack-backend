@@ -28,6 +28,7 @@ compute capability == (7, 5)
 | `qsa_slice` | rejected | QSA 选页切片 1024→4096 行，无收益 |
 | `ar_q8_probe` | probe（永不 auto） | 只量化、不改通信，用于量 8-bit 集合通信的精度代价；按“不降精度”已作废 |
 | `qsa_timing` | probe（永不 auto） | QSA 路径计时，实测全部 <2 ms |
+| `prefill_tail_overlap` | implemented_pending_gate | 层尾重叠（o_proj→AR→HC→MLP 逐 token 分块，AR 走 side stream）；8K 合成 proxy +9.54%（上界），待 L2/L3 与 64K A/B |
 | `hc_fuse` / `gdn_fuse` / `qsa_merge` | already_fused_upstream | 上游已融合，永不加载 |
 
 ## 加一个优化项
