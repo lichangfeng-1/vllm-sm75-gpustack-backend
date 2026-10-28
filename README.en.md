@@ -33,14 +33,27 @@ bash gpustack/preflight-sources-v1.sh
 bash gpustack/build-backend-v1.sh --two-stage
 ```
 
-Starts from upstream vLLM 0.30.0; stage 1 produces the intermediate `vllm-sm75:v0.1.7-beta2` (cache only), stage 2 produces `vllm-sm75-gpustack:v0.1.7-beta2-v7`. Success marker: `BUILD_BACKEND_OK ... target=runtime-pin-layer mode=two-stage`.
+Starts from upstream vLLM 0.30.0; stage 1 produces the intermediate `vllm-sm75:v0.1.7-beta2` (cache only), stage 2 produces the public one-command image `vllm-sm75-gpustack:v0.1.7-beta2-v7`. Success marker: `BUILD_BACKEND_OK ... target=runtime-pin-layer mode=two-stage`.
+
+The latest production layers (final-v1 / SQL prompt audit) use the private optimized base `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15` as parent; from the repo root:
+
+```bash
+docker build -f gpustack/Dockerfile.final-v1-20261029 \
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1 .
+docker build -f gpustack/Dockerfile.sql-prompt-audit-v20261029 \
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-sqlprompt-audit .
+```
+
+- `final-v1`: current production image (parent opt15; console maxTokens, speedtest v3.5 quota/upload, SQL finalanswer).
+- `sqlprompt-audit`: latest SQL prompt-audit layer (parent final-v1; fiscal-period format rule + tool-result truncation).
+- Without opt15, use the public v7 one-command path above; v7 already carries the same gated optimization pack.
 
 ### 3 Start GPUStack, register the backend version
 
 Full server / worker commands: [run-book §3/§5](gpustack/run-book-v1.md). Registration:
 
-- Version: `0.1.7-sm75.1-fast-custom`
-- Image: `vllm-sm75-gpustack:v0.1.7-beta2-v7`
+- Version: `0.1.7-sm75.1-sqlprompt-audit-custom` (latest build; current production `0.1.7-sm75.1-final-v1-custom`)
+- Image: `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-sqlprompt-audit` (latest build; current production `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`)
 - Entrypoint: `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
 
 One-shot write of the entrypoint and panel env: `gpustack/set-panel-autostart-v1.sh --apply` (dry-run by default).
@@ -92,7 +105,7 @@ Below / above this table is not guaranteed; see [run-book §0](gpustack/run-book
 - 8K/16K/32K/64K/128K output **63.52/63.15/63.00/62.48/61.50**; TTFT **2013/4127/9200/19758/42595 ms**.
 - Current vs upstream **+46.2%** (cross-session, different weights; delivered PLE is BF16 vs FP8 in the upstream FP8PLE set, so this is not a precision-for-speed trade); same-weights FP8PLE is +33.3% (57.73).
 - The direct-ruler 2019/8643 ms and 59.6–61.6 tok/s are a separate ruler; **do not subtract them from the panel 63.30**; details and negative results: [tuning doc](docs/tuning/flash-next-20261027.md).
-- 63.30 was measured on the 2026-10-27 opt15 thin layer; the `-v7` delivery image ships the same gated package and can reproduce it with the same production knobs (use your own same-ruler numbers). Without them it is the historical PIECEWISE profile (57.04).
+- 63.30 was measured on the 2026-10-27 opt15 thin layer; the public one-command `-v7` image ships the same gated package and can reproduce it with the same production knobs (use your own same-ruler numbers). final-v1 / sqlprompt-audit only change the console and panel extensions, not engine parameters; the 63.30 profile is unchanged. Without them it is the historical PIECEWISE profile (57.04).
 
 ## Gated package
 
@@ -107,7 +120,8 @@ The image ships `vllm_sm75`, auto-installed through `vllm.general_plugins`; with
 - [docs/README.md](docs/README.md): docs index.
 - [run-book](gpustack/run-book-v1.md): zero-to-serving, paste blocks, troubleshooting.
 - [tuning](docs/tuning/flash-next-20261027.md): 63.30 baseline, negative results, hardware floors.
-- [backend card](gpustack/backend-version-card-v1.md): registration form, field by field.
+- [backend card](gpustack/backend-version-card-v1.md): registration form, field by field (includes the 2026-10-29 internal deployment addendum).
+- [final-v1 recipe](gpustack/Dockerfile.final-v1-20261029) / [SQL prompt-audit recipe](gpustack/Dockerfile.sql-prompt-audit-v20261029): latest image layers.
 - [compat matrix](gpustack/compat-matrix-v1.md): capabilities and reading boundaries.
 - [release notes](gpustack/release-notes-v2.3.0-v1.md): GPUStack 2.3.0.
 - [design](docs/design/): design and research notes.
