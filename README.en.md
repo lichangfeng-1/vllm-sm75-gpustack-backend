@@ -129,6 +129,20 @@ vllm_sm75/  gated optimization package
 - New deliverables live in `gpustack/`; upstream files are protected by the freeze table, exceptions recorded in `NOTICE`.
 - License: Apache-2.0; third-party notices in `NOTICE` and `gpustack/backend-version-card-v1.md`.
 
+## Acknowledgements
+
+This repository builds on the following open-source work:
+
+- **VLLM-SM75 (fishensw)**: the SM75/Turing vLLM adaptation and Ultra console source (Apache-2.0); upstream base vLLM 0.30.0; per-item provenance in `NOTICE`.
+- **vLLM, FlashInfer, PyTorch, Triton, NCCL**: inference runtime, attention/communication kernels and collective communication.
+- **GPUStack**: model deployment, backend versions and operations control plane.
+- **AutoRound (Intel)** and **Qwen3.8-Flash-Next**: W4A16 quantization toolchain and base model; this repo does not redistribute weights.
+- **DeepSeek Harness (@deepseek-ai/dsh)**: the session and plugin framework behind the console workbench.
+- **llm_speedtest (gengchaogit)**: the speed test in the console's "Model Test" page; its credits include Bilibili creator "纸鸢随风", the DeepSeek-R1-0528 open speed-test script and llm-inference-bench.
+- Thanks also to the vLLM, SGLang, Ollama and llama.cpp communities for public benchmarks and tuning practices.
+
+Third-party licenses, versions and provenance: `NOTICE` and `gpustack/backend-version-card-v1.md`.
+
 ## GPUStack 2.3.0
 
 Tested offline docs, Anthropic `/v1/messages`, model YAML export/import, deployment revisions / rollback; PD disaggregation, shared KV, vGPU / MIG and multi-replica routing are not applicable here. Upgrade / rollback and untested items: [release notes](gpustack/release-notes-v2.3.0-v1.md) and run-book §0.1.
