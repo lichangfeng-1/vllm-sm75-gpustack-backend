@@ -75,8 +75,8 @@
     },
     "prefill_tail_overlap": {
       "default": "off",
-      "status": "implemented_pending_gate",
-      "note": "Layer-tail overlap: the attention core (QKV/QSA/GDN/KV) stays whole-batch; only the per-token tail o_proj -> all-reduce -> HC -> MLP is chunked and the o_proj AR runs on a side stream. Tuning: VLLM_SM75_TAIL_MIN_TOKENS (2048), TAIL_MAX_TOKENS (8192), TAIL_SPLIT (0.16667,0.5,0.83333), TAIL_SIDE_GROUP (new default; same is a diagnostic). A separate side communicator is required because the MLP's internal collectives use the TP communicator. Isolated 8xT10 microbench 2026-10-28: Phase-1 sync proxy +9.54% at 8K, hidden 37.0% of the o_proj AR, chunked AR 1.02x of the 42 MB AR; the MLP there is a dense fp16 proxy with no EP all-to-all, so the number is an upper bound. L2/L3 and a real 64K A/B are pending.",
+      "status": "failed_l2l3",
+      "note": "L2/L3 FAIL (2026-10-28): tail-off 8K single-segment L3 mean -1.65726 (RUNS=2); tail-on with the shared TP communicator -3.20358, delta 1.546 nats (gate 0.002-0.005) = silent wrong sum; tail-on with the default new group hangs the first 8K prefill (sample_tokens RPC timeout). Root cause: side AR vs MLP internal collectives (stream/communicator ordering) + per-chunk MoE forward context. Do not enable. The earlier 9.54% microbench was a dense-proxy upper bound without EP all-to-all. Layer-tail overlap: the attention core (QKV/QSA/GDN/KV) stays whole-batch; only the per-token tail o_proj -> all-reduce -> HC -> MLP is chunked and the o_proj AR runs on a side stream. Tuning: VLLM_SM75_TAIL_MIN_TOKENS (2048), TAIL_MAX_TOKENS (8192), TAIL_SPLIT (0.16667,0.5,0.83333), TAIL_SIDE_GROUP (new default; same is a diagnostic). A separate side communicator is required because the MLP's internal collectives use the TP communicator. Isolated 8xT10 microbench 2026-10-28: Phase-1 sync proxy +9.54% at 8K, hidden 37.0% of the o_proj AR, chunked AR 1.02x of the 42 MB AR; the MLP there is a dense fp16 proxy with no EP all-to-all, so the number is an upper bound. L2/L3 and a real 64K A/B are pending.",
       "l4_gain_pct": null
     }
   },
