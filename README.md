@@ -33,14 +33,27 @@ bash gpustack/preflight-sources-v1.sh
 bash gpustack/build-backend-v1.sh --two-stage
 ```
 
-起点是上游 vLLM 0.30.0；第一段产出中间基座 `vllm-sm75:v0.1.7-beta2`（只是构建缓存），第二段产出交付镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v7`。成功标志：`BUILD_BACKEND_OK ... target=runtime-pin-layer mode=two-stage`。
+起点是上游 vLLM 0.30.0；第一段产出中间基座 `vllm-sm75:v0.1.7-beta2`（只是构建缓存），第二段产出公开一键镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v7`。成功标志：`BUILD_BACKEND_OK ... target=runtime-pin-layer mode=two-stage`。
+
+最新生产形态（final-v1 / SQL 提示词审计层）以私有优化基座 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15` 为父；在仓库根目录：
+
+```bash
+docker build -f gpustack/Dockerfile.final-v1-20261029 \
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1 .
+docker build -f gpustack/Dockerfile.sql-prompt-audit-v20261029 \
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-sqlprompt-audit .
+```
+
+- `final-v1`：现役生产镜像（父 opt15；console maxTokens、测速 v3.5 配额/上传、SQL finalanswer）。
+- `sqlprompt-audit`：最新 SQL 提示词审计薄层（父 final-v1；财年/财季格式约束 + 工具结果截断）。
+- 没有 opt15 时用上面的公开一键 v7 路径；v7 已含同一门控包。
 
 ### 3 起 GPUStack，注册后端版本
 
 server / worker 的完整命令见 [run-book §3/§5](gpustack/run-book-v1.md)。注册后端时填：
 
-- 版本名：`0.1.7-sm75.1-fast-custom`
-- 镜像：`vllm-sm75-gpustack:v0.1.7-beta2-v7`
+- 版本名：`0.1.7-sm75.1-sqlprompt-audit-custom`（最新构建；现役生产为 `0.1.7-sm75.1-final-v1-custom`）
+- 镜像：`vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-sqlprompt-audit`（最新构建；现役生产为 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`）
 - 入口覆盖：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`
 
 一键写入入口与面板 env：`gpustack/set-panel-autostart-v1.sh --apply`（默认 dry-run；先看再执行）。
@@ -92,7 +105,7 @@ bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt
 - 8K/16K/32K/64K/128K 输出 **63.52/63.15/63.00/62.48/61.50**；TTFT **2013/4127/9200/19758/42595 ms**。
 - 当前相对上游 **+46.2%**（跨场次，且权重不同；本交付 PLE 为 BF16、上游 FP8PLE 为 FP8，不是降精度换速度）；同权重 FP8PLE 对照是 +33.3%（57.73）。
 - 直测尺的 2019/8643 ms 与 59.6–61.6 tok/s 是另一把尺，**不与面板 63.30 相减**；逐项读数、负结果与硬件地板见 [调优文档](docs/tuning/flash-next-20261027.md)。
-- 63.30 是 2026-10-27 在 opt15 薄层上的同机读数；交付镜像 `-v7` 已内置同一门控包，按同一组生产参数可复现，读数以本机同尺为准。不加这些参数时是历史 PIECEWISE 档（57.04）。
+- 63.30 是 2026-10-27 在 opt15 薄层上的同机读数；公开一键镜像 `-v7` 已内置同一门控包，按同一组生产参数可复现，读数以本机同尺为准。final-v1 / sqlprompt-audit 只改 console 与面板扩展，不改引擎参数，63.30 档位读数不变。不加这些参数时是历史 PIECEWISE 档（57.04）。
 
 ## 门控优化包
 
@@ -107,7 +120,8 @@ bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt
 - [docs/README.md](docs/README.md)：文档索引。
 - [run-book](gpustack/run-book-v1.md)：0→1 部署、粘贴块、排错。
 - [tuning](docs/tuning/flash-next-20261027.md)：63.30 基线、负结果、硬件地板。
-- [backend card](gpustack/backend-version-card-v1.md)：后端注册表单逐项。
+- [backend card](gpustack/backend-version-card-v1.md)：后端注册表单逐项（含 2026-10-29 内部部署增补）。
+- [final-v1 配方](gpustack/Dockerfile.final-v1-20261029) / [SQL 提示词审计配方](gpustack/Dockerfile.sql-prompt-audit-v20261029)：最新镜像薄层。
 - [compat matrix](gpustack/compat-matrix-v1.md)：能力落点与读数边界。
 - [release notes](gpustack/release-notes-v2.3.0-v1.md)：GPUStack 2.3.0。
 - [design](docs/design/)：设计与调研笔记。
