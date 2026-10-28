@@ -1,12 +1,14 @@
 # SQL 判分修复验证包（sm75-finalanswer-v1）
 
-本目录是 `gpustack/layers/panel/extensions/sql/sql_benchmark-v20261028.html` 的验证件，全部只读、无网络依赖（复判需要本地 DuckDB 1.4.4）。
+本目录是 `gpustack/layers/panel/extensions/sql/sql_benchmark-v20261029.html` 的验证件，全部只读、无网络依赖（复判需要本地 DuckDB 1.4.4）。
+
+> 2026-10-29：v20261029 在 v20261028 的判分逻辑上增加财年/财季格式约束与工具结果截断；测试仍验证判分逻辑，v20261028 也可单独跑。
 
 ## 1 合成 trace 单测（Node，无第三方依赖）
 
 ```bash
-node gpustack/tests/sql_judge/test-selector-v1.mjs gpustack/layers/panel/extensions/sql/sql_benchmark-v20261028.html
-node gpustack/tests/sql_judge/test-agentloop-v1.mjs gpustack/layers/panel/extensions/sql/sql_benchmark-v20261028.html
+node gpustack/tests/sql_judge/test-selector-v1.mjs gpustack/layers/panel/extensions/sql/sql_benchmark-v20261029.html
+node gpustack/tests/sql_judge/test-agentloop-v1.mjs gpustack/layers/panel/extensions/sql/sql_benchmark-v20261029.html
 node gpustack/tests/sql_judge/control-upstream-v1.mjs gpustack/layers/panel/extensions/sql/sql_benchmark.html
 ```
 
@@ -21,7 +23,7 @@ node gpustack/tests/sql_judge/control-upstream-v1.mjs gpustack/layers/panel/exte
 ```bash
 # 1) 从页面抽题目与期望值
 node gpustack/tests/sql_judge/extract_questions_v1.mjs \
-  gpustack/layers/panel/extensions/sql/sql_benchmark-v20261028.html questions.json
+  gpustack/layers/panel/extensions/sql/sql_benchmark-v20261029.html questions.json
 
 # 2) trace CSV -> 逐题候选 SQL
 python gpustack/tests/sql_judge/parse_traces_v2.py <trace_dir> candidates.json
