@@ -1,0 +1,12 @@
+# SQL 判分扩展 sm75-finalanswer-v1 薄层：只替换 panel sql 扩展，不动推理层。
+# 父镜像默认现役 opt15；构建与验装见 build-sql-finalanswer-v1.sh。
+# 上下文＝本扩展目录即可直接构建：所有 COPY 源都用带版本后缀的文件，避免误装上游入口。
+ARG PARENT=vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15
+FROM ${PARENT}
+ARG SQL_UPSTREAM_COMMIT=2aa49062f411928acd02d90ac8dddffe1b77a00e
+LABEL org.sm75.sql.upstream="${SQL_UPSTREAM_COMMIT}"
+LABEL org.sm75.sql.scoring="sm75-finalanswer-v1"
+COPY sql_benchmark-v20261028.html /opt/sm75-workbench/extensions/sql/sql_benchmark.html
+COPY sql_benchmark-v20261028.html /opt/sm75-workbench/extensions/sql/sql_benchmark-v20261028.html
+COPY manifest-v20261028.json /opt/sm75-workbench/extensions/sql/manifest.json
+COPY UPSTREAM-v20261028.md /opt/sm75-workbench/extensions/sql/UPSTREAM-v20261028.md
