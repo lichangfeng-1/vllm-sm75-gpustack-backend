@@ -129,6 +129,22 @@ vllm_sm75/  门控优化包
 - 本仓新增交付物在 `gpustack/`；上游文件受冻结表保护，例外登记在 `NOTICE`。
 - 许可：Apache-2.0；第三方来源见 `NOTICE` 与 `gpustack/backend-version-card-v1.md`。
 
+## 致谢
+
+本仓的推理、部署与面板能力建立在下列开源工作之上：
+
+- **VLLM-SM75（fishensw）**：SM75/Turing 的 vLLM 适配与 Ultra 控制台来源（Apache-2.0）；
+  上游基座 vLLM 0.30.0，逐项来源见 `NOTICE`。
+- **vLLM、FlashInfer、PyTorch、Triton、NCCL**：推理运行时、注意力/通信内核与集合通信基础。
+- **GPUStack**：模型部署、后端版本与运维控制面。
+- **AutoRound（Intel）** 与 **Qwen3.8-Flash-Next**：W4A16 量化工具链与基础模型；本仓不重新分发权重。
+- **DeepSeek Harness（@deepseek-ai/dsh）**：控制台“工作台”的会话与插件框架。
+- **llm_speedtest（gengchaogit）**：控制台“模型测试”页的测速工具；其致谢包括 Bilibili 创作者“纸鸢随风”、
+  DeepSeek-R1-0528 开源测速脚本与 llm-inference-bench。
+- 也感谢 vLLM、SGLang、Ollama、llama.cpp 等推理引擎社区公开的基准与调优实践。
+
+第三方许可、版本与逐项来源见 `NOTICE` 与 `gpustack/backend-version-card-v1.md`。
+
 ## GPUStack 2.3.0
 
 已实测离线文档、Anthropic `/v1/messages`、模型 YAML 导出/导入、revision / 回滚；PD 分离、共享 KV、vGPU / MIG、多副本负载路由当前不适用。升级 / 回退与未测项见 [release notes](gpustack/release-notes-v2.3.0-v1.md) 与 run-book §0.1。
