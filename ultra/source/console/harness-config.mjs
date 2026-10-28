@@ -19,7 +19,12 @@ export function managedHarnessConfig(profile) {
       baseURL,
       compat: {supportsDeveloperRole: false, maxTokensField: 'max_tokens'},
       models: [{id: model, input: chatConfig(profile).input, ...harnessThinking(profile),
-        ...(contextWindow > 0 ? {contextWindow} : {})}],
+        ...(contextWindow > 0 ? {contextWindow} : {}),
+        // The harness only sends thinking_token_budget when it can clamp it
+        // against a total cap (ceiling - 1024); without maxTokens the budget is
+        // dropped and reasoning runs unbounded. 64K leaves 16K thinking + ~48K
+        // answer, and keeps at least 4K of prompt room on smaller contexts.
+        maxTokens: Math.min(65536, contextWindow > 0 ? Math.max(2048, contextWindow - 4096) : 65536)}],
     },
     defaultModel: {provider: 'sm75-local', model},
   };

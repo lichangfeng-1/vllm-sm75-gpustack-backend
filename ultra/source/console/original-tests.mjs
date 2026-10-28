@@ -37,6 +37,9 @@ export class OriginalTests{
      const openaiUrl=this.external&&engineBase?engineBase+'/v1/chat/completions':this.external?'http://'+req.headers.host+prefix+'/model/v1/chat/completions':'http://'+ip+':8000/v1/chat/completions';
      html=html.replace(/let d_openai_apiUrl = '[^']*'/,"let d_openai_apiUrl = "+JSON.stringify(openaiUrl)).replace(/let d_openai_modelName = '[^']*'/,'let d_openai_modelName = '+JSON.stringify(model));
      if(!this.external)html=html.replace("let d_api_key = '';","let d_api_key = 'sm75-managed';");
+     // v3.5 share/user APIs use site-root /api/*; the panel serves this page under
+     // the /bench-app/<type> prefix, so route them through that prefix instead.
+     html=html.replace("const BACKEND_BASE = '';","const BACKEND_BASE = "+JSON.stringify(prefix)+";");
     }else{
      const sqlOpenaiUrl=this.external&&engineBase?engineBase+'/v1/chat/completions':`http://${req.headers.host}${prefix}/model/v1/chat/completions`;
      html=html.replaceAll('https://api.openai.com/v1/chat/completions',sqlOpenaiUrl);
