@@ -75,3 +75,5 @@
 - 排行榜的数据来自浏览器直连 Supabase（`cvezaerrczywfzqcaqmx.supabase.co`，上游地址）与 jsDelivr Chart.js，内网无外网时页面可打开但无数据；旧版同样如此。
 - 上游新增的独立 `index.html`（2D 矩阵免部署版，779,199 B）未纳入本包，面板仍以 Python 后端页为唯一测速入口。
 - 新页新增 `llmPerfTestTaskType` 本地键；面板 `speedResetScript` 只清理 API 地址/密钥，不涉及该键。
+
+> **2026-10-29 补充**：final-v1 实际使用本地补丁页 [`panel-responsive/public/speedtest-v20261028.html`](../../../panel-responsive/public/speedtest-v20261028.html)（sha `cb05faa3…`）；配额安全与上传前缀见 [`UPSTREAM-v20261028.md`](../../../panel-responsive/public/UPSTREAM-v20261028.md)。本文件记录的是上游 v3.5 原样对齐，不是 final-v1 的实际入口。

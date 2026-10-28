@@ -5,8 +5,10 @@
 ## 部署与运行
 
 - [run-book](../gpustack/run-book-v1.md)：0→1 部署、粘贴块、排错、参数逐条说明。
-- [backend card](../gpustack/backend-version-card-v1.md)：后端注册表单逐项。
+- [backend card](../gpustack/backend-version-card-v1.md)：后端注册表单逐项（含 2026-10-29 final-v1 / SQL 提示词审计增补）。
 - [compat matrix](../gpustack/compat-matrix-v1.md)：能力落点与读数边界。
+- [SQL 判分扩展 v20261029](../gpustack/layers/panel/extensions/sql/UPSTREAM-v20261029.md)：finalanswer 判分、财年格式、工具结果截断。
+- [测速扩展 v20261028](../gpustack/layers/panel-responsive/public/UPSTREAM-v20261028.md)：配额安全与上传前缀。
 - [release notes](../gpustack/release-notes-v2.3.0-v1.md)：GPUStack 2.3.0 升级与新特性。
 - [configuration-v0.1.7](configuration-v0.1.7.md)：模型配置示例。
 - [set-panel-autostart](../gpustack/set-panel-autostart-v1.sh)：面板入口与 env 一键写。
