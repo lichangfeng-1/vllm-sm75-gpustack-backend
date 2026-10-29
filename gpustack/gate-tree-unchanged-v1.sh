@@ -31,8 +31,10 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 # 2026-10-19：DSH 0.2 与面板修复后重录的基线（v2）；旧 SHA256SUMS-upstream.txt 保留为历史证据。
 # 2026-10-23：v3 纳入 10 个自有提交的 8 改+2 新增（C3/速度缓存/external/性能档位/docs），v2 保留历史。
-# 需要复核旧基线时：SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream-20261019-v2.txt bash gpustack/gate-tree-unchanged-v1.sh
-TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261023-v3.txt}"
+# 2026-10-30：v4 把 ultra/ 与三个缓存目录移出冻结面，并纳入 10-27 之后的上游作用域改动（295 件）。
+#             v3 保留为历史证据，复核旧基线用：
+#             SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream-20261023-v3.txt bash gpustack/gate-tree-unchanged-v1.sh
+TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261030-v4.txt}"
 TABLE_REL=${TABLE#"$REPO_ROOT"/}
 SELF=${0##*/}
 cd "$REPO_ROOT" || exit 6
@@ -70,9 +72,20 @@ for needed_tool in find awk sed sort sha256sum wc; do
 done
 
 # 上游作用域内所有普通文件（相对路径，按字节序排序）。
-# 排除：.git（版本库元数据）、gpustack/ 与 NOTICE（本仓自研，任务 3-5 要回填，不能钉进上游基线）。
+#
+# 2026-10-30 v4：冻结面排除表显式化。相对 v3 新增三类：
+#   - ultra/         自研 Ultra 面板（294 件），随面板迭代频繁改，不属于上游基座；
+#   - .bench-cache / .hermes-cache / .hermes-venv-cache
+#                    构建与运行缓存，内容随机器和下载时间漂移，不该进字节基线。
+# 其余（vllm/ docker/ docs/ tests/ tools/ requirements/ build-dependencies/ 根文件）
+# 仍逐字节冻结：它们要么来自上游基座，要么是本仓对外承诺过的构建产物定义。
+GATE_PRUNE=(
+  -path ./.git -o -path ./gpustack -o -path ./NOTICE -o
+  -path ./ultra -o -path ./.bench-cache -o
+  -path ./.hermes-cache -o -path ./.hermes-venv-cache
+)
 list_scope_files() {
-  find . \( -path ./.git -o -path ./gpustack -o -path ./NOTICE \) -prune -o -type f -print |
+  find . \( "${GATE_PRUNE[@]}" \) -prune -o -type f -print |
     sed 's|^\./||' | sort
 }
 
@@ -84,7 +97,7 @@ if [ "$MODE" = record ]; then
     echo "确实需要重录时加 --force，并在报告里写明理由。"
     exit 5
   fi
-  junk=$(find . \( -path ./.git -o -path ./gpustack -o -path ./NOTICE \) -prune -o \
+  junk=$(find . \( "${GATE_PRUNE[@]}" \) -prune -o \
         \( -name __pycache__ -o -name '*.pyc' -o -name '*.pyo' \) -print | sed 's|^\./||')
   if [ -n "$junk" ]; then
     echo "错误：上游作用域内存在编译产物，先清理再生成基线表："
