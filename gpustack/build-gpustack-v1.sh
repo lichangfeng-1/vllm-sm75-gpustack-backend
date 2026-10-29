@@ -256,6 +256,11 @@ if [ "$gate_rc" -ne 0 ]; then
   printf '%s\n' "$gate_out" | sed 's|^|    |' >&2
   if [ "$gate_rc" -eq 7 ]; then
     echo "红：上游护栏报漂移（其自身码 7），本脚本按约定映射为 9＝上游文件被改。" >&2
+    echo "    先分清两种原因：门禁比的是「工作树 vs 基线表」，不是「工作树 vs HEAD」。" >&2
+    echo "    (a) 真的改坏了上游件 —— 回退那处改动；" >&2
+    echo "    (b) 基线过期 —— 改动其实已在合法提交里，只是基线表还没重录。" >&2
+    echo "    判 (b) 的方法：git diff --quiet HEAD -- <被点名的文件>，干净即基线过期。" >&2
+    echo "    重录流程见 NOTICE 的「例外登记」段与 run-book 故障处理节（需 --record，并在 NOTICE 登记）。" >&2
     exit 9
   fi
   echo "红：上游护栏非漂移红（码 $gate_rc），属前置输入问题，按用法码 2 退出。" >&2

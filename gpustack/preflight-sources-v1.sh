@@ -4,6 +4,10 @@
 # 用法：
 #   bash gpustack/preflight-sources-v1.sh                 按内置默认清单探活
 #   bash gpustack/preflight-sources-v1.sh --list FILE     改用外部清单（自检与负控用）
+#   bash gpustack/preflight-sources-v1.sh --skip-group G  跳过某分组（可重复）；用于离线/内网构建：
+#                                                         G 内的源不探活、不参与"全组红"判定，
+#                                                         但仍登记源名，保证收尾一致性断言成立。
+#                                                         典型：--skip-group build_asset（两枚 GitHub Release 直链）
 #   清单格式：每行 源名|类别|URL|切换开关名|分组，# 开头为注释，空行忽略
 #   类别：registry（镜像仓库代理）| index（pypi / wheels 索引，或任何"HEAD 到就算在线"的构建期直链）
 #         | placeholder（清单里暂不放行的占位源；10-14 起本仓清单已无此类行，机制保留给外部夹具）
@@ -17,6 +21,7 @@
 #     占位前缀互锁、真实源非 http(s)）/ 清单不含真实源 / 绿红计数与真实源总数不符
 #     （＝有源被静默跳过，逐条点名）/ 缺必要工具
 #   3 至少一个分组"全组红"（逐条打印每条红源的 URL＋对应切换开关名＋所属分组）
+#   4 本机内存低于构建硬门 251 GiB（可用 --skip-mem-gate 跳过；只读 /proc/meminfo，非 Linux 自动跳过）
 #
 # 判绿口径：
 #   index       —— 与 curl -fsI 等价：请求成功且 HTTP 状态码 < 400
@@ -37,6 +42,9 @@ export LC_ALL=C
 
 LIST_FILE=""
 MAX_TIME=15
+SKIP_GROUPS=""
+skipped_by_flag=0
+SKIP_MEM_GATE=0
 
 usage() {
   awk 'NR>1{ if (/^#/) { sub(/^# ?/,""); print; next } exit }' "$0"
@@ -60,10 +68,33 @@ while [ $# -gt 0 ]; do
       [ -n "$list_abs" ] || \
         { echo "错误：--list 路径解析得到空串：$2" >&2; exit 2; }
       LIST_FILE=$list_abs; shift 2 ;;
+    --skip-group)
+      [ $# -ge 2 ] || { echo "错误：--skip-group 缺少分组名。" >&2; usage >&2; exit 2; }
+      SKIP_GROUPS="$SKIP_GROUPS $2"; shift 2 ;;
+    --skip-mem-gate) SKIP_MEM_GATE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "错误：未识别的参数「$1」。" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# 内存硬门：两层 docker build（基座 + allinone）峰值约 251 GiB。低于此值会在加载阶段 OOM，
+# 而 OOM 的表现是"构建长时间无输出"，与网络卡住难区分，排查代价高，所以提前拦。
+# 只读 /proc/meminfo，且只在真 Linux 上判定：Git Bash / Cygwin 也有 /proc/meminfo，
+# 但那是模拟文件，读数与真实构建机无关，误报会把开发机上的 dry 跑判成红。
+if [ "$SKIP_MEM_GATE" -eq 0 ] && [ "$(uname -s 2>/dev/null)" = "Linux" ] && [ -r /proc/meminfo ]; then
+  mem_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+  case "$mem_kb" in
+    ''|*[!0-9]*) : ;;
+    *)
+      mem_gib=$((mem_kb / 1024 / 1024))
+      if [ "$mem_gib" -lt 251 ]; then
+        echo "错误：本机内存 ${mem_gib} GiB，低于构建硬门 251 GiB（本脚本退出码 4）。" >&2
+        echo "      两层 docker build 峰值内存约 251 GiB；125 GiB 会在加载阶段 OOM，表现为构建长时间无输出。" >&2
+        echo "      换机器；确认只做探活、不构建时可加 --skip-mem-gate。" >&2
+        exit 4
+      fi ;;
+  esac
+fi
 
 read_list() {
   if [ -n "$LIST_FILE" ]; then
@@ -142,6 +173,16 @@ while IFS='|' read -r sid skind surl shint sgroup; do
     continue
   fi
 
+  # --skip-group：离线/内网构建时跳过需要外网的分组。该组不探活、不计入"全组红"判定，
+  # 但源名仍登记进 seen_ids，否则下面"绿红计数 vs 真实源总数"的一致性断言会把它读成静默跳过。
+  case " $SKIP_GROUPS " in
+    *" $sgroup "*)
+      printf '%-26s %-10s %-20s %-6s %-8s %s\n' "$sid" "$skind" "$sgroup" "-" "-" "跳过（--skip-group）"
+      seen_ids+=("$sid")
+      skipped_by_flag=$((skipped_by_flag + 1))
+      continue ;;
+  esac
+
   if [ -z "${group_total[$sgroup]+x}" ]; then group_order+=("$sgroup"); fi
   group_total[$sgroup]=$(( ${group_total[$sgroup]:-0} + 1 ))
 
@@ -181,9 +222,10 @@ done <<EOS
 $LIST
 EOS
 
-# 一致性断言：真实源要么判绿要么判红，任何"绿＋红 ≠ 总数"都说明有源被静默跳过——
-# 那正是本轮点名的假绿形态（清单被手工编辑过、字段数对但内容空等），一律退 2 并点名差额。
-tally=$((green + ${#red_lines[@]}))
+# 一致性断言：真实源要么判绿、要么判红、要么被 --skip-group 显式跳过；任何
+# "绿＋红＋跳过 ≠ 总数" 都说明有源被静默跳过——那正是本轮点名的假绿形态
+# （清单被手工编辑过、字段数对但内容空等），一律退 2 并点名差额。
+tally=$((green + ${#red_lines[@]} + skipped_by_flag))
 if [ "$tally" -ne "$real_total" ]; then
   echo "错误：判定计数与真实源总数不符：绿 $green ＋红 ${#red_lines[@]} ＝ $tally，" \
        "清单统计真实源 $real_total，差额 $((real_total - tally)) 条被静默跳过（本脚本退出码 2）。" >&2
@@ -216,7 +258,7 @@ for gname in "${group_order[@]}"; do
   if [ "${group_green[$gname]:-0}" -eq 0 ]; then fully_red+=("$gname"); fi
 done
 
-echo "统计：真实源 $real_total 项（绿 $green、红 ${#red_lines[@]}），占位豁免 $exempt 项；分组 ${#group_order[@]} 个，全组红 ${#fully_red[@]} 个。"
+echo "统计：真实源 $real_total 项（绿 $green、红 ${#red_lines[@]}、按 --skip-group 跳过 $skipped_by_flag），占位豁免 $exempt 项；分组 ${#group_order[@]} 个，全组红 ${#fully_red[@]} 个。"
 
 if [ "${#red_lines[@]}" -gt 0 ]; then
   if [ "${#fully_red[@]}" -gt 0 ]; then

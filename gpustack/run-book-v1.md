@@ -13,7 +13,7 @@
 
 | 项 | 要求 | 为什么 |
 | --- | --- | --- |
-| 主机内存 | **约 251 GiB** | 参数块带 `--engram-config={"cpu_offload":true}`，一部分权重常驻主机内存。64 GB 的机器会在加载阶段被 OOM killer 杀掉，且现象像"镜像坏了" |
+| 主机内存 | **约 251 GiB（硬门）** | 参数块带 `--engram-config={"cpu_offload":true}`，一部分权重常驻主机内存。64 GB 的机器会在加载阶段被 OOM killer 杀掉，且现象像"镜像坏了" |
 | 磁盘 | 数据目录所在盘可用 ≥ 250 G | 权重 17 枚 `*.safetensors` 合计 `181,196,007,016 B`（≈168.8 GiB），另需镜像与缓存余量 |
 | 网卡 | 记下宿主内网 IP，下面统一用 `HOST_IP` | worker 与浏览器都要能到达它。`export HOST_IP=192.0.2.10` 换成你的地址 |
 | 数据目录 | 下面统一用 `GS_DATA_DIR`（示例值 `/data/gpustack-data`），`export GS_DATA_DIR=/你的路径`；并且要在起容器**之前**先建好、容器要能写 | `--mount type=bind` 的源目录不存在时，失败发生在 `docker create` 而不是 `docker start`，原文 `invalid mount config for type "bind": bind source path does not exist`。另注意 GPUStack 会以 root 写这枚目录，事后普通账号删不掉 |
@@ -30,6 +30,10 @@
 | GPUStack | **quay.io/gpustack/gpustack:v2.3.0**（2026-10-23 实测；v2.2.3 为上一版） | 本文件其余 API/字段/旧行号取证仍按 2.2.3；2.3.0 兼容面见 §0.1 |
 
 **读法**：上表是"我们实际跑通的那一组"，**只作为下限**——低于它我们不保证、也未验证；高于它同样不保证（版本组合可能有行为差异），请使用者自行实测后再上生产。
+
+> **内存这一格现在是硬门，不只是要求**：`gpustack/preflight-sources-v1.sh` 在 Linux 上读
+> `/proc/meminfo`，`MemTotal < 251 GiB` 直接退出码 **4** 并打印实测值，不再让你跑到加载阶段才发现。
+> 只做探活、不构建时用 `--skip-mem-gate` 跳过。128 GiB 一类的机器属于"必然 OOM"，不要试图绕过。
 
 ### 0.1 从 2.2.3 升到 2.3.0（2026-10-23 本机实测）
 
@@ -160,13 +164,38 @@ docker build --file gpustack/Dockerfile.allinone --target runtime-pin-layer \
 ## 3 起 GPUStack server
 
 ```bash
+# 先写一个 0600 的 env 文件，token 不进命令行历史、不进 ps：
+#   install -m 600 /dev/null ${GS_TOKEN_FILE}
+#   printf 'GPUSTACK_TOKEN=%s\n' "$(openssl rand -hex 24)" >> ${GS_TOKEN_FILE}
+export GS_TOKEN_FILE=${GS_TOKEN_FILE:-$HOME/.gpustack-token.env}
+export GS_TOKEN=$(sed -n 's/^GPUSTACK_TOKEN=//p' "$GS_TOKEN_FILE")
+
 docker create --name sm75-gpustack-server --hostname sm75-gpustack-server \
   --network bridge --restart unless-stopped --env TZ=Asia/Shanghai \
   -p ${HOST_IP}:8180:80 \
   --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
-  quay.io/gpustack/gpustack:v2.3.0
+  quay.io/gpustack/gpustack:v2.3.0 \
+  --token "$GS_TOKEN"
 docker start sm75-gpustack-server
 ```
+
+**`--token` 不是可选项，是必需项**（2026-10-30 修正）。在**全新的空 `GS_DATA_DIR`** 上，
+v2.3.0 的 server 以 server-only 形态启动，此时：
+
+- `_is_both_role()` 为假 → `_should_create_default_cluster()` 为假（`server.py:1308-1315`）→
+  **默认集群不会被创建**；
+- 随之 `_ensure_registration_token()` 直接 return（`server.py:1120-1128`）→
+  **`${GS_DATA_DIR}/token` 不会被写出**。
+
+worker 随后去读自己 data_dir 里的 `token`（`config.py:312-313`），读不到就报
+`Token is required when running as worker`（`config.py:437-441`）。这是群友在 10-27 的树上撞到的现象。
+
+显式给 `--token` 之后，token 非空会让 `_should_create_default_cluster()` 为真：
+默认集群被建出来，`data_dir/token` 也一并写出。**server-only 形态不会因此变成 worker**
+（`_is_worker()` 只看 `server_url`，与 token 无关）。
+
+> 已存在的部署（`${GS_DATA_DIR}` 里已有 `token` 与数据库）不受影响，重启时保持原形制即可；
+> 加不加 `--token` 都能起来。这条修正针对的是**全新目录首启**。
 
 `unless-stopped` 的含义：进程崩了或宿主机重启会自动拉起；只有你显式 `docker stop` 之后才保持停止。要临时停机维护就用 `docker stop`，别用 `docker update` 改成 `no`（后者会让一次宿主重启后整套平台不再自启）。
 
@@ -193,7 +222,32 @@ docker exec sm75-gpustack-server cat /var/lib/gpustack/initial_admin_password
 
 ## 5 起 worker
 
-同机部署**不需要 token**：worker 取 token 的路径是 `gpustack/config/config.py:312-313` 的 `read_registration_token(self.data_dir)`，读的是**它自己 data_dir 里**那一份。不传 `--data-dir` 时 data_dir 是 OS 默认值，也就是容器内的 `/var/lib/gpustack`（`config.py:82`）⇒ **worker 必须把 `${GS_DATA_DIR}` 挂到 `/var/lib/gpustack`**（与 server 同一个目标路径），两边看到的才是同一份目录。本文件此前写作 target=${GS_DATA_DIR}，那样 worker 在自己那格空目录里找不到 token，只能退回 --token。现写法是 2026-10-18 在同一台机上实跑复验过的形制：该 worker 建的模型实例 `resolved_path=/var/lib/gpustack/cache/model_scope/…`，169 GiB 权重正常加载。
+**同机部署不需要在 worker 命令行上给 token —— 但前提是 server 那边已经把 token 文件写出来了。**
+（2026-10-30 修正：原表述把这条当成无条件成立，全新空目录首启时会踩空，见 §3 的说明。）
+
+机制：worker 取 token 的路径是 `gpustack/config/config.py:312-313` 的 `read_registration_token(self.data_dir)`，
+读的是**它自己 data_dir 里**那一份。不传 `--data-dir` 时 data_dir 是 OS 默认值，也就是容器内的
+`/var/lib/gpustack`（`config.py:82`）⇒ **worker 必须把 `${GS_DATA_DIR}` 挂到 `/var/lib/gpustack`**
+（与 server 同一个目标路径），两边看到的才是同一份目录。本文件此前写作 target=${GS_DATA_DIR}，
+那样 worker 在自己那格空目录里找不到 token，只能退回 --token。现写法是 2026-10-18 在同一台机上
+实跑复验过的形制：该 worker 建的模型实例 `resolved_path=/var/lib/gpustack/cache/model_scope/…`，
+169 GiB 权重正常加载。
+
+**起 worker 之前先验两件事**（缺一条就别起，否则 worker 会报 `Token is required when running as worker`）：
+
+```bash
+# 1) server 活着
+curl -s -o /dev/null -w '%{http_code}\n' http://${HOST_IP}:8180/healthz     # 期望 200
+# 2) 默认集群存在、token 文件已写
+curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/clusters          # 期望非空 items
+docker exec sm75-gpustack-server ls -l /var/lib/gpustack/token               # 期望看到该文件
+```
+
+**顺序有要求**：server 起来并且 token 文件出现之后，再 `docker start` worker。
+worker 的 `wait_token_file` 只等 10 秒（`config.py` 内实现），抢在 token 落盘之前起会直接失败重试。
+
+`--token` 与 `GPUSTACK_TOKEN` 两种写法都对应同一个 registration token；`--env-file` 传 `GPUSTACK_TOKEN`
+可避免它进 `ps` 与 shell 历史。
 
 ```bash
 docker create --name sm75-gpustack-worker --hostname sm75-gpustack-worker \
@@ -209,7 +263,7 @@ docker start sm75-gpustack-worker
 ```
 
 - **`--advertise-address` 不能省**。多网卡机器上 worker 会通告错地址，表现是"worker 显示 ready，但模型起不来或连不上"，很难查。
-- 跨机部署才需要 token：用 UI 的 Workers → 添加 worker 给出的整条命令，`--token` 会出现在命令行上，**同机 `ps` 可见**，跑完记得收紧该 token。
+- **跨机部署必须显式带 token**（同机靠 `${GS_DATA_DIR}/token` 那份文件）；用 UI 的 Workers → 添加 worker 给出的整条命令，`--token` 会出现在命令行上，**`ps` 可见**，跑完记得收紧该 token；或改用 `--env-file` 传 `GPUSTACK_TOKEN`。
 - **`--privileged` ＋ `docker.sock`＝容器内进程等价宿主 root**。这是 GPUStack 自己起模型容器的必要条件，无解，只能限定：只在可信机器上跑、别把 8180 发到不可信网络、API key 别写进 URL（会进访问日志）。
 - **为什么 worker 保留 host（必要项）**：worker 通过 `docker.sock` 管理模型容器，模型实例端口由平台直接开在宿主命名空间；改 bridge 需要映射 worker 监听口（10150）与每个模型端口，并重测注册/调度，未纳入本交付默认。**server 已按最小暴露走 bridge＋只映射 8180；测速与验证容器也改为 bridge＋单端口。**
 - worker 走 host 网，所以模型实例端口（如 40014）**直接开在宿主上且引擎侧不带鉴权**。"仅内网可达"是硬约束，不是建议。
@@ -1016,3 +1070,76 @@ VLLM_SM75_OPT=auto                 # 门控包：gemv_m1 + gdn_tc
 批 16384 OOM；ar_overlap / ar_prefill / qsa_slice / GDN_TC_WU=0 均无收益或更慢；
 HC 已在带宽地板；NCCL 调参无效；NCCL fp8 仅 sm90+；262K + MTP 需再腾 ~1.2 GiB/全卡，暂封存。
 
+
+## 17 离线 / 内网构建（2026-10-30 新增）
+
+§2 的构建路径里有两枚**构建期下载件**是 GitHub Release 硬直链，它们不随国内镜像代理走：
+
+| 件 | 出现在 | 用途 |
+|---|---|---|
+| `flashinfer_cubin-0.6.18-py3-none-any.whl` | `gpustack/mirror-patch-v1.patch:23`（`ADD https://github.com/flashinfer-ai/...`） | 预编译 cubin，避免 T10 上首次 JIT |
+| `nvidia-pstated` v1.0.9 | `docker/Dockerfile:234`（`curl https://github.com/sasha0552/...`） | 宿主侧 P-State 守护；GPL-3.0-only，本仓不重新分发 |
+
+两者都由 `sha256` 锚定（前者在 URL 片段里，后者是 `ARG NVIDIA_PSTATE_SHA256` + `sha256sum -c`），
+所以换源**不会**放过损坏件——校验照旧生效。
+
+### 17.1 先让探活不再因为这两条报红
+
+```bash
+bash gpustack/preflight-sources-v1.sh --skip-group build_asset
+```
+
+`build_asset` 组内的源不探活、也不参与"全组红"判定，但仍计入源名一致性断言（不会被当成静默跳过）。
+**这一步只是让探活反映"我们走离线"，不代表那两枚件已经就位**——见 17.2。
+
+### 17.2 把两枚件换成内网可达地址
+
+本仓**不改 Dockerfile 的默认 URL**（默认路径必须对公网可用）。离线机上有两种做法：
+
+**做法 A：内网 HTTP 中转（推荐，零源码改动）**
+
+1. 在一台能出网的机器上把两枚件下下来，`sha256sum` 与下表比对：
+
+   | 件 | 期望 sha256 |
+   |---|---|
+   | flashinfer_cubin-0.6.18-py3-none-any.whl | `2dd65c0fcfc6bc44c67f148530de5372979c2e3d260e47935730f94156d4d873` |
+   | nvidia-pstated 1.0.9 | `4bf5b5eba202c65f5955e2981d184b4b4baa833d1d5df36b062445d736d1eda6` |
+
+2. 放到内网静态服务器，例如 `http://10.0.0.5/assets/`；
+3. 构建前把两处 URL 换成内网地址（**只改工作树，不改仓**）：
+
+   ```bash
+   sed -i 's#https://github.com/flashinfer-ai/flashinfer/releases/download/v0.6.18/#http://10.0.0.5/assets/#' \
+     gpustack/mirror-patch-v1.patch
+   sed -i 's#https://github.com/sasha0552/nvidia-pstated/releases/download/v${NVIDIA_PSTATE_VERSION}/#http://10.0.0.5/assets/#' \
+     docker/Dockerfile
+   ```
+
+4. 构建后 `git checkout -- gpustack/mirror-patch-v1.patch docker/Dockerfile` 还原。
+
+**做法 B：hosts 劫持**（只要有域名级镜像，不想改文件）
+
+在构建机 `/etc/hosts` 把 `github.com` 指到内网镜像，并让该镜像按原路径回源。
+注意 `release-assets.githubusercontent.com` 才是真正的二进制落点，只劫 `github.com` 通常不够。
+
+### 17.3 其余离线前提
+
+- **源码包**：`github.com` 的 git 通道（SSH/HTTPS）与 `api.github.com` 是两条独立链路；
+  只开 API 时用 `gh api repos/<owner>/<repo>/tarball/<ref> > src.tar.gz` 取树（本仓 2026-10-30 实走此路）。
+- **基础镜像**：`docker/Dockerfile` 的 `BASE_IMAGE` 按 digest 钉死，内网需同步同一 digest 的镜像。
+- **Python 索引**：`PYTORCH_MIRROR` / `PIP_MIRROR` 已是国内源，内网需自建等价索引并 `--build-arg` 覆盖。
+- **GPUStack 平台镜像**：`quay.io/gpustack/gpustack:v2.3.0` 也要预先导入（`docker pull` 后 `docker save/load`）。
+
+### 17.4 验收
+
+离线机上从源码包到镜像产出全程**不应出现对 github.com 的请求**：
+
+```bash
+# 构建期间另开一窗抓包，确认没有到 github.com / release-assets.githubusercontent.com 的连接
+sudo tcpdump -ni any 'host github.com or host release-assets.githubusercontent.com' -c 5
+# 期望：无输出（或 5 秒内无包）
+docker images | grep vllm-sm75-gpustack     # 期望看到目标 tag
+```
+
+**未实机**：本节 17.2–17.4 是 2026-10-30 依源码与探活行为写的方案，**未在断网机上跑过完整构建**。
+首次离线构建请预留一次失败重试的时间，并把实际报错回填到本节。

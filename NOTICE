@@ -240,3 +240,21 @@ NOTICE —— vllm-sm75-gpustack-backend
     - README.md / README.en.md — 10-20 文档提交 + 9b8d0af（10-23 v2.3.0）
       README 两枚沿用 10-14 既有例外；v3 表已按当前版本重取 sha。
   除这 10 件外，上游树其余文件与 v2 表逐字节一致；v3 表生成后门 rc=0。
+
+  例外登记（10-30，用户批准）：冻结面收缩 + v4 基线重录
+  2026-10-30 将冻结表升级为 gpustack/SHA256SUMS-upstream-20261030-v4.txt
+  （295 条；v2 的 557 条、v3 的 559 条原表保留不改写）。
+  两条变更：
+    (1) 冻结面排除三类本不属于上游基座、且随运行/迭代漂移的路径：
+        - ultra/ —— 自研 Ultra 面板（294 件），随面板迭代频繁改；
+        - .bench-cache / .hermes-cache / .hermes-venv-cache —— 构建与运行缓存，
+          内容随机器和下载时间漂移，钉进字节基线只会制造假红。
+        排除表在 gpustack/gate-tree-unchanged-v1.sh 的 GATE_PRUNE，逐条列明。
+    (2) 纳入 10-23 之后、上游作用域内的合法改动（12 改 + 18 增），
+        主要为 10-27 的一批：docker/ 的 SM75 overlay 与 thin 镜像配方、
+        docs/ 的 flash-next/roofline/8bit-collective 系列、tests/ 的 GEMV 与门禁用例、
+        vllm/ 的 model_loader（ep_weight_filter / sm75_rank_shards）与 envs_sm75。
+  背景：群友在 10-27 的树上构建报「门 5 → 退 9」。复现确认根因是**基线停更**而非改坏：
+  门禁比的是「工作树 vs 基线表」而非「工作树 vs HEAD」，v3 表停在 10-23（ab4c6b1）。
+  验证：v4 表生成后正控 rc=0（295 件）；负控 modified/missing/extra 各报 1 件、rc=7；
+  改 ultra/ 下文件不再触发红。
