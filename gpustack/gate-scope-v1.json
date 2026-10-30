@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "updated": "2026-10-30",
+  "owned": [
+    "gpustack",
+    "NOTICE",
+    "ultra",
+    "tests",
+    "tools",
+    "vllm_sm75",
+    ".bench-cache",
+    ".hermes-cache",
+    ".hermes-venv-cache"
+  ],
+  "note": "owned 内的路径不参与上游字节冻结，可以自由改动。未列入的一切路径都属上游冻结面，逐字节比对基线表。.git 由脚本硬编码排除，不必列入。元素必须每行一个、双引号包裹，可带尾逗号。"
+}
