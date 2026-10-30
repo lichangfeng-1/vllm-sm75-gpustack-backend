@@ -1141,5 +1141,47 @@ sudo tcpdump -ni any 'host github.com or host release-assets.githubusercontent.c
 docker images | grep vllm-sm75-gpustack     # 期望看到目标 tag
 ```
 
-**未实机**：本节 17.2–17.4 是 2026-10-30 依源码与探活行为写的方案，**未在断网机上跑过完整构建**。
-首次离线构建请预留一次失败重试的时间，并把实际报错回填到本节。
+**实机状态（2026-10-30）**：17.2 做法 A（内网 HTTP 中转两枚构件）已跑通完整两段构建，产出
+`vllm-sm75:offline-test-20261030`（60.5 GB）与
+`vllm-sm75-gpustack:v0.1.7-beta2-v7-offline-test-20261030`（64 GB）；构建日志对 `github.com` 零引用，
+两枚构件由本机 HTTP `GET 200` 提供，镜像内 pstated sha 与钉值一致。
+口径：这是 **GitHub-free，不是完全气隙**——`apt` / PyPI / Docker Hub 仍走外网。
+完全气隙还缺本地 apt 源、PyPI 源与基础镜像导入，未做。
+
+### 17.5 BenchLocal 四件与 Hermes 缓存（2026-10-30 实机补）
+
+只做 17.1–17.4 不够：`.bench-cache` 里只有 `.keep` 时，`install-runtime.py` 会回退到官方源去拉
+Go / Rust / Chrome / agent-browser，干净机器在第二段 **panel-layer 15/18** 就会失败，
+现场报错是 `urllib.error.URLError: <urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING]>`。
+
+四件的文件名必须与 `ultra/source/benchlocal-verifiers/assets.lock.json` **完全一致**，放在仓根
+`.bench-cache/`；构建期该目录以 bind mount 挂到 `/bench-cache`，由 `SM75_BENCH_DOWNLOAD_CACHE` 复用：
+
+| 件 | 文件名 | sha256 | 上游 | 可用的国内镜像 |
+|---|---|---|---|---|
+| Go 1.21.13 | `go1.21.13.linux-amd64.tar.gz` | `502fc16d5910562461e6a6631fb6377de2322aad7304bf2bcd23500ba9dab4a7` | go.dev | 阿里云 golang 镜像 |
+| Rust 1.78.0 | `rust-1.78.0-x86_64-unknown-linux-gnu.tar.xz` | `ea144a052c0980dfbc6c84b3eda21e9f61b02b7b171787c7de80d7a8ad344ab3` | static.rust-lang.org | SJTUG rust-static |
+| Chrome for Testing 155.0.8059.39 | `chrome-linux64.zip` | `55672d1f392fd3e7b7a08621b6e804e6bcb39d40cf155504abb74b3a021ea8ea` | storage.googleapis.com | npmmirror binary |
+| agent-browser 0.27.0 | `agent-browser-0.27.0.tgz` | `62ef3bc80c75fc68cd70a45ec4ce981a67a4a95737580b67e8a4709afc28d875` | registry.npmjs.org | npmmirror |
+
+`install-runtime.py` 会对每个缓存件重算 sha256，不符直接
+`RuntimeError: Download hash mismatch: <key>`，不会静默放过损坏件。
+
+**Hermes 两目录**（可选；缺了会走外网 clone + pip 重建）：
+
+- `.hermes-cache/`：必须是完整 git 工作树（Dockerfile 以 `.git` 是否存在为判据），
+  HEAD 须为 `ea74f61d983ebdfd6a863c45761d1b38081f1d08`；
+- `.hermes-venv-cache/`：须有可执行的 `bin/python`（Dockerfile 以此为判据）。
+
+最省事的取法是从已有同版本镜像里直接拷：
+
+```bash
+docker create --name hsrc vllm-sm75-gpustack:v0.1.7-beta2-v7
+docker cp hsrc:/opt/hermes-agent .hermes-cache
+docker cp hsrc:/opt/hermes-venv  .hermes-venv-cache
+docker rm hsrc
+git -C .hermes-cache rev-parse HEAD   # 期望 ea74f61d983ebdfd6a863c45761d1b38081f1d08
+```
+
+这三个缓存目录已在 `gpustack/gate-scope-v1.json` 中列为 owned，不进上游字节冻结面；
+但它们的**存在**仍是构建前提——干净机器先补齐，再跑 §2 的两段构建。

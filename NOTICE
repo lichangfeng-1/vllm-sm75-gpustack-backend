@@ -258,3 +258,21 @@ NOTICE —— vllm-sm75-gpustack-backend
   门禁比的是「工作树 vs 基线表」而非「工作树 vs HEAD」，v3 表停在 10-23（ab4c6b1）。
   验证：v4 表生成后正控 rc=0（295 件）；负控 modified/missing/extra 各报 1 件、rc=7；
   改 ultra/ 下文件不再触发红。
+
+  例外登记（10-30 第二批，用户批准）：冻结面改为显式 owned 清单 + v5 基线
+  2026-10-30 将冻结表升级为 gpustack/SHA256SUMS-upstream-20261030-v5.txt
+  （204 条；v2 的 557 条、v3 的 559 条、v4 的 295 条原表保留不改写）。
+  两条变更：
+    (1) 新增 gpustack/gate-scope-v1.json 作为冻结面的权威声明：
+        owned = gpustack / NOTICE / ultra / tests / tools / vllm_sm75 /
+        .bench-cache / .hermes-cache / .hermes-venv-cache。
+        owned 内路径不参与字节冻结（可自由改动）；未列入的一切路径仍逐字节比对。
+        相对 v4 再移出 91 件自研件：tests/（53）、tools/（23）、vllm_sm75/（15）。
+    (2) gate-tree-unchanged-v1.sh 改为读取该清单生成排除表，不再硬编码 GATE_PRUNE，
+        也不再用“基线表顶层条目”推断作用域；清单缺失退 6、格式非法退 4，
+        避免静默退化成“只排除 .git + gpustack”的旧行为。
+  理由：靠顶层条目推断会把自研目录一起冻进上游面，改一次自研件就得重录一次基线，
+        与群友 10-27 遇到的“退 9”是同一类摩擦。
+  验证：v5 正控 rc=0（204 件）；负控 modified/missing/extra 各报 1 件、rc=7；
+        改 tests/、tools/、vllm_sm75/ 下文件 rc=0；清单缺失 rc=6；
+        格式非法 / 缺 gpustack / owned 含斜杠 各 rc=4。

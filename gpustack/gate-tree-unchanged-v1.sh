@@ -20,9 +20,11 @@
 # gpustack/exit-code-map-v1.md（任务 9）为权威，本注释不复制码表快照，
 # 因为滚动码表每加一个任务就会膨胀，枚举在这里必然腐化。
 #
-# 作用域定义：基线表里出现过的顶层条目（文件与目录）之并集。
-# 因此本仓自研的新顶层目录不会误红，但上游树内任何增删改都会红。
-# 自研文件请放仓根的新顶层路径（如 gpustack/、docs-gpustack/）；NOTICE 与 gpustack/ 不入基线。
+# 作用域定义：上游冻结面 = 全仓库减去 owned 清单（gate-scope-v1.json）与 .git。
+# owned 内的路径可自由改动；未列入的一律逐字节比对基线表，任何增删改（含行尾）都红。
+# 2026-10-30 v5 起作用域改为显式清单，不再靠“基线表顶层条目”推断——
+# 后者会把自研目录也冻进去，改一次自研件就得重录一次基线。
+# 清单缺失或格式非法时本脚本拒绝运行（退 6/4），避免静默退化成“只排除 .git”。
 
 set -uo pipefail
 export LC_ALL=C
@@ -32,9 +34,11 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 # 2026-10-19：DSH 0.2 与面板修复后重录的基线（v2）；旧 SHA256SUMS-upstream.txt 保留为历史证据。
 # 2026-10-23：v3 纳入 10 个自有提交的 8 改+2 新增（C3/速度缓存/external/性能档位/docs），v2 保留历史。
 # 2026-10-30：v4 把 ultra/ 与三个缓存目录移出冻结面，并纳入 10-27 之后的上游作用域改动（295 件）。
-#             v3 保留为历史证据，复核旧基线用：
+# 2026-10-30：v5 把冻结面改为 gate-scope-v1.json 显式声明，tests/ tools/ vllm_sm75/ 一并移出（204 件）。
+#             旧表全部保留为历史证据，复核旧基线用：
 #             SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream-20261023-v3.txt bash gpustack/gate-tree-unchanged-v1.sh
-TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261030-v4.txt}"
+TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261030-v5.txt}"
+SCOPE="${SM75_GATE_SCOPE:-$SCRIPT_DIR/gate-scope-v1.json}"
 TABLE_REL=${TABLE#"$REPO_ROOT"/}
 SELF=${0##*/}
 cd "$REPO_ROOT" || exit 6
@@ -64,7 +68,7 @@ fi
 
 # 工具哨兵：本脚本所有判据都来自这些工具的 stdout，而空串正是各道的“无问题”值。
 # 缺件时命令替换得到空串，会把“工具不可用”误报成“校验通过”，故一律先验可执行。
-for needed_tool in find awk sed sort sha256sum wc; do
+for needed_tool in find awk sed sort uniq grep sha256sum wc; do
   if ! command -v "$needed_tool" >/dev/null 2>&1; then
     echo "错误：缺少必要工具「$needed_tool」，拒绝校验。"
     exit 6
@@ -73,17 +77,56 @@ done
 
 # 上游作用域内所有普通文件（相对路径，按字节序排序）。
 #
-# 2026-10-30 v4：冻结面排除表显式化。相对 v3 新增三类：
-#   - ultra/         自研 Ultra 面板（294 件），随面板迭代频繁改，不属于上游基座；
-#   - .bench-cache / .hermes-cache / .hermes-venv-cache
-#                    构建与运行缓存，内容随机器和下载时间漂移，不该进字节基线。
-# 其余（vllm/ docker/ docs/ tests/ tools/ requirements/ build-dependencies/ 根文件）
-# 仍逐字节冻结：它们要么来自上游基座，要么是本仓对外承诺过的构建产物定义。
-GATE_PRUNE=(
-  -path ./.git -o -path ./gpustack -o -path ./NOTICE -o
-  -path ./ultra -o -path ./.bench-cache -o
-  -path ./.hermes-cache -o -path ./.hermes-venv-cache
-)
+# 冻结面 = 全仓库 − .git − owned 清单（gate-scope-v1.json）。
+# owned 清单是权威：改自研件、加自研目录都不该红，只有上游基座的增删改才红。
+# 清单缺失或格式非法时一律拒绝运行，绝不退化成“只排除 .git + gpustack”的旧行为。
+if [ ! -f "$SCOPE" ]; then
+  echo "错误：作用域清单不存在：${SCOPE#"$REPO_ROOT"/}"
+  echo "本脚本拒绝在无显式 owned 清单时运行——否则自研路径会被误钉进上游冻结面。"
+  exit 6
+fi
+scope_owned=$(awk '
+  /"owned"[[:space:]]*:/ { inarr=1; next }
+  inarr && /^[[:space:]]*\]/ { inarr=0; next }
+  inarr {
+    if ($0 !~ /^[[:space:]]*"[^"]+"[[:space:]]*,?[[:space:]]*$/) { print "__BADLINE__"; next }
+    line=$0
+    sub(/^[[:space:]]*"/, "", line)
+    sub(/"[[:space:]]*,?[[:space:]]*$/, "", line)
+    print line
+  }
+' "$SCOPE")
+if [ -z "$scope_owned" ]; then
+  echo "错误：作用域清单里没有解析到任何 owned 条目：${SCOPE#"$REPO_ROOT"/}"
+  exit 4
+fi
+if printf '%s\n' "$scope_owned" | grep -qx '__BADLINE__'; then
+  echo "错误：作用域清单格式非法（owned 元素须每行一个、双引号包裹）：${SCOPE#"$REPO_ROOT"/}"
+  exit 4
+fi
+scope_dups=$(printf '%s\n' "$scope_owned" | sort | uniq -d)
+if [ -n "$scope_dups" ]; then
+  echo "错误：作用域清单存在重复 owned 条目："
+  printf '%s\n' "$scope_dups" | sed 's|^|    |'
+  exit 4
+fi
+scope_bad=$(printf '%s\n' "$scope_owned" | awk '/\// || /^\.$/ || /^\.\.$/ {print}')
+if [ -n "$scope_bad" ]; then
+  echo "错误：owned 条目只能是仓根顶层名，不得含斜杠或指向上级："
+  printf '%s\n' "$scope_bad" | sed 's|^|    |'
+  exit 4
+fi
+if ! printf '%s\n' "$scope_owned" | grep -qx 'gpustack'; then
+  echo "错误：owned 清单必须包含 gpustack（本护栏自身所在目录），否则脚本会把自己钉进上游面。"
+  exit 4
+fi
+
+GATE_PRUNE=( -path ./.git )
+while IFS= read -r owned; do
+  [ -n "$owned" ] || continue
+  GATE_PRUNE+=( -o -path "./$owned" )
+done <<< "$scope_owned"
+
 list_scope_files() {
   find . \( "${GATE_PRUNE[@]}" \) -prune -o -type f -print |
     sed 's|^\./||' | sort
