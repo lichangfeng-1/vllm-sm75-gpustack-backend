@@ -2221,7 +2221,18 @@ class EngineArgs:
             kv_offloading_backend=self.kv_offloading_backend,
         )
 
-        if resolved_cache_dtype.startswith("turboquant_"):
+        # SM75 UQ: UltraQuant 4-bit KV 为默认关的兼容件 (fail-closed):
+        # 未显式 VLLM_SM75_ULTRAQUANT=1 时拒绝该 dtype, 行为与 final-v1 等价。
+        if resolved_cache_dtype == "ultraquant_4bit" and not envs.VLLM_SM75_ULTRAQUANT:
+            raise ValueError(
+                "kv-cache-dtype=ultraquant_4bit 需要显式 VLLM_SM75_ULTRAQUANT=1; "
+                "该兼容件默认关闭 (fail-closed)。"
+            )
+
+        if (
+            resolved_cache_dtype.startswith("turboquant_")
+            or resolved_cache_dtype == "ultraquant_4bit"
+        ):
             from vllm.model_executor.layers.quantization.turboquant.config import (
                 TurboQuantConfig,
             )
@@ -2616,7 +2627,10 @@ class EngineArgs:
 
         # TurboQuant requires FlashAttention 2 — FA3 boundary layers assert
         # FlashAttentionImpl which fails with TurboQuantAttentionImpl.
-        if resolved_cache_dtype.startswith("turboquant_") and (
+        if (
+            resolved_cache_dtype.startswith("turboquant_")
+            or resolved_cache_dtype == "ultraquant_4bit"
+        ) and (
             attention_config.flash_attn_version is None
             or attention_config.flash_attn_version >= 3
         ):

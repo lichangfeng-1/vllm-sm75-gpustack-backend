@@ -112,6 +112,61 @@ COPY vllm/v1/attention/backends/gdn_attn.py \
     /tmp/sm75-overlay/v1/attention/backends/gdn_attn.py
 COPY vllm/model_executor/kernels/linear/mixed_precision/marlin.py \
     /tmp/sm75-overlay/model_executor/kernels/linear/mixed_precision/marlin.py
+# sm75 compat overlay (2026-11-16): vllm-Turing 0.32 兼容件, 全部 env 默认关
+COPY vllm/model_executor/kernels/linear/nvfp4/marlin.py \
+    /tmp/sm75-overlay/model_executor/kernels/linear/nvfp4/marlin.py
+COPY vllm/model_executor/layers/quantization/utils/firefly_nvfp4.py \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly_nvfp4.py
+COPY vllm/model_executor/layers/quantization/utils/firefly_nvfp4.cu \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly_nvfp4.cu
+COPY vllm/model_executor/layers/quantization/utils/firefly_skillet.py \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly_skillet.py
+COPY vllm/model_executor/layers/quantization/utils/firefly_skillet.cu \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly_skillet.cu
+COPY vllm/model_executor/layers/quantization/utils/firefly_idecode.py \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly_idecode.py
+COPY vllm/model_executor/layers/quantization/utils/firefly_idecode.cu \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly_idecode.cu
+COPY vllm/model_executor/layers/quantization/utils/firefly_exl3.cu \
+    /tmp/sm75-overlay/model_executor/layers/quantization/utils/firefly_exl3.cu
+COPY vllm/model_executor/layers/quantization/exl3/__init__.py \
+    /tmp/sm75-overlay/model_executor/layers/quantization/exl3/__init__.py
+COPY vllm/model_executor/layers/quantization/exl3/exl3.py \
+    /tmp/sm75-overlay/model_executor/layers/quantization/exl3/exl3.py
+COPY vllm/v1/attention/backends/turboquant_attn.py \
+    /tmp/sm75-overlay/v1/attention/backends/turboquant_attn.py
+COPY vllm/v1/attention/backends/ultraquant_attn.py \
+    /tmp/sm75-overlay/v1/attention/backends/ultraquant_attn.py
+COPY vllm/v1/attention/ops/flydsl_ultraquant_decode.py \
+    /tmp/sm75-overlay/v1/attention/ops/flydsl_ultraquant_decode.py
+COPY vllm/v1/attention/ops/flydsl_kernels/ultraquant_decode_hd256.py \
+    /tmp/sm75-overlay/v1/attention/ops/flydsl_kernels/ultraquant_decode_hd256.py
+COPY vllm/v1/attention/ops/ultraquant/__init__.py \
+    /tmp/sm75-overlay/v1/attention/ops/ultraquant/__init__.py
+COPY vllm/v1/attention/ops/ultraquant/format.py \
+    /tmp/sm75-overlay/v1/attention/ops/ultraquant/format.py
+COPY vllm/v1/attention/ops/ultraquant/reference.py \
+    /tmp/sm75-overlay/v1/attention/ops/ultraquant/reference.py
+COPY vllm/v1/attention/ops/ultraquant/triton_dequant.py \
+    /tmp/sm75-overlay/v1/attention/ops/ultraquant/triton_dequant.py
+COPY vllm/v1/attention/ops/ultraquant/triton_store.py \
+    /tmp/sm75-overlay/v1/attention/ops/ultraquant/triton_store.py
+COPY vllm/v1/attention/ops/ultraquant/triton_unified_attention.py \
+    /tmp/sm75-overlay/v1/attention/ops/ultraquant/triton_unified_attention.py
+COPY vllm/v1/kv_cache_interface.py \
+    /tmp/sm75-overlay/v1/kv_cache_interface.py
+COPY vllm/config/cache.py \
+    /tmp/sm75-overlay/config/cache.py
+COPY vllm/utils/torch_utils.py \
+    /tmp/sm75-overlay/utils/torch_utils.py
+COPY vllm/v1/attention/backends/registry.py \
+    /tmp/sm75-overlay/v1/attention/backends/registry.py
+COPY vllm/platforms/cuda.py \
+    /tmp/sm75-overlay/platforms/cuda.py
+COPY vllm/platforms/interface.py \
+    /tmp/sm75-overlay/platforms/interface.py
+COPY vllm/model_executor/models/qwen3_5.py \
+    /tmp/sm75-overlay/model_executor/models/qwen3_5.py
 COPY vllm/model_executor/kernels/linear/scaled_mm/marlin.py \
     /tmp/sm75-overlay/model_executor/kernels/linear/scaled_mm/marlin.py
 COPY vllm/model_executor/kernels/linear/scaled_mm/cutlass.py \

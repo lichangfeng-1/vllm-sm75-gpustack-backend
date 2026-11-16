@@ -18,6 +18,8 @@ from vllm.model_executor.layers.linear import (
     UnquantizedLinearMethod,
 )
 from vllm.model_executor.layers.quantization.base_config import QuantizationConfig
+from vllm.triton_utils import tl, triton
+from vllm.utils.torch_utils import direct_register_custom_op
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     UnquantizedEmbeddingMethod,
 )
@@ -35,23 +37,157 @@ from .qwen3_dflash import (
 )
 from .utils import maybe_prefix
 
+from vllm import envs as _envs
+
+
+def _df2_opt() -> bool:
+    """SM75 兼容件门 (2026-11-16 吸收 0.32): 默认关 => 行为与 final-v1 一致。"""
+    return bool(_envs.VLLM_SM75_DFLASH2_OPT)
+
 
 def _use_sm75_bf16_emulation() -> bool:
     return current_platform.is_cuda() and current_platform.is_device_capability(75)
 
 
-def _use_sm75_tp4_context_fc(
+def _use_sm75_tp_context_fc(
     fc: nn.Module, config, use_aux_hidden_state: bool
 ) -> bool:
-    """Shard the unquantized FC even when the draft's MLP is quantized."""
+    """draft MLP 量化时, 未量化的 context FC 也要切分。
+
+    fc 默认是 ReplicatedLinear(每 rank 一份完整副本)。改成 ColumnParallelLinear
+    切输出维, 每 rank 只存 5120/tp, gather 回完整输出——机制对任意 tp 成立, 故
+    放开到 tp>=2, 不只是 tp4。形状门 (25600/5120) 是特定 draft 头的特征, 保留。
+    """
     return (
         _use_sm75_bf16_emulation()
-        and get_tensor_model_parallel_world_size() == 4
+        and (
+            get_tensor_model_parallel_world_size() >= 2
+            if _df2_opt()
+            else get_tensor_model_parallel_world_size() == 4
+        )
         and isinstance(fc.quant_method, UnquantizedLinearMethod)
         and use_aux_hidden_state
         and fc.input_size == 25600
         and config.hidden_size == 5120
     )
+
+@triton.jit
+def _dflash2_grouped_conv_kernel(
+    x_ptr,
+    delta_ptr,
+    base_ptr,
+    output_ptr,
+    x_stride_row,
+    delta_stride_row,
+    delta_stride_tap,
+    base_stride_tap,
+    output_stride_row,
+    NUM_CHANNELS: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
+    GROUP_SIZE: tl.constexpr,
+    TAPS: tl.constexpr,
+    ELEMENT_BLOCK: tl.constexpr,
+) -> None:
+    row = tl.program_id(0) // triton.cdiv(NUM_CHANNELS, ELEMENT_BLOCK)
+    col_block = tl.program_id(0) % triton.cdiv(NUM_CHANNELS, ELEMENT_BLOCK)
+    channels = col_block * ELEMENT_BLOCK + tl.arange(0, ELEMENT_BLOCK)
+    mask = channels < NUM_CHANNELS
+    groups = channels // GROUP_SIZE
+    position = row % BLOCK_SIZE
+
+    delta_row = delta_ptr + row * delta_stride_row
+    x_row = x_ptr + row * x_stride_row
+    accumulator = (
+        tl.load(base_ptr + channels, mask=mask, other=0.0).to(tl.float32)
+        + tl.load(delta_row + groups, mask=mask, other=0.0).to(tl.float32)
+    ) * tl.load(x_row + channels, mask=mask, other=0.0).to(tl.float32)
+
+    for tap in tl.static_range(1, TAPS):
+        tap_mask = mask & (position >= tap)
+        coefficient = tl.load(
+            base_ptr + tap * base_stride_tap + channels,
+            mask=tap_mask,
+            other=0.0,
+        ).to(tl.float32) + tl.load(
+            delta_row + tap * delta_stride_tap + groups,
+            mask=tap_mask,
+            other=0.0,
+        ).to(tl.float32)
+        x = tl.load(
+            x_ptr + (row - tap) * x_stride_row + channels,
+            mask=tap_mask,
+            other=0.0,
+        ).to(tl.float32)
+        accumulator += coefficient * x
+
+    tl.store(
+        output_ptr + row * output_stride_row + channels,
+        accumulator,
+        mask=mask,
+    )
+
+
+def dflash2_grouped_conv_impl(
+    x: torch.Tensor,
+    delta: torch.Tensor,
+    base: torch.Tensor,
+    block_size: int,
+    group_size: int,
+) -> torch.Tensor:
+    """DFlash2 grouped convolution adapted from LightSeek TokenSpeed PR #1399."""
+    num_rows, num_channels = x.shape
+    output = torch.empty_like(x)
+    if num_rows == 0:
+        return output
+
+    element_block = 1024 if num_rows >= 128 and num_channels % 1024 == 0 else 512
+    grid = (num_rows * triton.cdiv(num_channels, element_block),)
+    _dflash2_grouped_conv_kernel[grid](
+        x,
+        delta,
+        base,
+        output,
+        x.stride(0),
+        delta.stride(0),
+        delta.stride(1),
+        base.stride(0),
+        output.stride(0),
+        NUM_CHANNELS=num_channels,
+        BLOCK_SIZE=block_size,
+        GROUP_SIZE=group_size,
+        TAPS=base.shape[0],
+        ELEMENT_BLOCK=element_block,
+        num_warps=4,
+    )
+    return output
+
+
+def dflash2_grouped_conv_fake(
+    x: torch.Tensor,
+    delta: torch.Tensor,
+    base: torch.Tensor,
+    block_size: int,
+    group_size: int,
+) -> torch.Tensor:
+    return torch.empty_like(x)
+
+
+direct_register_custom_op(
+    op_name="dflash2_grouped_conv",
+    op_func=dflash2_grouped_conv_impl,
+    fake_impl=dflash2_grouped_conv_fake,
+    tags=(torch.Tag.needs_fixed_stride_order,),
+)
+
+
+def dflash2_grouped_conv(
+    x: torch.Tensor,
+    delta: torch.Tensor,
+    base: torch.Tensor,
+    block_size: int,
+    group_size: int,
+) -> torch.Tensor:
+    return torch.ops.vllm.dflash2_grouped_conv(x, delta, base, block_size, group_size)
 
 
 def _grouped_conv(
@@ -63,6 +199,9 @@ def _grouped_conv(
     group_size: int,
     taps: int,
 ) -> torch.Tensor:
+    if _df2_opt() and hidden_states.is_cuda:
+        return dflash2_grouped_conv(hidden_states, delta, base, block_size, group_size)
+
     blocks = hidden_states.unflatten(-1, (num_groups, group_size))
     coefficients = base.view(1, taps, num_groups, group_size) + delta.unsqueeze(-1)
     output = coefficients[:, 0] * blocks
@@ -86,6 +225,7 @@ class DFlashGroupedConv(nn.Module):
         block_size: int,
         params_dtype: torch.dtype,
         prefix: str,
+        quant_config: QuantizationConfig | None = None,
     ) -> None:
         super().__init__()
         if hidden_size % group_size:
@@ -105,7 +245,7 @@ class DFlashGroupedConv(nn.Module):
             2 * taps * self.num_groups,
             bias=False,
             params_dtype=params_dtype,
-            quant_config=None,
+            quant_config=quant_config if _df2_opt() else None,
             prefix=maybe_prefix(prefix, "kernel_projection"),
             return_bias=False,
         )
@@ -184,6 +324,7 @@ class DFlash2Qwen3DecoderLayer(DFlashQwen3DecoderLayer):
             # Query tokens per request: the bonus token plus the mask tokens.
             block_size=1 + speculative_config.num_speculative_tokens,
             params_dtype=vllm_config.model_config.dtype,
+            quant_config=quant_config if _df2_opt() else None,
         )
         self.attention_conv = DFlashGroupedConv(
             **conv_args, prefix=maybe_prefix(prefix, "attention_conv")
@@ -302,9 +443,10 @@ class DFlash2Qwen3Model(DFlashQwen3Model):
             prefix=prefix,
         )
         draft_config = self.config.dflash_config
-        # Backport the portable TP4 context-FC sharding from 1Cat v1.5.0.
-        # Use the existing SM75 linear implementation, never SM70-only kernels.
-        if _use_sm75_tp4_context_fc(
+        # 可移植的 TP4 context-FC 切分 (移植自参考实现)。
+        # 用现有 SM75 linear 实现, 不用 SM70 专用 kernel。
+        # 只要 FC 本身未量化就切分, 不再要求整个 draft 都不量化。
+        if _use_sm75_tp_context_fc(
             self.fc, self.config, self.use_aux_hidden_state
         ):
             self.fc = ColumnParallelLinear(

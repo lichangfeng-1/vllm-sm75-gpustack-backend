@@ -95,6 +95,23 @@ __device__ __forceinline__ uint64_t ld_acquire_sys_u64(const uint64_t* p) {
   return v;
 }
 
+// ---- GPU 自旋等待 + 有界 backoff (失锁步时不占满 SM) ----
+// 正常锁步 (vllm forward 两 rank 同层同 allreduce): 命中前自旋次数远小于阈值,
+//   不进 backoff, 开销 ~0。
+// 失锁步 (某 rank 被 CPU 侧拖慢): 连续未命中达阈值后 __nanosleep, 释放 SM,
+//   避免纯忙等把 nvidia-smi util 顶到 100%; peer 回来后仍微秒级重试快速响应。
+// 语义与裸自旋完全等价 (release/acquire 由 st/ld 保证, backoff 只是"未命中时
+//   睡一会儿"); 不引入 CPU-GPU 同步 / 回退, 保持 cudagraph capture 安全。
+__device__ __forceinline__ void spin_wait_until_eq_sys(const uint64_t* p,
+                                                       uint64_t expect) {
+  int spins = 0;
+  while (ld_acquire_sys_u64(p) != expect) {
+    if (++spins >= 128) {
+      __nanosleep(1000);
+    }
+  }
+}
+
 // fp8 转换 (sm75 无 fp8 硬件, CUDA 原生软转; c10 device 路径实测坏)
 __device__ __forceinline__ uint8_t quant_to_fp8(float v) {
   return __nv_cvt_float_to_fp8(v, __NV_SATFINITE, __NV_E4M3);
@@ -134,8 +151,7 @@ __global__ void ar_scale_exchange(char* __restrict__ shm_base,
         reinterpret_cast<uint64_t*>(base + 2 * data_half + 8);
     amax_shm[rank] = local_amax;                       // 写本端 amax
     st_release_sys_u64(flag_scale + rank, seq);         // 发布 (release)
-    while (ld_acquire_sys_u64(flag_scale + (1 - rank)) != seq) {
-    }                                                  // 等对端 (acquire)
+    spin_wait_until_eq_sys(flag_scale + (1 - rank), seq);  // 等对端 (acquire)
     float peer_amax = amax_shm[1 - rank];
     *scale_dev = fmaxf(local_amax, peer_amax) / 448.0f;  // e4m3fn max finite
   }
@@ -165,8 +181,7 @@ __global__ void ar_scale_exchange_p2p(char* __restrict__ own_base,
         reinterpret_cast<uint64_t*>(peer_base + 2 * data_half + 8);
     *own_amax = local_amax;                        // 写本端 amax
     st_release_sys_u64(own_flag, seq);             // 发布 (release)
-    while (ld_acquire_sys_u64(peer_flag) != seq) {
-    }                                              // 等对端 (acquire)
+    spin_wait_until_eq_sys(peer_flag, seq);        // 等对端 (acquire)
     *scale_dev = fmaxf(local_amax, *peer_amax) / 448.0f;
   }
 }
@@ -203,8 +218,7 @@ __global__ void ar_scale_exchange_n(char** __restrict__ bases_dev,
       char* peer = bases_dev[r];
       uint64_t* peer_flag =
           reinterpret_cast<uint64_t*>(peer + world * data_half + 8);
-      while (ld_acquire_sys_u64(peer_flag) != seq) {
-      }                                              // 等其余卡 (acquire)
+      spin_wait_until_eq_sys(peer_flag, seq);        // 等其余卡 (acquire)
       float pa = *reinterpret_cast<float*>(peer + world * data_half);
       if (pa > global_amax) global_amax = pa;
     }
@@ -234,8 +248,7 @@ __global__ void ar_scale_exchange_n_shm(char* __restrict__ shm_base,
     float global_amax = local_amax;
     for (int64_t r = 0; r < world; ++r) {
       if (r == rank) continue;
-      while (ld_acquire_sys_u64(flag_arr + r) != seq) {
-      }                                         // 等其余卡 (acquire)
+      spin_wait_until_eq_sys(flag_arr + r, seq);  // 等其余卡 (acquire)
       float pa = amax_arr[r];
       if (pa > global_amax) global_amax = pa;
     }
@@ -272,14 +285,31 @@ __global__ void ar_set_spin(uint64_t* __restrict__ my_flag,
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     uint64_t seq = *seq_dev;
     st_release_sys_u64(my_flag, seq);
-    while (ld_acquire_sys_u64(peer_flag) != seq) {
-    }
+    spin_wait_until_eq_sys(peer_flag, seq);
   }
 }
 
 // ---- kernel: seq_dev += 1 (本 allreduce 完成, 供下次 flag 递增) ----
 __global__ void ar_bump_seq(uint64_t* __restrict__ seq_dev) {
   if (threadIdx.x == 0 && blockIdx.x == 0) *seq_dev += 1;
+}
+
+// ---- kernel: 只 set 本端 flag (release), 不 spin 对端 (流水线 per-chunk 用) ----
+// 拆分自 ar_set_spin 的「set」半边: 流水线里 D2H 完一个 chunk 就发它的 flag,
+// 不必等对端 (对端 flag 由 H2D 前的 ar_flag_wait 单独等)。
+__global__ void ar_flag_set(uint64_t* __restrict__ my_flag,
+                            const uint64_t* __restrict__ seq_dev) {
+  if (threadIdx.x == 0 && blockIdx.x == 0)
+    st_release_sys_u64(my_flag, *seq_dev);
+}
+
+// ---- kernel: 只 spin 对端 flag (acquire), 不 set (流水线 per-chunk 用) ----
+// 拆分自 ar_set_spin 的「wait」半边: H2D 拉对端 chunk 前, 先等对端把该 chunk
+// 的 D2H flag 置到 seq (acquire 保证拉到的是完整 chunk)。
+__global__ void ar_flag_wait(const uint64_t* __restrict__ peer_flag,
+                             const uint64_t* __restrict__ seq_dev) {
+  if (threadIdx.x == 0 && blockIdx.x == 0)
+    spin_wait_until_eq_sys(peer_flag, *seq_dev);
 }
 
 }  // namespace
@@ -331,6 +361,147 @@ void firefly_ar_exchange(at::Tensor x, at::Tensor xq, at::Tensor xq_peer,
   cudaMemcpyAsync(xqpp, peer_data, (size_t)n, cudaMemcpyHostToDevice, stream);
   ar_dequant_sum<<<grid, threads, 0, stream>>>(xqp, xqpp, outp, scale_dev, n);
   ar_set_spin<<<1, 1, 0, stream>>>(my_flag_barrier, peer_flag_barrier, seq_dev);
+  ar_bump_seq<<<1, 1, 0, stream>>>(seq_dev);
+}
+
+// ---- 流水线 (2 卡 SHM 分块全双工) 资源: 2 持久 stream + 3 event ----
+// A=D2H (发我数据), B=H2D (收对端数据)。全双工 PCIe 链 (二号机 GPU0<->host) 上
+// A/B 真并发 (两路不同 buffer / 相反方向, 无同进程依赖)。fork_a/fork_b = 主流
+// quant 后 fork 到 A/B (A 读 xqp 须等 quant); join_b = B 拉回后 join 回主流
+// (主流 dequant 读 xqpp 前等 B 拉完)。init 时建 (capture 外), 每次 allreduce
+// 复用; destroy 释放。
+// **为何不设 join_a (B 等 A 同块)**: 同进程 B 拉 peer_data / A 发 my_data 是不同
+// host 区无冲突, 跨块正确性由 per-chunk SHM flag (peer_data_flag) 保证; 设
+// join_a 反会把 A(c) 排在 B(c) 前、限制 overlap, 且单一 event 复用 K 次有
+// 假满足风险 (wait 被更晚块的 record 满足)。去掉后 A/B 纯并发, 全双工 overlap
+// 最大化。A 无需 join 回主流: 下次 AR 的 fork_a 在主流上 (本轮 barrier wait 之
+// 后), 传递排序保证下次 AR 的 A-D2H 晚于本轮 peer 读完 my_data, 无覆盖 hazard。
+namespace {
+struct PipeState {
+  cudaStream_t a = nullptr, b = nullptr;
+  cudaEvent_t fork_a = nullptr, fork_b = nullptr;
+  cudaEvent_t join_b = nullptr;
+  cudaEvent_t join_a = nullptr;  // N 卡 butterfly pipe 用 (见 firefly_ar_butterfly_shm_pipe)
+};
+PipeState g_pipe;
+}  // namespace
+
+void firefly_ar_init_pipe() {
+  if (g_pipe.a) return;  // 幂等
+  cudaStreamCreateWithFlags(&g_pipe.a, cudaStreamNonBlocking);
+  cudaStreamCreateWithFlags(&g_pipe.b, cudaStreamNonBlocking);
+  cudaEventCreateWithFlags(&g_pipe.fork_a, cudaEventDisableTiming);
+  cudaEventCreateWithFlags(&g_pipe.fork_b, cudaEventDisableTiming);
+  cudaEventCreateWithFlags(&g_pipe.join_b, cudaEventDisableTiming);
+  cudaEventCreateWithFlags(&g_pipe.join_a, cudaEventDisableTiming);
+}
+
+void firefly_ar_destroy_pipe() {
+  if (g_pipe.a) {
+    cudaStreamDestroy(g_pipe.a);
+    cudaStreamDestroy(g_pipe.b);
+    cudaEventDestroy(g_pipe.fork_a);
+    cudaEventDestroy(g_pipe.fork_b);
+    cudaEventDestroy(g_pipe.join_b);
+    cudaEventDestroy(g_pipe.join_a);
+  }
+  g_pipe = PipeState{};
+}
+
+// host launcher (SHM 分块流水线, 2 卡): 大 n 全双工 overlap 版。
+// **数值与串行 firefly_ar_exchange 逐 bit 一致**: round1 (整消息全局 amax ->
+// common scale) + 每元素 quant/dequant 都不变, 仅把 D2H/H2D 传输按 chunk 字节
+// 分块并跨 A/B stream overlap —— 全双工链 (二号机 GPU0<->host) 上 send 块 k+1
+// (A D2H) 与 recv 块 k (B H2D) 并发, 通信项 ~2x; 半双工链 (T10/一号机) 上分块
+// 串行化 ≈ 无回退。默认关, VLLM_FIREFLY_AR_PIPE 开才走这里 (见 .py)。
+// round1 (主流): 全局 amax -> SHM 交换 -> common scale (整消息一次, 同串行)。
+// round2 (主流 + A/B 双 stream 流水线, per-chunk flag, seq 每 allreduce +1):
+//   主流: quant(整消息) -> record fork_a/fork_b (fork 到 A/B)
+//   逐块 c (A/B 并发): A 上 D2H(my_data[c]) -> ar_flag_set(my_data_flag[c])
+//           B 上 ar_flag_wait(peer_data_flag[c]) -> H2D(peer_data[c])
+//             -> ar_flag_set(my_barrier_flag[c]) -> record join_b
+//   主流: wait join_b (我 _xq_peer 拉回) -> ar_flag_wait(peer_barrier_flag[last])
+//     (对端读完我全部 my_data, 防下次 AR D2H 覆盖未读 slot, 同串行 barrier 语义)
+//     -> dequant(整消息, self _xq + peer _xq_peer) -> bump seq
+// per-chunk flag 双数组 (python 分配, 紧跟 56B 元数据, 布局见上):
+//   data_flag[rank][c]   = rank 的 D2H chunk c 完成 (peer H2D 前等)
+//   barrier_flag[rank][c] = rank 读完 peer_data chunk c (H2D 完成, peer 等)
+//   data_flag[c] 与 barrier_flag[c] 独立 (一个写 my_data 一个读 peer_data, 不同
+//   host 区, 无冲突)。两卡对称锁步 (vllm forward 同层同 allreduce), 无死锁:
+//   各 rank 的 A 流只发不等待 (D2H+set) 恒推进, B/主流只等对端已推进的 flag。
+// **cudagraph 安全**: A/B + event 在 init 建 (capture 外); 每次 allreduce 用 event
+// fork/join (主流 fork -> A/B overlap -> join 主流), 无 CPU sync, seq 由
+// ar_bump_seq device 端 +1 (replay 读当前值), flag 全读 seq_dev (by-pointer)。
+void firefly_ar_exchange_pipe(at::Tensor x, at::Tensor xq, at::Tensor xq_peer,
+                              at::Tensor out, at::Tensor scratch,
+                              int64_t shm_base, int64_t data_half,
+                              int64_t rank, int64_t n, int64_t chunk,
+                              int64_t max_chunks) {
+  const cudaStream_t stream = c10::cuda::getCurrentCUDAStream().stream();
+  const cudaStream_t sa = g_pipe.a;
+  const cudaStream_t sb = g_pipe.b;
+  const __half* xp = reinterpret_cast<const __half*>(x.data_ptr());
+  uint8_t* xqp = reinterpret_cast<uint8_t*>(xq.data_ptr());
+  uint8_t* xqpp = reinterpret_cast<uint8_t*>(xq_peer.data_ptr());
+  __half* outp = reinterpret_cast<__half*>(out.data_ptr());
+  // scratch: [+0] amax(f32) [+4] scale(f32) [+8] seq(u64)
+  void* sp = scratch.data_ptr();
+  float* amax_dev = reinterpret_cast<float*>(sp);
+  float* scale_dev = reinterpret_cast<float*>(sp) + 1;
+  uint64_t* seq_dev = reinterpret_cast<uint64_t*>(sp) + 1;
+  char* base = reinterpret_cast<char*>(shm_base);
+  uint8_t* my_data = reinterpret_cast<uint8_t*>(base) + rank * data_half;
+  uint8_t* peer_data = reinterpret_cast<uint8_t*>(base) + (1 - rank) * data_half;
+  // per-chunk flag 区 (紧跟 56B 元数据): data_flag[rank][c] / barrier_flag[rank][c]
+  const int64_t flag_off = 2 * data_half + 56;
+  uint64_t* my_data_flag =
+      reinterpret_cast<uint64_t*>(base + flag_off) + rank * max_chunks;
+  uint64_t* peer_data_flag =
+      reinterpret_cast<uint64_t*>(base + flag_off) + (1 - rank) * max_chunks;
+  uint64_t* my_barrier_flag =
+      reinterpret_cast<uint64_t*>(base + flag_off + 2 * max_chunks) +
+      rank * max_chunks;
+  uint64_t* peer_barrier_flag =
+      reinterpret_cast<uint64_t*>(base + flag_off + 2 * max_chunks) +
+      (1 - rank) * max_chunks;
+  constexpr int threads = 256;
+  const dim3 grid((unsigned)((n + threads - 1) / threads));
+  const int64_t C = chunk;  // 每块 fp8 字节 (= fp16 元素数)
+
+  // round1 (主流): 整消息全局 amax -> SHM 交换 -> common scale (数值同串行)
+  cudaMemsetAsync(amax_dev, 0, sizeof(float), stream);
+  ar_amax_partial<<<grid, threads, 0, stream>>>(xp, amax_dev, n);
+  ar_scale_exchange<<<1, 1, 0, stream>>>(reinterpret_cast<char*>(shm_base),
+                                         data_half, rank, amax_dev, scale_dev,
+                                         seq_dev);
+  // round2 (主流 + A/B 流水线): 整消息 quant -> fork 到 A/B -> 逐块 D2H/A +
+  //   H2D/B overlap -> join 主流 -> 整消息 dequant+sum -> bump seq。
+  ar_quant<<<grid, threads, 0, stream>>>(xp, xqp, scale_dev, n);
+  cudaEventRecord(g_pipe.fork_a, stream);
+  cudaEventRecord(g_pipe.fork_b, stream);
+  cudaStreamWaitEvent(sa, g_pipe.fork_a, 0);
+  cudaStreamWaitEvent(sb, g_pipe.fork_b, 0);
+  for (int64_t off = 0, c = 0; off < n; off += C, ++c) {
+    int64_t csz = (n - off < C) ? (n - off) : C;
+    // A (发): D2H 我本块 -> set 我 data_flag[c]。A 恒推进, 不等待 (全双工)。
+    cudaMemcpyAsync(my_data + off, xqp + off, (size_t)csz,
+                    cudaMemcpyDeviceToHost, sa);
+    ar_flag_set<<<1, 1, 0, sa>>>(my_data_flag + c, seq_dev);
+    // B (收): 等对端本块 D2H 完 (ar_flag_wait peer_data_flag[c], 跨进程正确性)
+    //   -> H2D 拉本块 -> set 我 barrier_flag[c] (我读完 peer 本块) -> join_b。
+    //   B 不依赖 A (不同 host 区 / 相反方向), 与 A 并发。
+    ar_flag_wait<<<1, 1, 0, sb>>>(peer_data_flag + c, seq_dev);
+    cudaMemcpyAsync(xqpp + off, peer_data + off, (size_t)csz,
+                    cudaMemcpyHostToDevice, sb);
+    ar_flag_set<<<1, 1, 0, sb>>>(my_barrier_flag + c, seq_dev);
+    cudaEventRecord(g_pipe.join_b, sb);
+  }
+  // 主流: 等 B 拉回全部 (join_b 传递依赖 A 全块已发) -> 等对端读完我全部
+  // my_data (barrier, 防下次 AR D2H 覆盖未读 slot) -> 整消息 dequant+sum -> bump
+  cudaStreamWaitEvent(stream, g_pipe.join_b, 0);
+  const int64_t last = (n + C - 1) / C - 1;
+  ar_flag_wait<<<1, 1, 0, stream>>>(peer_barrier_flag + last, seq_dev);
+  ar_dequant_sum<<<grid, threads, 0, stream>>>(xqp, xqpp, outp, scale_dev, n);
   ar_bump_seq<<<1, 1, 0, stream>>>(seq_dev);
 }
 
@@ -540,6 +711,124 @@ void firefly_ar_butterfly_shm(at::Tensor x, at::Tensor work, at::Tensor xq,
                   cudaMemcpyDeviceToDevice, stream);
 }
 
+// host launcher (N 卡 butterfly, SHM backend, 全双工分块流水线, 4 卡 = 现网 TP4):
+// **数值与串行 firefly_ar_butterfly_shm 逐 bit 一致**: round1 整消息全局 amax ->
+// N-way scale 交换、每轮 quant/dequant_sum 的 fp8 编码与累加都不变, 仅把每轮的
+// D2H(发 own slot)/H2D(拉 partner slot) 按 chunk 字节分块并跨 A/B stream overlap
+// (结构照 2 卡 firefly_ar_exchange_pipe 搬)。全双工链 (二号机 GPU<->host) 上
+// send 块 k+1 与 recv 块 k 并发, 传输项 ~2x; 半双工链上分块串行化 ≈ 无回退。
+// 比 2 卡多一处必须加固 (见 join_a 处注释): 每轮末 main 等 A 流 D2H 全部完成,
+// 否则下一轮 quant 覆写 _xq 与本轮 A 的 D2H 读之间只剩轮间 kernel 间隙,
+// 2 卡靠 AR 间的计算空隙传递排序, N 卡轮间空隙 (spin kernel 量级) 太短不可依赖。
+// 正确性 (per-chunk flag 双数组, 布局在 barrier 区之后, 见 .py 分配):
+//   data_flag[rank][c]    = rank 第 c 块 D2H 完成 (partner H2D 前等)
+//   barrier_flag[rank][c] = rank 读完 (H2D 拉回) peer 第 c 块 (partner 轮末等)
+// 每轮 partner = rank ^ offset, 各 rank 同 pattern 锁步, flag 按 seq 递增, 无死锁。
+// **cudagraph 安全**: A/B + event 在 init 建 (capture 外); seq 由 ar_bump_seq
+// device 端 +1 (replay 读当前值), flag 全读 seq_dev (by-pointer)。
+void firefly_ar_butterfly_shm_pipe(at::Tensor x, at::Tensor work, at::Tensor xq,
+                                   at::Tensor xq_peer, at::Tensor out,
+                                   at::Tensor scratch, int64_t shm_base,
+                                   int64_t data_half, int64_t rank,
+                                   int64_t world, int64_t n, int64_t chunk,
+                                   int64_t max_chunks) {
+  const cudaStream_t stream = c10::cuda::getCurrentCUDAStream().stream();
+  const cudaStream_t sa = g_pipe.a;
+  const cudaStream_t sb = g_pipe.b;
+  const __half* xp = reinterpret_cast<const __half*>(x.data_ptr());
+  __half* wp = reinterpret_cast<__half*>(work.data_ptr());
+  uint8_t* xqp = reinterpret_cast<uint8_t*>(xq.data_ptr());
+  uint8_t* xqpp = reinterpret_cast<uint8_t*>(xq_peer.data_ptr());
+  __half* outp = reinterpret_cast<__half*>(out.data_ptr());
+  void* sp = scratch.data_ptr();
+  float* amax_dev = reinterpret_cast<float*>(sp);
+  float* scale_dev = reinterpret_cast<float*>(sp) + 1;
+  uint64_t* seq_dev = reinterpret_cast<uint64_t*>(sp) + 1;
+  char* base = reinterpret_cast<char*>(shm_base);
+  constexpr int threads = 256;
+  const dim3 grid((unsigned)((n + threads - 1) / threads));
+  const int64_t C = chunk;  // 每块 fp8 字节 (= fp16 元素数)
+
+  // round1: 整消息全局 amax -> N-way 交换 -> common scale (与串行版逐字一致)
+  cudaMemsetAsync(amax_dev, 0, sizeof(float), stream);
+  ar_amax_partial<<<grid, threads, 0, stream>>>(xp, amax_dev, n);
+  ar_scale_exchange_n_shm<<<1, 1, 0, stream>>>(base, data_half, rank, world,
+                                               amax_dev, scale_dev, seq_dev);
+
+  // metadata 区指针 (相对 shm_base 单一基址, 布局与串行版一致):
+  //   [N*D, +4W) amax | [+4W, +12W) flag_scale | [+12W, +20W) flag_data
+  //   [+20W, +28W) barrier (各 W 槽位); **per-chunk flag 区紧跟 28W 之后**
+  //   (2 个数组各 world*max_chunks 个 u64, .py 按同式分配: total = N*D + 28W
+  //   + 2*W*max_chunks*8)
+  uint64_t* flag_data =
+      reinterpret_cast<uint64_t*>(base + world * data_half + 4 * world +
+                                  8 * world);
+  uint64_t* flag_barrier =
+      reinterpret_cast<uint64_t*>(base + world * data_half + 4 * world +
+                                  16 * world);
+  uint64_t* chunk_data =
+      reinterpret_cast<uint64_t*>(base + world * data_half + 28 * world);
+  uint64_t* chunk_barrier = chunk_data + world * max_chunks;
+
+  for (int64_t offset = 1; offset < world; offset <<= 1) {
+    int64_t partner = rank ^ offset;
+    uint8_t* own_data = reinterpret_cast<uint8_t*>(base) + rank * data_half;
+    uint8_t* peer_data =
+        reinterpret_cast<uint8_t*>(base) + partner * data_half;
+    uint64_t* my_cd = chunk_data + rank * max_chunks;
+    uint64_t* peer_cd = chunk_data + partner * max_chunks;
+    uint64_t* my_cb = chunk_barrier + rank * max_chunks;
+    uint64_t* peer_cb = chunk_barrier + partner * max_chunks;
+    const int64_t nchunks = (n + C - 1) / C;
+
+    // round2 (主流 + A/B 流水线): 整消息 quant -> fork A/B -> 逐块
+    //   A: D2H(my 本块) -> set my_cd[c]; B: wait peer_cd[c] -> H2D(peer 本块)
+    //   -> set my_cb[c] -> join_b; 主流: wait join_b -> wait A 全块 (join_a)
+    //   -> 整消息 dequant+sum 写回 work -> 轮 barrier (整块粒度, 同串行)
+    //   -> bump seq。
+    ar_quant<<<grid, threads, 0, stream>>>(wp, xqp, scale_dev, n);
+    cudaEventRecord(g_pipe.fork_a, stream);
+    cudaEventRecord(g_pipe.fork_b, stream);
+    cudaStreamWaitEvent(sa, g_pipe.fork_a, 0);
+    cudaStreamWaitEvent(sb, g_pipe.fork_b, 0);
+    for (int64_t off = 0, c = 0; off < n; off += C, ++c) {
+      const int64_t csz = (n - off < C) ? (n - off) : C;
+      // A (发): D2H 我本块 -> set 我 chunk_data_flag[c]。A 恒推进不等待。
+      cudaMemcpyAsync(own_data + off, xqp + off, (size_t)csz,
+                      cudaMemcpyDeviceToHost, sa);
+      ar_flag_set<<<1, 1, 0, sa>>>(my_cd + c, seq_dev);
+      // B (收): 等对端本块 D2H 完 -> H2D 拉回 -> set 我 chunk_barrier_flag[c]。
+      //   与 A 并发 (不同 host 区 / 相反方向)。
+      ar_flag_wait<<<1, 1, 0, sb>>>(peer_cd + c, seq_dev);
+      cudaMemcpyAsync(xqpp + off, peer_data + off, (size_t)csz,
+                      cudaMemcpyHostToDevice, sb);
+      ar_flag_set<<<1, 1, 0, sb>>>(my_cb + c, seq_dev);
+    }
+    // **join 事件必须在轮 barrier 发布前记录** (竞态关键): 同一 allreduce 的
+    // 各轮共享同一个 seq 值 (bump 在每轮末, 轮间不变)。若 A/B 全块的完成
+    // 信号在 barrier 之后才记录, partner 的 spin 在本轮就能看到"完成"标志,
+    // 而此刻它读 own_data 可能早于我的 D2H/H2D 真正落盘 -> 假满足。把
+    // record 放在 barrier 前: barrier 语义 (partner 读完) 传递排到 A/B 完成
+    // 之后, 下一轮 (或同一 AR 末轮后下次 AR) 的 flag 观察者看到的才可信。
+    cudaEventRecord(g_pipe.join_a, sa);
+    cudaEventRecord(g_pipe.join_b, sb);
+    // 主流: 等 B 拉回全部 peer 块 (dequant 读 xqpp) + 等 A 的 D2H 全部完成
+    // (下一轮 quant 覆写 xqp 前)。2 卡 pipe 无 join_a 靠 "下次 AR 的 fork_a
+    // 在本轮 barrier 后" 传递排序 (AR 间隔着 GEMM, 空隙足够); N 卡下一轮
+    // quant 紧跟在本轮后, 空隙只有轮间 flag spin (微秒级), 不可依赖。
+    // A/B 无冲突: A 只读 xqp, B 只写 xqpp, 均不碰对方目标。
+    cudaStreamWaitEvent(stream, g_pipe.join_b, 0);
+    cudaStreamWaitEvent(stream, g_pipe.join_a, 0);
+    ar_dequant_sum<<<grid, threads, 0, stream>>>(xqp, xqpp, wp, scale_dev, n);
+    ar_set_spin<<<1, 1, 0, stream>>>(flag_barrier + rank,
+                                     flag_barrier + partner, seq_dev);
+    ar_bump_seq<<<1, 1, 0, stream>>>(seq_dev);
+  }
+  // 末轮 work == 全体和 -> 拷入独立 out (不动输入 x)
+  cudaMemcpyAsync(outp, wp, (size_t)n * sizeof(__half),
+                  cudaMemcpyDeviceToDevice, stream);
+}
+
 // host: 把某 IPC buffer 的 metadata 区 (amax/flag_scale/flag_data/barrier)
 // 清零。cudaMalloc'd 显存初始是垃圾, flag 初始非 0 → 首 spin 误判「已完成」假
 // 命中、dequant 读未写 data 错值。base=buffer 首址; 零区 = [base+world*D,
@@ -556,6 +845,16 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {  // NOLINT
         "firefly allreduce SHM full-GPU (round1 amax + round2 exchange): "
         "amax + scale-exchange + quant + D2H + flag + H2D + dequant+sum + "
         "barrier + bump-seq, capture-safe");
+  m.def("firefly_ar_exchange_pipe", &firefly_ar_exchange_pipe,
+        "firefly allreduce SHM full-GPU chunked full-duplex pipeline: same "
+        "numerics as firefly_ar_exchange but D2H/H2D split into K chunks "
+        "overlapped on 2 streams (per-chunk flags) for full-duplex PCIe "
+        "links; needs firefly_ar_init_pipe + per-chunk flag region");
+  m.def("firefly_ar_init_pipe", &firefly_ar_init_pipe,
+        "create the 2 pipeline streams + 4 events (call once, outside "
+        "cudagraph capture) before firefly_ar_exchange_pipe");
+  m.def("firefly_ar_destroy_pipe", &firefly_ar_destroy_pipe,
+        "destroy pipeline streams + events (call on teardown)");
   m.def("firefly_ar_exchange_p2p", &firefly_ar_exchange_p2p,
         "firefly allreduce P2P full-GPU: amax + scale-exchange + quant + "
         "P2P data flag + dequant(P2P read) + barrier + bump-seq, "
@@ -571,6 +870,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {  // NOLINT
         "rounds, each amax-exchange(N, shm) + quant + D2H own slot + "
         "data-flag + H2D partner slot + dequant+sum -> work + barrier + "
         "bump-seq; single shm_base host-mapped region; capture-safe");
+  m.def("firefly_ar_butterfly_shm_pipe", &firefly_ar_butterfly_shm_pipe,
+        "firefly allreduce N-GPU butterfly (world=4/8, SHM) chunked "
+        "full-duplex pipeline: same numerics as firefly_ar_butterfly_shm but "
+        "each round's D2H/H2D split into chunks overlapped on 2 streams "
+        "(per-chunk flags after the barrier region) + per-round join_a; "
+        "needs firefly_ar_init_pipe");
   m.def("firefly_ar_zero_meta", &firefly_ar_zero_meta,
         "firefly allreduce: zero an IPC buffer metadata region "
         "(amax/flags/barrier); call on own + each peer after init");
