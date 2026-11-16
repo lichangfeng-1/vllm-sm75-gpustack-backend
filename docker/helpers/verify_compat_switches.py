@@ -45,8 +45,12 @@ def main():
               repr(getattr(envs, key, None)))
     check("idec-max-m-default", envs.VLLM_FIREFLY_IDEC_MAX_M == 8)
     check("skillet-spk-default", envs.VLLM_FIREFLY_SKILLET_SPK == 8)
-    # DIRECT 跟随 VLLM_FIREFLY; 本镜像 ENV VLLM_FIREFLY=auto => True (等价 final-v1)
-    check("firefly-direct-follows", isinstance(envs.VLLM_FIREFLY_DIRECT, bool))
+    # DIRECT 未显式设置时跟随 VLLM_FIREFLY; 本镜像 ENV VLLM_FIREFLY=auto => True
+    # (等价 final-v1)。断言两值一致, 而不是只断言类型。
+    check("firefly-direct-follows",
+          envs.VLLM_FIREFLY_DIRECT == bool(envs.VLLM_FIREFLY),
+          "direct=%r firefly=%r" % (envs.VLLM_FIREFLY_DIRECT,
+                                    envs.VLLM_FIREFLY))
 
     # 2) EXL3 注册门控 (默认关 => KeyError; 开 => 可解析; 须在任何 import 之前)
     from vllm.model_executor.layers.quantization import get_quantization_config
@@ -91,7 +95,20 @@ def main():
     for m in mods:
         needs_triton = ("ultraquant" in m) or ("turboquant" in m) or ("flydsl" in m)
         if needs_triton and not triton_active:
+            # 不能 import, 但至少做语法编译, 避免结构性错误被 SKIP 掩盖。
+            import importlib.util
+            spec = importlib.util.find_spec(m)
+            path = getattr(spec, "origin", None) if spec else None
+            ok, detail = bool(path), "module file not found"
+            if path:
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        compile(f.read(), path, "exec")
+                    ok, detail = True, ""
+                except SyntaxError as e:  # noqa: BLE001
+                    ok, detail = False, repr(e)
             print("SKIP (no GPU driver / triton disabled):", m)
+            check("compile:%s" % m, ok, detail)
             continue
         try:
             importlib.import_module(m)
@@ -111,14 +128,30 @@ def main():
     check("uq-backend-enum", hasattr(AttentionBackendEnum, "ULTRAQUANT")
           and AttentionBackendEnum.ULTRAQUANT is not None)
 
-    # 5) arg_utils fail-closed 守卫在场
+    # 5) arg_utils fail-closed 守卫在场 (结构化断言, 不接受注释里的字符串)
     import inspect
 
     import vllm.engine.arg_utils as au
 
-    src = inspect.getsource(au)
-    check("uq-fail-closed-guard",
-          "VLLM_SM75_ULTRAQUANT" in src and "ultraquant_4bit" in src)
+    import ast as _ast
+
+    tree = _ast.parse(inspect.getsource(au))
+    guard_ok = False
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.If):
+            continue
+        cond = _ast.dump(node.test)
+        if "VLLM_SM75_ULTRAQUANT" not in cond or "ultraquant_4bit" not in cond:
+            continue
+        for sub in node.body:
+            if (
+                isinstance(sub, _ast.Raise)
+                and isinstance(sub.exc, _ast.Call)
+                and getattr(sub.exc.func, "id", "") == "ValueError"
+            ):
+                guard_ok = True
+    check("uq-fail-closed-guard", guard_ok,
+          "no 'if ... ultraquant_4bit ... not VLLM_SM75_ULTRAQUANT: raise ValueError'")
 
     if FAILS:
         print("COMPAT-VERIFY: %d FAIL" % len(FAILS))

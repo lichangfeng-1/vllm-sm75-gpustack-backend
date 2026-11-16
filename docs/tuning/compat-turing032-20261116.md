@@ -23,7 +23,7 @@
 
 | 件 | 开关 | 默认 | 开 = 什么 | 关 = final-v1？ |
 |---|---|---|---|---|
-| firefly fp8 AR | `VLLM_FIREFLY_AR` | **关**（未设/`auto` 均关；`1`/`on`/`fp8` 才开） | fp8 SHM/P2P allreduce（≥1 MiB 消息） | 是（行 26 显式 `=0`，行为不变；**唯一语义收紧**：未设该键时不再随 `VLLM_FIREFLY` 自动开） |
+| firefly fp8 AR | `VLLM_FIREFLY_AR` | **关**（未设/`auto` 均关；`1`/`on`/`fp8` 才开） | fp8 SHM/P2P allreduce（≥1 MiB 消息） | 是（行 26 显式 `=0`，行为不变；**唯一语义收紧**：未设或显式 `auto` 都不再视为开，只有 `1`/`on`/`fp8` 才开；仓内 8 个 27B 预设与 `docker/run.sh` 默认值已同步改为显式 `0`） |
 | AR 分块流水线 | `VLLM_FIREFLY_AR_PIPE` | 关 | 2-GPU 全双工 SHM 分块 overlap | 是 |
 | NVFP4 firefly 快填 | `VLLM_FIREFLY_NVFP4` | 关 | 大 M 现反 int8 走 IMMA；decode 仍 Marlin | 是（不建快照、零额外显存） |
 | NVFP4 IDEC decode | `VLLM_FIREFLY_IDEC_NVFP4` | 关 | NVFP4 decode 也走 int8（需上项先开） | 是 |
@@ -37,11 +37,13 @@
 
 NVFP4 三项是嵌套门：`VLLM_FIREFLY_NVFP4` 为总门，`IDEC_NVFP4` 依赖总门的快照，Skillet 自带独立快照门。全部关时不建任何快照、不改任何权重布局。
 
+`VLLM_FIREFLY_AR` 的生效口径：`1`/`on`/`fp8` 算开，**未设与显式 `auto` 都按关**。仓内 27B 预设（`ultra/source/profiles/qwen38-27b-*.json`，8 件）与 `docker/run.sh` 的默认值已同步改为显式 `0`，避免旧 `auto` 语义静默变化。
+
 ## 3 GPU 实机门禁（未完成，默认关不得开）
 
 | # | 件 | 判据 |
 |---|---|---|
-| G1 | 全关等价（总门） | 同参数分别跑 final-v1 与 compat1（不设任何兼容开关）：面板同尺 decode 中位差 ≤1%、prefill/TTFT ≤3%、固定题（temp=0）逐字一致、显存差 ≤1% |
+| G1 | 全关等价（总门） | 同参数分别跑 final-v1 与 compat1（不设任何兼容开关）：面板同尺 decode 中位差 ≤1%、prefill/TTFT ≤3%、固定题（temp=0）逐字一致、显存差 ≤1%；另比对启动日志的 block/mamba 页对齐与 `Padding mamba page size` 行一致 |
 | G2 | NVFP4 firefly / Skillet / IDEC | 27B NVFP4 实验行逐项开；日志出现对应快照行；同题文本一致或 L2 相对误差 ≤1e-3；记录 decode 提速 |
 | G3 | int4 IDEC | Flash-Next W4A16 实验行开 `VLLM_FIREFLY_IDEC=1`；日志 `firefly_idecode CUDA kernel loaded`；文本一致；记录提速 |
 | G4 | TurboQuant SM75 | 起 `--kv-cache-dtype turboquant_k8v4`（或 4bit_nc）＋`VLLM_FIREFLY_TQ=1`：无 FA2 assert、预填不掉速/OOM |
@@ -53,11 +55,13 @@ NVFP4 三项是嵌套门：`VLLM_FIREFLY_NVFP4` 为总门，`IDEC_NVFP4` 依赖�
 
 ## 4 容量档：block 400 ＋ mamba fp16（纯配置，无代码）
 
-**机制**（0.30 `vllm/platforms/interface.py` 实读）：开 prefix caching 时是 align 模式，`mamba_block_size` 被强制等于 `block_size`（独立 `--mamba-block-size` 无效）；mamba 页会被 padding 到与 attention 页相等：
+**机制**（`vllm/platforms/interface.py` 的混合模型块对齐）：混合模型先保证 attention 页 ≥ mamba 页；`mamba_cache_mode=align` 时再把 `mamba_block_size` 强制等于 `block_size`（独立 `--mamba-block-size` 会被覆盖）。随后 mamba 页会被 padding 到与 attention 页相等：
 
 ```
 padding% = 100 × (block × P − M_mamba) / M_mamba
 ```
+
+口径说明：下面的 0.25% / 344,137 是在 **final-v1（0.30 基座）** 上、行 26 参数＋`--block-size 400 --mamba-ssm-cache-dtype float16` 实测；启动日志应出现 `Padding mamba page size by 0.25%` 与 `block_size=400, mamba_block_size=400`。compat1 覆盖了 `cache.py` 与 `platforms/interface.py`（UQ/TQ 支持），全关时这两件的 mamba 页行为是否与 final-v1 完全一致由 G1 门验证；**G1 通过前，容量档继续在 final-v1 上使用**。
 
 **block 880 ＋ mamba fp16**：padding **120.55%**、`kv_cache_size_tokens=338,994`，与基线 339,110 基本相同 ⇒ 无增益，**勿用 880**。
 

@@ -2,7 +2,8 @@
   "release": "0.1.7-beta2-compat1",
   "date": "2026-11-16",
   "image": "vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1",
-  "imageDigest": "sha256:9cb13d85",
+  "imageDigestPrefix": "9cb13d85",
+  "imageDigestNote": "构建证据只保留 manifest list 前缀；完整 digest 以构建机 docker image inspect 为准",
   "parentImage": "vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1",
   "parentImageId": "7267ff1c3db0",
   "build": {
@@ -28,6 +29,21 @@
   "repoChanges": [
     {
       "status": "modified",
+      "path": "NOTICE",
+      "sha256": "f2227d9754aef4b3cf5ef702d152b8fbbd03b1da2a759ead9e274dece1c6a0ff"
+    },
+    {
+      "status": "modified",
+      "path": "README.en.md",
+      "sha256": "03a4800505af2b6c4166d812131f150fdb8aeb733fdebfda9873fb74be6ff024"
+    },
+    {
+      "status": "modified",
+      "path": "README.md",
+      "sha256": "632553fc1f263e486a0347d0196cfa45d7bb66e904f58693efd9d056febf4bed"
+    },
+    {
+      "status": "modified",
       "path": "docker/Dockerfile",
       "sha256": "d6c70860604edbff07bdda40dd18282b44abdd7e3ed5632338272f5174dde73e"
     },
@@ -39,7 +55,12 @@
     {
       "status": "added",
       "path": "docker/helpers/verify_compat_switches.py",
-      "sha256": "790b95680563085113ca27f395fcfc79cba85037806714b0ece23baa42af6868"
+      "sha256": "0d8fca6981d2dfbddef44366b484c09129017588b69baf068bcd101ff2c36168"
+    },
+    {
+      "status": "modified",
+      "path": "docker/run.sh",
+      "sha256": "0cb0199c46beb3a8d48f4a7956a63771eda3fa08a1f6bdb83bc664124d73902a"
     },
     {
       "status": "modified",
@@ -57,9 +78,59 @@
       "sha256": "5fcb5f5da97b27e55e7feadb639959dfcb339079d96429c6eca66acc1bc0d6a8"
     },
     {
+      "status": "modified",
+      "path": "docs/README.md",
+      "sha256": "dbe479db84d880c3bda9f2dd50037ac9ca5a79b54d5eb50187273ec8bde64793"
+    },
+    {
+      "status": "added",
+      "path": "docs/releases/v0.1.7-beta2-compat1-release-manifest.json",
+      "sha256": "729820496dc68bd95376ebc7becae6e993d39fe4cd174b88b4ef7b525e37c1c9"
+    },
+    {
+      "status": "added",
+      "path": "docs/releases/v0.1.7-beta2-compat1.md",
+      "sha256": "2a0689912d63d4de4fdda54b99f71ea9513b6dc08dc2a078de8f877fc68044bd"
+    },
+    {
+      "status": "added",
+      "path": "docs/tuning/compat-turing032-20261116.md",
+      "sha256": "77e0eaeecc127cb09579d21d7afbe1dd8f6fd64b23faa9425fa25eb509fcab25"
+    },
+    {
       "status": "added",
       "path": "gpustack/Dockerfile.compat-v1-20261116",
-      "sha256": "a4192d1ec3f7d126630928ee284960adb6644fc208f996d4010042ab8ae30b91"
+      "sha256": "58a6db505f31f79c7a81015cf38fd579ee1b032066816f625b46c2e12b31602f"
+    },
+    {
+      "status": "added",
+      "path": "gpustack/SHA256SUMS-upstream-20261116-v6.txt",
+      "sha256": "8508afaacd863aa0be512716a08a0d9c6d6e61ee975006560a7e361bb17996a3"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/backend-version-card-v1.md",
+      "sha256": "8e898589a0d9763f7c50a4650dccabb0820b2fbbb0e3abd0e086cbfe88e65ab4"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/compat-matrix-v1.md",
+      "sha256": "7cf812599e463201193408a0d9e46698c52c12adf38d5cbf0baef3d78a975654"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/gate-tree-unchanged-v1.sh",
+      "sha256": "5c44dc0bc7051f28c32f5ad065280508a096b048e57eba1441a35b2ab0d31ee2"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/run-book-v1.md",
+      "sha256": "22f22a17b007e79d7dd82e64f8259ea208edeaecd3b5484b46221298082b9481"
+    },
+    {
+      "status": "modified",
+      "path": "tests/model_executor/test_dflash_quantization.py",
+      "sha256": "fb8cc91b80a52abb8cfcd8adabae5093390c4ed0b4dbb7b5ec11e53874e513f4"
     },
     {
       "status": "added",
@@ -233,8 +304,8 @@
     }
   ],
   "repoChangeCount": {
-    "added": 30,
-    "modified": 11
+    "added": 34,
+    "modified": 21
   },
   "imageDiff": {
     "total": 5140,
