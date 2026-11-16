@@ -98,7 +98,7 @@
     "VLLM_ALLREDUCE_USE_SYMM_MEM": "0",
     "VLLM_ALLREDUCE_USE_FLASHINFER": "0",
     "VLLM_FIREFLY": "1",
-    "VLLM_FIREFLY_AR": "auto",
+    "VLLM_FIREFLY_AR": "0",
     "VLLM_FIREFLY_AR_BACKEND": "auto"
   },
   "power": {
