@@ -276,3 +276,24 @@ NOTICE —— vllm-sm75-gpustack-backend
   验证：v5 正控 rc=0（204 件）；负控 modified/missing/extra 各报 1 件、rc=7；
         改 tests/、tools/、vllm_sm75/ 下文件 rc=0；清单缺失 rc=6；
         格式非法 / 缺 gpustack / owned 含斜杠 各 rc=4。
+
+  例外登记（11-16 第一批，兼容件层）：冻结面重录为 v6
+  2026-11-16 并入 Turing 0.32 兼容件层（全部 env 默认关）。上游作用域内有意改动 14 件：
+    - vllm/ 6 件修改：distributed/device_communicators/firefly_allreduce.cu 与 .py、
+      engine/arg_utils.py、envs_sm75.py、model_executor/kernels/linear/
+      mixed_precision/marlin.py、model_executor/layers/quantization/utils/firefly.py；
+    - docker/ 5 件修改：Dockerfile、helpers/install_sm75_overlay.py、
+      speculative/sm75_gdn_metadata.py、speculative/vllm/model_executor/models/
+      qwen3_dflash.py 与 qwen3_dflash2.py；
+    - 仓根与 docs 索引 3 件：README.md、README.en.md、docs/README.md。
+  新增 31 件：vllm/ 27 件（NVFP4/Skillet/IDEC、EXL3、TurboQuant、UltraQuant 全家族、
+  qwen3_5、platforms/cuda 与 interface、torch_utils、registry、kv_cache_interface）、
+  docker/helpers/verify_compat_switches.py 1 件、docs/ 3 件（兼容件调优、compat1
+  发布说明与清单）。
+  兼容件均为 Apache-2.0（文件头 SPDX 保留），来源为 vllm-Turing 0.32 包（vLLM 0.32 系
+  Turing 适配线），已按 0.30 API 适配；开关表与 GPU 门禁见
+  docs/tuning/compat-turing032-20261116.md。
+  口径变更：v6 在工作区行尾归一化（LF）后录制，因此 6 件历史 docs 的哈希与 v5（当时按
+  CRLF 工作区录制）不同——这是行尾口径差，不是内容改动。v5 与更早原表保留不改写。
+  验证：v6 正控 rc=0（235 件）；v5 负控 rc=7（篡改 20＝14 件有意＋6 件行尾口径、
+        缺失 0、新增 31）。
