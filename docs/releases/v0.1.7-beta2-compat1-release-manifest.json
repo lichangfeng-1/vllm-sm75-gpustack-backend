@@ -1,0 +1,257 @@
+{
+  "release": "0.1.7-beta2-compat1",
+  "date": "2026-11-16",
+  "image": "vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1",
+  "imageDigest": "sha256:9cb13d85",
+  "parentImage": "vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1",
+  "parentImageId": "7267ff1c3db0",
+  "build": {
+    "dockerfile": "gpustack/Dockerfile.compat-v1-20261116",
+    "context": "repo root",
+    "installers": [
+      "docker/helpers/install_sm75_overlay.py",
+      "docker/helpers/install_speculative.py"
+    ]
+  },
+  "switches": {
+    "VLLM_FIREFLY_AR": false,
+    "VLLM_FIREFLY_AR_PIPE": false,
+    "VLLM_FIREFLY_NVFP4": false,
+    "VLLM_FIREFLY_IDEC_NVFP4": false,
+    "VLLM_FIREFLY_SKILLET": false,
+    "VLLM_FIREFLY_IDEC": false,
+    "VLLM_FIREFLY_TQ": false,
+    "VLLM_SM75_EXL3": false,
+    "VLLM_SM75_ULTRAQUANT": false,
+    "VLLM_SM75_DFLASH2_OPT": false
+  },
+  "repoChanges": [
+    {
+      "status": "modified",
+      "path": "docker/Dockerfile",
+      "sha256": "d6c70860604edbff07bdda40dd18282b44abdd7e3ed5632338272f5174dde73e"
+    },
+    {
+      "status": "modified",
+      "path": "docker/helpers/install_sm75_overlay.py",
+      "sha256": "764d31f9968ab25c0b910abb289fca73c14294e74937e05c2b16b0a76191604d"
+    },
+    {
+      "status": "added",
+      "path": "docker/helpers/verify_compat_switches.py",
+      "sha256": "790b95680563085113ca27f395fcfc79cba85037806714b0ece23baa42af6868"
+    },
+    {
+      "status": "modified",
+      "path": "docker/speculative/sm75_gdn_metadata.py",
+      "sha256": "3d8f0cb89c140466b389d6c53e51c05a21886bf7a5f583c2428b3a8fad52693a"
+    },
+    {
+      "status": "modified",
+      "path": "docker/speculative/vllm/model_executor/models/qwen3_dflash.py",
+      "sha256": "dbbb8096cb5d5b61bb30928d46c470da3a8310bd1f4684a232ba297970111ed6"
+    },
+    {
+      "status": "modified",
+      "path": "docker/speculative/vllm/model_executor/models/qwen3_dflash2.py",
+      "sha256": "5fcb5f5da97b27e55e7feadb639959dfcb339079d96429c6eca66acc1bc0d6a8"
+    },
+    {
+      "status": "added",
+      "path": "gpustack/Dockerfile.compat-v1-20261116",
+      "sha256": "a4192d1ec3f7d126630928ee284960adb6644fc208f996d4010042ab8ae30b91"
+    },
+    {
+      "status": "added",
+      "path": "tests/test_sm75_compat_switches.py",
+      "sha256": "dc0b8004bcd17e82f103b9c44213a66416eaa6b7ed14b3527272f8ba213b5af6"
+    },
+    {
+      "status": "added",
+      "path": "vllm/config/cache.py",
+      "sha256": "853e906f79f4dc529c578438ae8d99fe2a58e2702e472f0d16f1c2204d9a7920"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/distributed/device_communicators/firefly_allreduce.cu",
+      "sha256": "b365b07d4ae767da4cde58e735a71991a3b05b37f8cec4ae7ef958931e8336c4"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/distributed/device_communicators/firefly_allreduce.py",
+      "sha256": "962751ab69b482ca95f030b586161c14c497b51e6b2a41cfb920d93052d336e3"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/engine/arg_utils.py",
+      "sha256": "b409aa2cacec197fbf4c6e6bc8810f6190f5e67ef69f51b3c5befea2d0be9416"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/envs_sm75.py",
+      "sha256": "4af79183726b2f45815ff56c8871b9bddf655c5b6326ac08ec4fd24257abf34d"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/model_executor/kernels/linear/mixed_precision/marlin.py",
+      "sha256": "8de8f770b87b526cb73d58795f785f7bcebd0291e4afc82f078c76baebfab149"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/kernels/linear/nvfp4/marlin.py",
+      "sha256": "1b48ffa22fab810bf6e309a777291def09b39fc69260db1d020ffc90890d80d7"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/exl3/__init__.py",
+      "sha256": "3b5d22eadf2828b6fb84e852420c69d627fcff610944416a9e939271b916dccf"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/exl3/exl3.py",
+      "sha256": "b10218345015f951d0b0aec3df4ddeb303c0d0b8817b8c64aaf53ee9319c5ac4"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly.py",
+      "sha256": "e03a2fa999d18a90f912d67fba3c584b66bd2f79f4881c9548a96b726d96e670"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_exl3.cu",
+      "sha256": "23fb6aeff18e288716e0459c3e9598e38d15a3a4e7efaafdebb36799586a7637"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_idecode.cu",
+      "sha256": "606ff0448b6239a2f4c888d9ff9e800f5c52c05a3ea7eb5d8016c154c9f1fcdd"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_idecode.py",
+      "sha256": "fb0a77529ccff791aea72550ad3d5f0e082841755d7bb0cb797f8fad129708ee"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_nvfp4.cu",
+      "sha256": "749a95068c9bd6f18942379e9d934badd571ff65037bdcf957ec43a033a0e041"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_nvfp4.py",
+      "sha256": "613f294b2c0b4249ac23dfd251fe708d94b6a141b6730a7e7397bca46bd8a81d"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_skillet.cu",
+      "sha256": "871c04d5aff9519e32c0ae8937ff6f2a835737654db47655ae939a161b9e4735"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_skillet.py",
+      "sha256": "1cfe144872c1dee8e6888d2341d804879419a2cac73d2e1d5736522bda90d41e"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/models/qwen3_5.py",
+      "sha256": "995d49cb3b31d4770ca46855b44eb86ca00b3bb7c66c3c5840264be9e974b908"
+    },
+    {
+      "status": "added",
+      "path": "vllm/platforms/cuda.py",
+      "sha256": "a56d57910b4cbb286625132e34c27296a8358da3ab4b93991d3d7e76659bc675"
+    },
+    {
+      "status": "added",
+      "path": "vllm/platforms/interface.py",
+      "sha256": "ca6464338b0dec15b78489b04409a28c1cc290f4eae0025d704b721057ead12c"
+    },
+    {
+      "status": "added",
+      "path": "vllm/utils/torch_utils.py",
+      "sha256": "6787340640925197515a57a62451d7f2dd3c2ce4d602e46a537454c8168275e2"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/backends/registry.py",
+      "sha256": "336f8a7121b7f073845478a45c545c3457fc1b216d82d9bf0cce502683846300"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/backends/turboquant_attn.py",
+      "sha256": "6e8b6e90f7e87a46ddb309827c4468056c4dbee909ef8a117f2e454b59864ca9"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/backends/ultraquant_attn.py",
+      "sha256": "49631f4fb5318311f199ac2448b3a6c307675f9504994d3fe7a9d046fe8320aa"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/flydsl_kernels/ultraquant_decode_hd256.py",
+      "sha256": "0a94d7687735e9773a34384c8324d5931e27a3c83993f449b485a626854d8a2e"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/flydsl_ultraquant_decode.py",
+      "sha256": "5a1f321174c2745a5803cf7f74d6cfd7ce3e4e3e2226421e3d8b127b5129d82d"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/__init__.py",
+      "sha256": "2e547a51b4f23227f93506249d6988daabd07c2b1e614742fa578b31eae0399c"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/format.py",
+      "sha256": "3b82892628e784b21ff5acc9519d94418a0a820427223b2efe0b5a023df243c7"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/reference.py",
+      "sha256": "9bd101cdf04930ad3749ecbe3ffbdad29fff5d0ed580485943e3680e63cd7d5e"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/triton_dequant.py",
+      "sha256": "7eb4464669ba4f56f7f11099b873c92be4cd1611ffca935f673265f64f331e8f"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/triton_store.py",
+      "sha256": "4627a20c504e3a02f655c971e59b16d76e7a2d7410f1597c2076f4dd62feceba"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/triton_unified_attention.py",
+      "sha256": "06ec6552ce88be996eb4e7e79d12a343b5d3e67bc7b3e743fac5619de95f2f4f"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/kv_cache_interface.py",
+      "sha256": "14bc6317fe759f10e8b2176ccd9de2bfe214f4d3beee2cfdb1a8f821982f0e98"
+    }
+  ],
+  "repoChangeCount": {
+    "added": 30,
+    "modified": 11
+  },
+  "imageDiff": {
+    "total": 5140,
+    "added": 18,
+    "modified": 18,
+    "deleted": 0,
+    "unchanged": 5104,
+    "note": "dist-packages/vllm, __pycache__ excluded, byte-level vs parent image"
+  },
+  "verification": {
+    "verify_compat_switches": "COMPAT-VERIFY: ALL PASS",
+    "l1_tests": {
+      "test_sm75_compat_switches.py": "8/8",
+      "test_build_contract.py": "14/14",
+      "test_sm75_gate.py": "12/12"
+    },
+    "gpuGates": "pending (G1-G7 in docs/tuning/compat-turing032-20261116.md section 3)"
+  },
+  "upstreamBaseline": "gpustack/SHA256SUMS-upstream-20261116-v6.txt"
+}

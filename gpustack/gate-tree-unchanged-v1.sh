@@ -35,9 +35,10 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 # 2026-10-23：v3 纳入 10 个自有提交的 8 改+2 新增（C3/速度缓存/external/性能档位/docs），v2 保留历史。
 # 2026-10-30：v4 把 ultra/ 与三个缓存目录移出冻结面，并纳入 10-27 之后的上游作用域改动（295 件）。
 # 2026-10-30：v5 把冻结面改为 gate-scope-v1.json 显式声明，tests/ tools/ vllm_sm75/ 一并移出（204 件）。
-#             旧表全部保留为历史证据，复核旧基线用：
-#             SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream-20261023-v3.txt bash gpustack/gate-tree-unchanged-v1.sh
-TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261030-v5.txt}"
+# 2026-11-16：v6 纳入 Turing 0.32 兼容件层（27 件 vllm 新增/覆盖、1 件 docker 校验器、3 件 docs）＋
+#             兼容层与容量档文档（235 件）；v5 保留为历史证据，复核旧基线用：
+#             SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream-20261030-v5.txt bash gpustack/gate-tree-unchanged-v1.sh
+TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261116-v6.txt}"
 SCOPE="${SM75_GATE_SCOPE:-$SCRIPT_DIR/gate-scope-v1.json}"
 TABLE_REL=${TABLE#"$REPO_ROOT"/}
 SELF=${0##*/}

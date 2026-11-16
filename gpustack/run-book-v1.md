@@ -1185,3 +1185,28 @@ git -C .hermes-cache rev-parse HEAD   # 期望 ea74f61d983ebdfd6a863c45761d1b380
 
 这三个缓存目录已在 `gpustack/gate-scope-v1.json` 中列为 owned，不进上游字节冻结面；
 但它们的**存在**仍是构建前提——干净机器先补齐，再跑 §2 的两段构建。
+
+## 18 2026-11-16 Turing 0.32 兼容件层（默认关）与容量档
+
+**兼容件层（可选，不覆盖 final-v1）**：
+
+```bash
+# 在仓库根目录；父镜像须先在本机（final-v1 未动）
+docker build -f gpustack/Dockerfile.compat-v1-20261116 \
+  -t vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1 .
+```
+
+- 11 个兼容开关全部默认关；全关与 final-v1 的镜像级对拍：新增 18、修改 18、删除 0，其余 5104/5140 件逐字节相同；构建期 `verify_compat_switches.py` 全过，L1 8/8。
+- **GPU 实机 A/B 未跑**：compat1 只可停在「已构建」，不得注册到生产行；逐件开启前先过 [`docs/tuning/compat-turing032-20261116.md`](../docs/tuning/compat-turing032-20261116.md) §3 的 G1–G7 门。
+- 行 26 现役 final-v1 配置不变；`VLLM_FIREFLY_AR` 在本层收紧为默认关（行 26 本就显式 `=0`）。
+
+**容量档（纯配置，可单独用）**：
+
+```
+--block-size 400
+--mamba-ssm-cache-dtype float16
+```
+
+实测 padding 0.25%、KV tokens 344,137（+1.48%）、decode 不变；日志应出现 `Padding mamba page size by 0.25%`。**不要用 block 880**（padding 120.55%，无增益）。机制与读数见 tuning 文档 §4。
+
+**MTP**：暂不吸收。MTP2 decode ≈×1.27–1.35，但 262K 与 MTP 显存互斥（实用 ≤ ~195K）；Config B（`--prefix-match-unit 80` ＋ `enable_mamba_fine_grained_prefix_cache`）无 MTP 时为 no-op。材料内部存档，不进公开仓。
