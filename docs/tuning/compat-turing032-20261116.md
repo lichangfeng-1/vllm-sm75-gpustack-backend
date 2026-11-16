@@ -114,7 +114,7 @@ padding% = 100 × (block × P − M_mamba) / M_mamba
 | `c5b685f` EP 过滤补 `.qweight/.qzeros` | **优先级已上调（2026-11-16）**：不是可选优化，是**修一个已在生产里空转的开关**；仓内源码已修、**未烘入镜像**，解冻须用户明示 | **空转四步取证**：①flag 在行 48 live argv；②日志 `default_loader.py:406` 自报 `loading 64/512 experts`（执行者确实跑了）；③镜像内判据 `ep_weight_filter.py:79` 只认 `.weight`/`.weight_packed`；④实际张量名是 `.qweight`/`.qzeros`/`.scales`（expert0 共 432 个＝48层×3proj×3）⇒ **全部放行、一个没滤**，每 rank 仍读全 512 专家，**那句日志是假绿**。修复后（Intel 上实测）无损（64-token 指纹一致）、单 rank 读量 **164.62→115.02 GiB（−30.1%）**；`.scales` 保持不滤（有些后端要全专家 scale）。**Swift 上未实测**；按读量比例折算加载 209.46→~146.4 s（省 ~63 s）属**推算**，纯过滤耗时从未单测。**只动启动 I/O，不动 decode，也不改显存** |
 | `ce4f4e7` PLE 按 rank 分片加载 | 不吸收 | 2026-10-26 已判死（读量降到 0.19× 只快 22–33%，且减的是每 rank 拷贝）；分片目录已删 |
 | Config B（`enable_mamba_fine_grained_prefix_cache` ＋ `--prefix-match-unit 80`） | 仅文档 | 无 MTP 时为 no-op；MTP 下共享前缀才有行为收益，且额外收益未获铁证 |
-| MTP（投机解码） | **用户裁定不做**（2026-11-16） | MTP2 面板同尺 decode 85.33 / 80.35 / 79.91（均值 81.86，≈×1.27–1.35 基线），接受率 45.1%、平均接受长度 1.90；但 262K 撞显存墙：KV 2.25 GiB 时 250K 预填 OOM 158 MiB，KV 1.5 GiB 时容量门拒（≈195,200 tokens）。**本机 MTP 实用上下文 ≤ ~195K**，与 262K 互斥 |
+| MTP（投机解码） | **用户裁定不做**（2026-11-16） | MTP2 面板同尺 decode 85.33 / 80.35 / 79.91（均值 81.86，≈×1.27–1.35 基线），接受率 45.1%、平均接受长度 1.90；但 262K 撞显存墙：KV 2.25 GiB 时 250K 预填 OOM 158 MiB，KV 1.5 GiB 时容量门拒（≈195,200 tokens）。**本机 MTP 实用上下文 ≤ ~195K**，与 262K 互斥。实测对象为行 26（Intel AutoRound）参数+block400/ConfigB（实验行 53），比值对 Intel 无 MTP 基线 ~63.3（63.30 九档均值）；Swift 权重+MTP2 未实测，同读数对 Swift 66.68 折算约 ×1.19–1.28（均值 ≈1.23），非 Swift 实测收益 |
 
 MTP 的完整材料（配置、崩溃记录、复现要点）未随包发布；复现路线：先测草稿每卡占用（分片 vs 复制），再评估 Swift 权重省显存或 CPU KV offload。
 

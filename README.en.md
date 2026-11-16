@@ -145,8 +145,8 @@ The image ships `vllm_sm75`, auto-installed through `vllm.general_plugins`; with
 - [run-book](gpustack/run-book-v1.md): zero-to-serving, paste blocks, troubleshooting.
 - [tuning (live)](docs/tuning/swift15-prod-20261116.md): Swift-1.5 row 48 baseline (decode mean 66.68), live runtime values, the 15929 MiB/card memory convention, four parameter verdict groups and headroom boundaries.
 - [tuning (historical)](docs/tuning/flash-next-20261027.md): the 2026-10-27 Intel opt15 63.30 baseline, negative results, hardware floors.
-- [compat tuning](docs/tuning/compat-turing032-20261116.md): Turing 0.32 compat layer (default-off), block400 capacity tier, MTP conclusion.
-- [backend card](gpustack/backend-version-card-v1.md): registration form, field by field (includes the 2026-10-29 internal deployment addendum).
+- [compat tuning](docs/tuning/compat-turing032-20261116.md): Turing 0.32 compat layer (default-off); the full 0.32 stack without MTP is net-negative (mean output 59.47), so only compat pieces are absorbed, no full-stack migration; block400 capacity tier (capacity only, not speed); MTP2 measured and ruled out by the user.
+- [backend card](gpustack/backend-version-card-v1.md): registration form, field by field (includes the 2026-10-29 internal deployment addendum, historical, and the 2026-11-16 live-production addendum).
 - [final-v1 recipe](gpustack/Dockerfile.final-v1-20261029) / [SQL prompt-audit recipe](gpustack/Dockerfile.sql-prompt-audit-v20261029): latest image layers.
 - [compat matrix](gpustack/compat-matrix-v1.md): capabilities and reading boundaries.
 - [release notes](gpustack/release-notes-v2.3.1-v1.md): GPUStack v2.3.1 (live); [v2.3.0](gpustack/release-notes-v2.3.0-v1.md) is the historical record.

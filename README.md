@@ -145,8 +145,8 @@ decode 三档均值 **66.68**（**三档各一次，未做多次中位**）。**
 - [run-book](gpustack/run-book-v1.md)：0→1 部署、粘贴块、排错。
 - [tuning（现役）](docs/tuning/swift15-prod-20261116.md)：Swift-1.5 行 48 基线（decode 均 66.68）、现读运行时值、显存口径 15929 MiB/卡、四组参数判定与空间边界。
 - [tuning（历史）](docs/tuning/flash-next-20261027.md)：2026-10-27 Intel opt15 的 63.30 基线、负结果、硬件地板。
-- [compat tuning](docs/tuning/compat-turing032-20261116.md)：Turing 0.32 兼容件层（默认关）、容量档 block400、MTP 结论。
-- [backend card](gpustack/backend-version-card-v1.md)：后端注册表单逐项（含 2026-10-29 内部部署增补）。
+- [compat tuning](docs/tuning/compat-turing032-20261116.md)：Turing 0.32 兼容件层（默认关）、0.32 整栈非 MTP 净负（平均输出 59.47）故只吸收兼容件不整栈迁、容量档 block400（只动容量不动速度）、MTP2 实测与用户裁定不做。
+- [backend card](gpustack/backend-version-card-v1.md)：后端注册表单逐项（含 2026-10-29 内部部署增补·历史、2026-11-16 现役生产增补）。
 - [final-v1 配方](gpustack/Dockerfile.final-v1-20261029) / [SQL 提示词审计配方](gpustack/Dockerfile.sql-prompt-audit-v20261029)：最新镜像薄层。
 - [compat matrix](gpustack/compat-matrix-v1.md)：能力落点与读数边界。
 - [release notes](gpustack/release-notes-v2.3.1-v1.md)：GPUStack v2.3.1（现役）；[v2.3.0](gpustack/release-notes-v2.3.0-v1.md) 为历史件。

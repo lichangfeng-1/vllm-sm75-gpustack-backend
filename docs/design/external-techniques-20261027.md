@@ -19,7 +19,7 @@
 | DP Attention（注意力 DP、MoE TP） | SGLang/DeepSeek | 避免 MLA 的 KV 复制 | 我们 QSA/GQA 的 KV 已按 TP 分片，不适用 |
 | 零开销/异步调度 | SGLang、vLLM v1 | CPU 调度与 GPU 重叠 | 已具备（SM75Scheduler 继承 AsyncScheduler，实测确认） |
 | 前缀复用（RadixAttention） | SGLang | 前缀缓存 | vLLM 已有 prefix caching；测速用随机前缀绕开 |
-| NVFP4/FP8/INT4 量化、MTP、DFlash | 各家 | 降精度或投机 | **按"不能降低精度"作废**；**MTP 已于 2026-11-16 实测**（MTP2 均 81.86、×1.27–1.35、接受率 45.1%、τ1.90）**但 262K 显存墙、实用 ≤~195K，用户裁定不做** |
+| NVFP4/FP8/INT4 量化、MTP、DFlash | 各家 | 降精度或投机 | **按"不能降低精度"作废**；**MTP 已于 2026-11-16 实测**（MTP2 均 81.86、×1.27–1.35、接受率 45.1%、τ1.90）**但 262K 显存墙、实用 ≤~195K，用户裁定不做**。实测对象为行 26（Intel AutoRound）参数+block400/ConfigB（实验行 53），比值对 Intel 无 MTP 基线 ~63.3（63.30 九档均值）；Swift 权重+MTP2 未实测，同读数对 Swift 66.68 折算约 ×1.19–1.28（均值 ≈1.23），非 Swift 实测收益 |
 
 ## 2 本轮同时得到的负结果（有数据）
 
