@@ -130,9 +130,9 @@ def main() -> None:
         "    try:\n"
         "        from vllm.model_executor.layers.quantization.exl3 import Exl3Config  # noqa: F401\n"
         "    except Exception as _sm75_exl3_exc:  # pragma: no cover\n"
-        "        import logging as _sm75_logging\n"
-        "        _sm75_logging.getLogger(__name__).warning(\n"
-        "            'SM75 EXL3 registration failed: %s', _sm75_exl3_exc)\n"
+        "        raise ImportError(\n"
+        "            'SM75 EXL3 registration failed: %s' % _sm75_exl3_exc\n"
+        "        ) from _sm75_exl3_exc\n"
     )
     quant_text = quant_init.read_text()
     if "EXL3 quant method registration" not in quant_text:

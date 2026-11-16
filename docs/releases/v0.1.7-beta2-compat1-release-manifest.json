@@ -50,7 +50,7 @@
     {
       "status": "modified",
       "path": "docker/helpers/install_sm75_overlay.py",
-      "sha256": "764d31f9968ab25c0b910abb289fca73c14294e74937e05c2b16b0a76191604d"
+      "sha256": "0413da06a2c2c48a05430d05ff20662f1bde15804d758d761a44fbd52ce982af"
     },
     {
       "status": "added",
@@ -84,11 +84,6 @@
     },
     {
       "status": "added",
-      "path": "docs/releases/v0.1.7-beta2-compat1-release-manifest.json",
-      "sha256": "729820496dc68bd95376ebc7becae6e993d39fe4cd174b88b4ef7b525e37c1c9"
-    },
-    {
-      "status": "added",
       "path": "docs/releases/v0.1.7-beta2-compat1.md",
       "sha256": "2a0689912d63d4de4fdda54b99f71ea9513b6dc08dc2a078de8f877fc68044bd"
     },
@@ -100,12 +95,7 @@
     {
       "status": "added",
       "path": "gpustack/Dockerfile.compat-v1-20261116",
-      "sha256": "58a6db505f31f79c7a81015cf38fd579ee1b032066816f625b46c2e12b31602f"
-    },
-    {
-      "status": "added",
-      "path": "gpustack/SHA256SUMS-upstream-20261116-v6.txt",
-      "sha256": "8508afaacd863aa0be512716a08a0d9c6d6e61ee975006560a7e361bb17996a3"
+      "sha256": "d94b95b94912ebbb8fc52b759c7ed645d1d901646048bc6c6500fbd1b302746f"
     },
     {
       "status": "modified",
@@ -115,7 +105,7 @@
     {
       "status": "modified",
       "path": "gpustack/compat-matrix-v1.md",
-      "sha256": "7cf812599e463201193408a0d9e46698c52c12adf38d5cbf0baef3d78a975654"
+      "sha256": "ab6385b2faa19b14197c384141deacaa97cb4a2274a703d2bc763e7bcf722f11"
     },
     {
       "status": "modified",
@@ -136,6 +126,46 @@
       "status": "added",
       "path": "tests/test_sm75_compat_switches.py",
       "sha256": "dc0b8004bcd17e82f103b9c44213a66416eaa6b7ed14b3527272f8ba213b5af6"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-awq-dflash2.json",
+      "sha256": "c3e67779ab72aba3145ebb5bcff4fdf48f278aa568ea7b7b6d98eb001fb54044"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-awq-mtp5.json",
+      "sha256": "2efa5e254ffa37f596bd051fc14d2097f82eae57078a1ad3e44df3d19244331c"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-awq.json",
+      "sha256": "676617e9c671958fba0cbbf59e7a3b7b5415988c1fdd6105b0edcd0971a76a1d"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-fp8-dflash2.json",
+      "sha256": "4b68ea79c44064b5a7ddb0b6d62610f58a4a7d2c28170914c8eea97f20edd608"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-fp8-dspark5.json",
+      "sha256": "85b39c1ca063417ba537f2d6bf4b819e8af83c088a3674a51e7ac6363eac8ff0"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-fp8-mtp5.json",
+      "sha256": "29d97b667d6c32bd9cedaf1caf076f6ef3dee82b0d01a198acf08e8ec81bde77"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-fp8.json",
+      "sha256": "6cd2fd7cbc4e5b2ca560441c16e8a02ec633f9f807205d9e190c73e40e3e6adc"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-nvfp4-dspark5-256k.json",
+      "sha256": "5b294f8a55d922ffc4ed7896576629d8b8064ffafa38e0cba4b373c27c0303b0"
     },
     {
       "status": "added",
@@ -304,8 +334,8 @@
     }
   ],
   "repoChangeCount": {
-    "added": 34,
-    "modified": 21
+    "added": 32,
+    "modified": 29
   },
   "imageDiff": {
     "total": 5140,
@@ -324,5 +354,9 @@
     },
     "gpuGates": "pending (G1-G7 in docs/tuning/compat-turing032-20261116.md section 3)"
   },
-  "upstreamBaseline": "gpustack/SHA256SUMS-upstream-20261116-v6.txt"
+  "upstreamBaseline": "gpustack/SHA256SUMS-upstream-20261116-v6.txt",
+  "excludedMeta": [
+    "docs/releases/v0.1.7-beta2-compat1-release-manifest.json",
+    "gpustack/SHA256SUMS-upstream-20261116-v6.txt"
+  ]
 }
