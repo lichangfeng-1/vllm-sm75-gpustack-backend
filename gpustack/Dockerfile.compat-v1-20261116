@@ -6,9 +6,23 @@
 #   docker build -f gpustack/Dockerfile.compat-v1-20261116 \
 #     -t vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1 .
 ARG PARENT=vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1
+FROM ${PARENT} AS parent
+
+# 交付仓比 final-v1 领先 3 件 loader 改动 (2026-10-26 仓提交未烘入 final-v1 镜像)。
+# 本兼容层只做「吸收 0.32 兼容件」: 这 3 件保持 final-v1 原样, 不夹带漂移
+# (否则全关态与 final-v1 不等价; 是否单独吸收请主控另裁)。
+RUN mkdir -p /opt/vllm-sm75/parent-loader && \
+    for f in default_loader.py ep_weight_filter.py sm75_rank_shards.py; do \
+        src=/usr/local/lib/python3.12/dist-packages/vllm/model_executor/model_loader/$f; \
+        if [ -f "$src" ]; then cp "$src" /opt/vllm-sm75/parent-loader/; fi; \
+    done
+
 FROM ${PARENT}
 
 LABEL org.sm75.compat="turing032-compat-default-off-20261116"
+
+# 父镜像原样 loader 快照 (来自 parent 阶段, 用于抵消安装器对 3 件 loader 的覆盖)
+COPY --from=parent /opt/vllm-sm75/parent-loader /opt/vllm-sm75/parent-loader
 
 # vllm/ 整树进 /tmp/sm75-overlay: install_sm75_overlay.py 只按清单拷贝,
 # 未入清单的文件(含历史 envs.py 参考副本)不会进镜像。
@@ -22,6 +36,12 @@ COPY docker/speculative /opt/vllm-sm75/speculative
 RUN python3 /tmp/install_sm75_overlay.py /tmp/sm75-overlay && \
     python3 /tmp/install_speculative.py && \
     python3 /tmp/verify_compat_switches.py && \
+    DST=/usr/local/lib/python3.12/dist-packages/vllm/model_executor/model_loader && \
+    for f in default_loader.py ep_weight_filter.py; do \
+        cp /opt/vllm-sm75/parent-loader/$f "$DST/$f"; \
+    done && \
+    test ! -e /opt/vllm-sm75/parent-loader/sm75_rank_shards.py && \
+    rm -f "$DST/sm75_rank_shards.py" && \
     rm -rf /tmp/sm75-overlay /tmp/install_sm75_overlay.py \
         /tmp/patch_request_usage.py /tmp/install_speculative.py \
         /tmp/verify_compat_switches.py

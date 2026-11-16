@@ -54,7 +54,9 @@ def main():
     try:
         get_quantization_config("exl3")
         check("exl3-default-unregistered", False, "unexpectedly registered")
-    except KeyError:
+    except (KeyError, ValueError):
+        # 0.30: NotImplementedError 之外统一抛 ValueError("Invalid quantization
+        # method: exl3"): 与 final-v1 行为一致即通过。
         check("exl3-default-unregistered", True)
 
     code = (
@@ -82,7 +84,15 @@ def main():
         "vllm.v1.attention.ops.flydsl_ultraquant_decode",
         "vllm.model_executor.models.qwen3_5",
     ]
+    # 构建期容器无 GPU 驱动: vllm 把 Triton 换成占位模块(无 dtype 属性), UQ 的
+    # triton 模块不能在此环境 import (真机有驱动即正常)。按环境能力标记 SKIP。
+    from vllm.triton_utils import tl as _tl
+    triton_active = hasattr(_tl, "float16")
     for m in mods:
+        needs_triton = ("ultraquant" in m) or ("turboquant" in m) or ("flydsl" in m)
+        if needs_triton and not triton_active:
+            print("SKIP (no GPU driver / triton disabled):", m)
+            continue
         try:
             importlib.import_module(m)
             check("import:%s" % m, True)
