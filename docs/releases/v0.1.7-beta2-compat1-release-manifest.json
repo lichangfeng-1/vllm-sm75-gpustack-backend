@@ -30,17 +30,17 @@
     {
       "status": "modified",
       "path": "NOTICE",
-      "sha256": "f2227d9754aef4b3cf5ef702d152b8fbbd03b1da2a759ead9e274dece1c6a0ff"
+      "sha256": "91466a84ab79f12d89ecef9c0e8b2b72b5079ac636c6a8963d84fa5ef577dfa0"
     },
     {
       "status": "modified",
       "path": "README.en.md",
-      "sha256": "03a4800505af2b6c4166d812131f150fdb8aeb733fdebfda9873fb74be6ff024"
+      "sha256": "26f1734dc97c4d48178e55031ff16b1a1cb2c577ebf75db97432725a3d8187ac"
     },
     {
       "status": "modified",
       "path": "README.md",
-      "sha256": "632553fc1f263e486a0347d0196cfa45d7bb66e904f58693efd9d056febf4bed"
+      "sha256": "4a67f842aeba1327339a6ef2b73bdbf32812f0dc781b4fc80ccdade020474135"
     },
     {
       "status": "modified",
@@ -85,12 +85,12 @@
     {
       "status": "added",
       "path": "docs/releases/v0.1.7-beta2-compat1.md",
-      "sha256": "2a0689912d63d4de4fdda54b99f71ea9513b6dc08dc2a078de8f877fc68044bd"
+      "sha256": "ca3a64dacb749508f3be3babefd86e98290bae36091675edb3ac7e63c57932f0"
     },
     {
       "status": "added",
       "path": "docs/tuning/compat-turing032-20261116.md",
-      "sha256": "77e0eaeecc127cb09579d21d7afbe1dd8f6fd64b23faa9425fa25eb509fcab25"
+      "sha256": "dea22959da83de8c27ca66b92e89d07138140bd3bd501d4e33fed9bcc58f330e"
     },
     {
       "status": "added",
@@ -109,13 +109,18 @@
     },
     {
       "status": "modified",
+      "path": "gpustack/exit-code-map-v1.md",
+      "sha256": "28476456151761f534e06a7cda12026f611d49ef105f184308b87393798b7f2e"
+    },
+    {
+      "status": "modified",
       "path": "gpustack/gate-tree-unchanged-v1.sh",
       "sha256": "5c44dc0bc7051f28c32f5ad065280508a096b048e57eba1441a35b2ab0d31ee2"
     },
     {
       "status": "modified",
       "path": "gpustack/run-book-v1.md",
-      "sha256": "22f22a17b007e79d7dd82e64f8259ea208edeaecd3b5484b46221298082b9481"
+      "sha256": "27ca36890be8e5af5c89fa9074a9c6953c9c2c9c9ebe710b300557a7564832af"
     },
     {
       "status": "modified",
@@ -335,7 +340,7 @@
   ],
   "repoChangeCount": {
     "added": 32,
-    "modified": 29
+    "modified": 30
   },
   "imageDiff": {
     "total": 5140,
@@ -358,5 +363,6 @@
   "excludedMeta": [
     "docs/releases/v0.1.7-beta2-compat1-release-manifest.json",
     "gpustack/SHA256SUMS-upstream-20261116-v6.txt"
-  ]
+  ],
+  "imageBuiltFrom": "compat tree before the 2026-11-16 review fixes; later recipe changes affect rebuild only, the image was not rebuilt"
 }

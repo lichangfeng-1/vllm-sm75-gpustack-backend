@@ -53,7 +53,7 @@ docker build -f gpustack/Dockerfile.sql-prompt-audit-v20261029 \
 
 - `final-v1`：现役生产镜像（父 opt15；console maxTokens、测速 v3.5 配额/上传、SQL finalanswer）。
 - `sqlprompt-audit`：最新 SQL 提示词审计薄层（父 final-v1；财年/财季格式约束 + 工具结果截断）。
-- `compat1`（可选实验层）：Turing 0.32 兼容件薄层（父 final-v1；全部开关默认关；已构建、未注册），配方 `gpustack/Dockerfile.compat-v1-20261116`，说明见 [tuning](docs/tuning/compat-turing032-20261116.md)。
+- `compat1`（可选实验层）：Turing 0.32 兼容件薄层（父 final-v1；功能开关默认关；已构建、未注册），配方 `gpustack/Dockerfile.compat-v1-20261116`，说明见 [tuning](docs/tuning/compat-turing032-20261116.md)。
 
 ### 3 起 GPUStack，注册后端版本
 
