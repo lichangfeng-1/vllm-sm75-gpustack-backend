@@ -1,7 +1,7 @@
 # Turing 0.32 兼容件层与容量档（2026-11-16）
 
 > 口径：8×Tesla T10 16 GiB、SMT Off、面板同尺（8192 / 16384 / 32768，output 1024，并发 1，temp 1，topP 0.95）。
-> 生产镜像 `…-final-v1` 未改动；本文的兼容层是**可选薄层**，全部开关默认关。**GPU 实机 A/B 尚未跑**（见 §3），默认关可以叠，逐件开启前先过门禁。
+> 生产镜像 `…-final-v1` 未改动；本文的兼容层是**可选薄层**，功能开关默认关（`VLLM_FIREFLY_DIRECT` 是 0.32 生态别名，跟随现有 `VLLM_FIREFLY`，与 final-v1 等价）。**GPU 实机 A/B 尚未跑**（见 §3），默认关可以叠，逐件开启前先过门禁。
 
 ## 1 兼容件层是什么
 
@@ -17,7 +17,9 @@
 | 构建期验收 | [`docker/helpers/verify_compat_switches.py`](../../docker/helpers/verify_compat_switches.py)：开关默认关、EXL3 默认未注册、UQ dtype fail-closed、11 个新模块可导入，构建日志 `COMPAT-VERIFY: ALL PASS` |
 | L1 静态测试 | `tests/test_sm75_compat_switches.py` 8/8、`tests/test_build_contract.py` 14/14、`tests/test_sm75_gate.py` 12/12（CPU） |
 
-**夹带处置**：交付仓比 final-v1 领先 3 件 loader 改动（rank 分片加载 ＋ EP 过滤放行 `.qweight/.qzeros`）。本层从父镜像取原样快照回填，**不夹带**；是否单独吸收另议（见 §4）。
+**夹带处置**：交付仓比 final-v1 领先 3 件 loader 改动（rank 分片加载 ＋ EP 过滤放行 `.qweight/.qzeros`）。本层从父镜像取原样快照回填，**不夹带**；是否单独吸收见 §5。
+
+镜像构建自审查前的兼容件树；本轮审查后的配方改动（loader 回填逻辑、EXL3 失败即抛、校验加固）只影响重建行为，镜像本身未重建。需要与当前树逐一对应时，按配方重建即可。
 
 ## 2 开关表（全部默认关）
 
@@ -31,7 +33,7 @@
 | int4 IDEC GEMV | `VLLM_FIREFLY_IDEC` / `_MAX_M`（默认 8） | 关 | W4A16 decode M≤8 自研 GEMV；**改 load 期权重布局** | 是（默认不改布局） |
 | 0.32 生态总门别名 | `VLLM_FIREFLY_DIRECT` | 跟随 `VLLM_FIREFLY` | 0.32 包代码用此名 | 与现状等价 |
 | EXL3 在线解码 | `VLLM_SM75_EXL3` | 关 | 注册 EXL3 量化法（仅 EXL3 模型需要） | 是（关时解析同 final-v1 报错） |
-| TurboQuant SM75 prefill | `VLLM_FIREFLY_TQ` | 关（0.32 包原默认开，已按令翻转） | TQ KV 在 SM75 走 FlashInfer ragged | 是（TQ 不在生产路径） |
+| TurboQuant SM75 prefill | `VLLM_FIREFLY_TQ` | 关（0.32 包原默认开，已改为默认关） | TQ KV 在 SM75 走 FlashInfer ragged | 是（TQ 不在生产路径） |
 | UltraQuant 4bit KV | `VLLM_SM75_ULTRAQUANT` | 关 | 允许 `--kv-cache-dtype ultraquant_4bit` | 是（关时该 dtype 在 arg_utils 显式报错＝fail-closed） |
 | DFlash2 0.32 改进 | `VLLM_SM75_DFLASH2_OPT` | 关 | 分组卷积 Triton 核 ＋ tp≥2 context-FC 切分 ＋ draft 量化传递 | 是（生产未配投机） |
 
@@ -93,4 +95,4 @@ padding% = 100 × (block × P − M_mamba) / M_mamba
 | Config B（`enable_mamba_fine_grained_prefix_cache` ＋ `--prefix-match-unit 80`） | 仅文档 | 无 MTP 时为 no-op；MTP 下共享前缀才有行为收益，且额外收益未获铁证 |
 | MTP（投机解码） | 暂不吸收 | MTP2 面板同尺 decode 85.33 / 80.35 / 79.91（均值 81.86，≈×1.27–1.35 基线），接受率 45.1%、平均接受长度 1.90；但 262K 撞显存墙：KV 2.25 GiB 时 250K 预填 OOM 158 MiB，KV 1.5 GiB 时容量门拒（≈195,200 tokens）。**本机 MTP 实用上下文 ≤ ~195K**，与 262K 互斥 |
 
-MTP 的完整材料（配置、崩溃记录、复现要点）留在内部材料档，不进公开仓；复现路线：先测草稿每卡占用（分片 vs 复制），再评估 Swift 权重省显存或 CPU KV offload。
+MTP 的完整材料（配置、崩溃记录、复现要点）未随包发布；复现路线：先测草稿每卡占用（分片 vs 复制），再评估 Swift 权重省显存或 CPU KV offload。

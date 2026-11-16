@@ -53,7 +53,7 @@ docker build -f gpustack/Dockerfile.sql-prompt-audit-v20261029 \
 
 - `final-v1`: current production image (parent opt15; console maxTokens, speedtest v3.5 quota/upload, SQL finalanswer).
 - `sqlprompt-audit`: latest SQL prompt-audit layer (parent final-v1; fiscal-period format rule + tool-result truncation).
-- `compat1` (optional experimental layer): Turing 0.32 compat thin layer (parent final-v1; all switches default-off; built, not registered), recipe `gpustack/Dockerfile.compat-v1-20261116`, see [tuning](docs/tuning/compat-turing032-20261116.md).
+- `compat1` (optional experimental layer): Turing 0.32 compat thin layer (parent final-v1; all functional switches default-off; built, not registered), recipe `gpustack/Dockerfile.compat-v1-20261116`, see [tuning](docs/tuning/compat-turing032-20261116.md).
 
 ### 3 Start GPUStack, register the backend version
 
