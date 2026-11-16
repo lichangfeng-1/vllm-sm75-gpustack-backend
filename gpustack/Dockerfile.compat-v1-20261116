@@ -1,7 +1,7 @@
-# 兼容件吸收薄层 (2026-11-16 用户令「不负面就吸、默认关、增兼容」):
-#   final-v1 + vllm-Turing 0.32 兼容件 (NVFP4/Skillet/IDEC、EXL3、TurboQuant SM75、
-#   UltraQuant 4bit KV、firefly fp8 AR 代码与 fail-closed 开关), 所有权能开关默认关。
-#   不覆盖 final-v1 tag; 全关应与 final-v1 行为一致 (生产行26 显式 VLLM_FIREFLY_AR=0)。
+# 兼容件吸收薄层 (2026-11-16): final-v1 + vllm-Turing 0.32 兼容件 (NVFP4/Skillet/IDEC、
+# EXL3、TurboQuant SM75、UltraQuant 4bit KV、firefly fp8 AR 代码与 fail-closed 开关),
+# 所有功能开关默认关。不覆盖 final-v1 tag; 全关应与 final-v1 行为一致
+# (生产行26 显式 VLLM_FIREFLY_AR=0)。
 # 构建上下文＝仓库根目录:
 #   docker build -f gpustack/Dockerfile.compat-v1-20261116 \
 #     -t vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1 .
@@ -10,7 +10,7 @@ FROM ${PARENT} AS parent
 
 # 交付仓比 final-v1 领先 3 件 loader 改动 (2026-10-26 仓提交未烘入 final-v1 镜像)。
 # 本兼容层只做「吸收 0.32 兼容件」: 这 3 件按父镜像原样回填 (父有则恢复、父无则删除),
-# 不夹带漂移 (否则全关态与 final-v1 不等价; 是否单独吸收请主控另裁)。
+# 不夹带漂移 (否则全关态与 final-v1 不等价; 是否单独吸收另行评估)。
 RUN mkdir -p /opt/vllm-sm75/parent-loader && \
     for f in default_loader.py ep_weight_filter.py sm75_rank_shards.py; do \
         src=/usr/local/lib/python3.12/dist-packages/vllm/model_executor/model_loader/$f; \
