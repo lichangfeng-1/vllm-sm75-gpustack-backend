@@ -45,21 +45,54 @@ def _firefly_mode() -> str:
     return "1" if v in ("1", "auto", "on", "true", "yes") else "0"
 
 
-def _firefly_ar_mode() -> str:
-    """VLLM_FIREFLY_AR 归一化: 'auto'(默认, 跟随 VLLM_FIREFLY) / '0'=强制关 /
-    'fp8'=强制开。
+def _firefly_ar_mode() -> bool:
+    """VLLM_FIREFLY_AR 归一化: 默认关 (fail-closed), 仅显式开启才生效。
 
-    auto = firefly 模式开 (VLLM_FIREFLY=1) 时 fp8 allreduce 自动启用 (fp8 近乎
-    无损, PLAN-fp8-allreduce §3.5); firefly 关 → AR 关。'fp8' 单独开 (firefly
-    不用也开 AR); '0' 单独关 (firefly 开但 AR 不用)。FireflyAllReduce 只做 fp8,
-    双 backend (P2P / SHM, 见 VLLM_FIREFLY_AR_BACKEND)。
+    用户红线 (2026-11-16): fp8 集合通信仅入库代码、默认关、永不默认启用。
+    1/on/true/yes/fp8 = 开; 其余 (含未设与旧值 'auto') = 关。旧 'auto'
+    (跟随 VLLM_FIREFLY) 语义已废除 —— firefly 权重路径开着也不会带开 AR。
+    'fp8' 仍接受以兼容旧配置写法。FireflyAllReduce 只做 fp8, 双 backend
+    (P2P / SHM, 见 VLLM_FIREFLY_AR_BACKEND)。
     """
     v = os.getenv("VLLM_FIREFLY_AR", "").strip().lower()
+    return v in ("1", "on", "true", "yes", "fp8")
+
+
+def _firefly_direct() -> bool:
+    """VLLM_FIREFLY_DIRECT (0.32 生态名): 默认跟随 VLLM_FIREFLY; 显式覆盖优先。
+
+    int4/fp8 权重 firefly 路径的门控; 与 0.32 包代码同名列兼容。未设时
+    跟随 VLLM_FIREFLY ('1'/'auto' = 开), 显式 0 关 / 1 开。
+    """
+    v = os.getenv("VLLM_FIREFLY_DIRECT", "").strip().lower()
+    if v in ("1", "auto", "on", "true", "yes"):
+        return True
     if v in ("0", "off", "false", "no"):
-        return "0"
-    if v in ("fp8", "1", "on", "true", "yes"):
-        return "fp8"
-    return "auto"
+        return False
+    return _firefly_mode() == "1"
+
+
+def _env_flag(name: str) -> bool:
+    """严格布尔: 仅 1/on/true/yes 开; 未设/其余一律关 (fail-closed)。"""
+    return os.getenv(name, "").strip().lower() in ("1", "on", "true", "yes")
+
+
+def _firefly_skillet_spk() -> int:
+    """VLLM_FIREFLY_SKILLET_SPK: split-K 因子, 仅接受 2/4/8/16, 其余回 8。"""
+    try:
+        v = int(os.getenv("VLLM_FIREFLY_SKILLET_SPK", "8").strip())
+    except ValueError:
+        return 8
+    return v if v in (2, 4, 8, 16) else 8
+
+
+def _firefly_idec_max_m() -> int:
+    """VLLM_FIREFLY_IDEC_MAX_M: idecode GEMV 的 batch 上限, 只在 1..8 有效。"""
+    try:
+        v = int(os.getenv("VLLM_FIREFLY_IDEC_MAX_M", "8").strip())
+    except ValueError:
+        return 8
+    return v if 1 <= v <= 8 else 8
 
 
 def _firefly_ar_backend() -> str:
@@ -129,6 +162,33 @@ EXTENSIONS: dict[str, object] = {
     # p2p(强制) / shm(强制)。P2P 有 NVLink/PCIe 直连时 data/flag 全 device 显存
     # 无 host bounce; 无 P2P (PHB 如 T10) 回 SHM。见 firefly_allreduce.py。
     "VLLM_FIREFLY_AR_BACKEND": _firefly_ar_backend,
+    # SHM 分块全双工流水线 (0.32 新增): 仅 2-GPU SHM 全双工链上有意义, 默认关。
+    "VLLM_FIREFLY_AR_PIPE": lambda: _env_flag("VLLM_FIREFLY_AR_PIPE"),
+    # ---- 兼容件开关 (2026-11-16 吸收 vllm-Turing 0.32; 全部默认关) ----
+    # 0.32 生态同名总门: 未设跟随 VLLM_FIREFLY, 显式覆盖优先 (见 _firefly_direct)。
+    "VLLM_FIREFLY_DIRECT": _firefly_direct,
+    # NVFP4 权重 firefly prefill(大 M 现反 int8 走 IMMA)+ decode 走 Marlin。
+    # 默认 0 => 不建快照、不改任何权重布局, 与 final-v1 逐字节等价。
+    "VLLM_FIREFLY_NVFP4": lambda: _env_flag("VLLM_FIREFLY_NVFP4"),
+    # NVFP4 decode 走 firefly int8(需 VLLM_FIREFLY_NVFP4=1 先开)。
+    "VLLM_FIREFLY_IDEC_NVFP4": lambda: _env_flag("VLLM_FIREFLY_IDEC_NVFP4"),
+    # int4(W4A16) decode 自研 GEMV: 改 load 期权重布局(自然 row-major), 默认关。
+    "VLLM_FIREFLY_IDEC": lambda: _env_flag("VLLM_FIREFLY_IDEC"),
+    "VLLM_FIREFLY_IDEC_MAX_M": _firefly_idec_max_m,
+    # NVFP4 decode Skillet m16n8k8 GEMM(独享快照), 默认关。
+    "VLLM_FIREFLY_SKILLET": lambda: _env_flag("VLLM_FIREFLY_SKILLET"),
+    "VLLM_FIREFLY_SKILLET_SPK": _firefly_skillet_spk,
+    # TurboQuant KV 在 SM75 的 prefill 快路径(FlashInfer ragged, 替代 FA2/SDPA)。
+    # 0.32 包默认开; 本镜像按「兼容件默认关」翻转, 未设=关 => 与 final-v1 同。
+    "VLLM_FIREFLY_TQ": lambda: _env_flag("VLLM_FIREFLY_TQ"),
+    # EXL3 在线解码量化法注册(仅加载 EXL3 模型时需要), 默认关。
+    "VLLM_SM75_EXL3": lambda: _env_flag("VLLM_SM75_EXL3"),
+    # UltraQuant 4bit KV (--kv-cache-dtype ultraquant_4bit), 默认关;
+    # 关时 arg_utils 对该 dtype 显式报错(fail-closed)。
+    "VLLM_SM75_ULTRAQUANT": lambda: _env_flag("VLLM_SM75_ULTRAQUANT"),
+    # DFlash2 0.32 改进(分组卷积 Triton 核 / tp>=2 context-FC 切分 / draft 量化
+    # 传递), 默认关 => DFlash2 行为与 final-v1 一致。
+    "VLLM_SM75_DFLASH2_OPT": lambda: _env_flag("VLLM_SM75_DFLASH2_OPT"),
     # 单文件 HTML 监控页开关, 默认开(_monitor 归一化)。
     # 开 = serve 在 /monitor 挂自包含 HTML 看板(纯前端 canvas 图表, 无 CDN,
     # 轮询同源 /metrics); 0/off/false/no = 只关闭 HTML 页面(控制 API 保留)。见

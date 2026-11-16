@@ -1,0 +1,368 @@
+{
+  "release": "0.1.7-beta2-compat1",
+  "date": "2026-11-16",
+  "image": "vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1",
+  "imageDigestPrefix": "9cb13d85",
+  "imageDigestNote": "构建证据只保留 manifest list 前缀；完整 digest 以构建机 docker image inspect 为准",
+  "parentImage": "vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1",
+  "parentImageId": "7267ff1c3db0",
+  "build": {
+    "dockerfile": "gpustack/Dockerfile.compat-v1-20261116",
+    "context": "repo root",
+    "installers": [
+      "docker/helpers/install_sm75_overlay.py",
+      "docker/helpers/install_speculative.py"
+    ]
+  },
+  "switches": {
+    "VLLM_FIREFLY_AR": false,
+    "VLLM_FIREFLY_AR_PIPE": false,
+    "VLLM_FIREFLY_NVFP4": false,
+    "VLLM_FIREFLY_IDEC_NVFP4": false,
+    "VLLM_FIREFLY_SKILLET": false,
+    "VLLM_FIREFLY_IDEC": false,
+    "VLLM_FIREFLY_TQ": false,
+    "VLLM_SM75_EXL3": false,
+    "VLLM_SM75_ULTRAQUANT": false,
+    "VLLM_SM75_DFLASH2_OPT": false
+  },
+  "repoChanges": [
+    {
+      "status": "modified",
+      "path": "NOTICE",
+      "sha256": "91466a84ab79f12d89ecef9c0e8b2b72b5079ac636c6a8963d84fa5ef577dfa0"
+    },
+    {
+      "status": "modified",
+      "path": "README.en.md",
+      "sha256": "26f1734dc97c4d48178e55031ff16b1a1cb2c577ebf75db97432725a3d8187ac"
+    },
+    {
+      "status": "modified",
+      "path": "README.md",
+      "sha256": "4a67f842aeba1327339a6ef2b73bdbf32812f0dc781b4fc80ccdade020474135"
+    },
+    {
+      "status": "modified",
+      "path": "docker/Dockerfile",
+      "sha256": "d6c70860604edbff07bdda40dd18282b44abdd7e3ed5632338272f5174dde73e"
+    },
+    {
+      "status": "modified",
+      "path": "docker/helpers/install_sm75_overlay.py",
+      "sha256": "0413da06a2c2c48a05430d05ff20662f1bde15804d758d761a44fbd52ce982af"
+    },
+    {
+      "status": "added",
+      "path": "docker/helpers/verify_compat_switches.py",
+      "sha256": "0d8fca6981d2dfbddef44366b484c09129017588b69baf068bcd101ff2c36168"
+    },
+    {
+      "status": "modified",
+      "path": "docker/run.sh",
+      "sha256": "0cb0199c46beb3a8d48f4a7956a63771eda3fa08a1f6bdb83bc664124d73902a"
+    },
+    {
+      "status": "modified",
+      "path": "docker/speculative/sm75_gdn_metadata.py",
+      "sha256": "3d8f0cb89c140466b389d6c53e51c05a21886bf7a5f583c2428b3a8fad52693a"
+    },
+    {
+      "status": "modified",
+      "path": "docker/speculative/vllm/model_executor/models/qwen3_dflash.py",
+      "sha256": "dbbb8096cb5d5b61bb30928d46c470da3a8310bd1f4684a232ba297970111ed6"
+    },
+    {
+      "status": "modified",
+      "path": "docker/speculative/vllm/model_executor/models/qwen3_dflash2.py",
+      "sha256": "5fcb5f5da97b27e55e7feadb639959dfcb339079d96429c6eca66acc1bc0d6a8"
+    },
+    {
+      "status": "modified",
+      "path": "docs/README.md",
+      "sha256": "dbe479db84d880c3bda9f2dd50037ac9ca5a79b54d5eb50187273ec8bde64793"
+    },
+    {
+      "status": "added",
+      "path": "docs/releases/v0.1.7-beta2-compat1.md",
+      "sha256": "ca3a64dacb749508f3be3babefd86e98290bae36091675edb3ac7e63c57932f0"
+    },
+    {
+      "status": "added",
+      "path": "docs/tuning/compat-turing032-20261116.md",
+      "sha256": "dea22959da83de8c27ca66b92e89d07138140bd3bd501d4e33fed9bcc58f330e"
+    },
+    {
+      "status": "added",
+      "path": "gpustack/Dockerfile.compat-v1-20261116",
+      "sha256": "d94b95b94912ebbb8fc52b759c7ed645d1d901646048bc6c6500fbd1b302746f"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/backend-version-card-v1.md",
+      "sha256": "8e898589a0d9763f7c50a4650dccabb0820b2fbbb0e3abd0e086cbfe88e65ab4"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/compat-matrix-v1.md",
+      "sha256": "ab6385b2faa19b14197c384141deacaa97cb4a2274a703d2bc763e7bcf722f11"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/exit-code-map-v1.md",
+      "sha256": "28476456151761f534e06a7cda12026f611d49ef105f184308b87393798b7f2e"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/gate-tree-unchanged-v1.sh",
+      "sha256": "5c44dc0bc7051f28c32f5ad065280508a096b048e57eba1441a35b2ab0d31ee2"
+    },
+    {
+      "status": "modified",
+      "path": "gpustack/run-book-v1.md",
+      "sha256": "27ca36890be8e5af5c89fa9074a9c6953c9c2c9c9ebe710b300557a7564832af"
+    },
+    {
+      "status": "modified",
+      "path": "tests/model_executor/test_dflash_quantization.py",
+      "sha256": "fb8cc91b80a52abb8cfcd8adabae5093390c4ed0b4dbb7b5ec11e53874e513f4"
+    },
+    {
+      "status": "added",
+      "path": "tests/test_sm75_compat_switches.py",
+      "sha256": "dc0b8004bcd17e82f103b9c44213a66416eaa6b7ed14b3527272f8ba213b5af6"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-awq-dflash2.json",
+      "sha256": "c3e67779ab72aba3145ebb5bcff4fdf48f278aa568ea7b7b6d98eb001fb54044"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-awq-mtp5.json",
+      "sha256": "2efa5e254ffa37f596bd051fc14d2097f82eae57078a1ad3e44df3d19244331c"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-awq.json",
+      "sha256": "676617e9c671958fba0cbbf59e7a3b7b5415988c1fdd6105b0edcd0971a76a1d"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-fp8-dflash2.json",
+      "sha256": "4b68ea79c44064b5a7ddb0b6d62610f58a4a7d2c28170914c8eea97f20edd608"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-fp8-dspark5.json",
+      "sha256": "85b39c1ca063417ba537f2d6bf4b819e8af83c088a3674a51e7ac6363eac8ff0"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-fp8-mtp5.json",
+      "sha256": "29d97b667d6c32bd9cedaf1caf076f6ef3dee82b0d01a198acf08e8ec81bde77"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-fp8.json",
+      "sha256": "6cd2fd7cbc4e5b2ca560441c16e8a02ec633f9f807205d9e190c73e40e3e6adc"
+    },
+    {
+      "status": "modified",
+      "path": "ultra/source/profiles/qwen38-27b-nvfp4-dspark5-256k.json",
+      "sha256": "5b294f8a55d922ffc4ed7896576629d8b8064ffafa38e0cba4b373c27c0303b0"
+    },
+    {
+      "status": "added",
+      "path": "vllm/config/cache.py",
+      "sha256": "853e906f79f4dc529c578438ae8d99fe2a58e2702e472f0d16f1c2204d9a7920"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/distributed/device_communicators/firefly_allreduce.cu",
+      "sha256": "b365b07d4ae767da4cde58e735a71991a3b05b37f8cec4ae7ef958931e8336c4"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/distributed/device_communicators/firefly_allreduce.py",
+      "sha256": "962751ab69b482ca95f030b586161c14c497b51e6b2a41cfb920d93052d336e3"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/engine/arg_utils.py",
+      "sha256": "b409aa2cacec197fbf4c6e6bc8810f6190f5e67ef69f51b3c5befea2d0be9416"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/envs_sm75.py",
+      "sha256": "4af79183726b2f45815ff56c8871b9bddf655c5b6326ac08ec4fd24257abf34d"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/model_executor/kernels/linear/mixed_precision/marlin.py",
+      "sha256": "8de8f770b87b526cb73d58795f785f7bcebd0291e4afc82f078c76baebfab149"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/kernels/linear/nvfp4/marlin.py",
+      "sha256": "1b48ffa22fab810bf6e309a777291def09b39fc69260db1d020ffc90890d80d7"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/exl3/__init__.py",
+      "sha256": "3b5d22eadf2828b6fb84e852420c69d627fcff610944416a9e939271b916dccf"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/exl3/exl3.py",
+      "sha256": "b10218345015f951d0b0aec3df4ddeb303c0d0b8817b8c64aaf53ee9319c5ac4"
+    },
+    {
+      "status": "modified",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly.py",
+      "sha256": "e03a2fa999d18a90f912d67fba3c584b66bd2f79f4881c9548a96b726d96e670"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_exl3.cu",
+      "sha256": "23fb6aeff18e288716e0459c3e9598e38d15a3a4e7efaafdebb36799586a7637"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_idecode.cu",
+      "sha256": "606ff0448b6239a2f4c888d9ff9e800f5c52c05a3ea7eb5d8016c154c9f1fcdd"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_idecode.py",
+      "sha256": "fb0a77529ccff791aea72550ad3d5f0e082841755d7bb0cb797f8fad129708ee"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_nvfp4.cu",
+      "sha256": "749a95068c9bd6f18942379e9d934badd571ff65037bdcf957ec43a033a0e041"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_nvfp4.py",
+      "sha256": "613f294b2c0b4249ac23dfd251fe708d94b6a141b6730a7e7397bca46bd8a81d"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_skillet.cu",
+      "sha256": "871c04d5aff9519e32c0ae8937ff6f2a835737654db47655ae939a161b9e4735"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/layers/quantization/utils/firefly_skillet.py",
+      "sha256": "1cfe144872c1dee8e6888d2341d804879419a2cac73d2e1d5736522bda90d41e"
+    },
+    {
+      "status": "added",
+      "path": "vllm/model_executor/models/qwen3_5.py",
+      "sha256": "995d49cb3b31d4770ca46855b44eb86ca00b3bb7c66c3c5840264be9e974b908"
+    },
+    {
+      "status": "added",
+      "path": "vllm/platforms/cuda.py",
+      "sha256": "a56d57910b4cbb286625132e34c27296a8358da3ab4b93991d3d7e76659bc675"
+    },
+    {
+      "status": "added",
+      "path": "vllm/platforms/interface.py",
+      "sha256": "ca6464338b0dec15b78489b04409a28c1cc290f4eae0025d704b721057ead12c"
+    },
+    {
+      "status": "added",
+      "path": "vllm/utils/torch_utils.py",
+      "sha256": "6787340640925197515a57a62451d7f2dd3c2ce4d602e46a537454c8168275e2"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/backends/registry.py",
+      "sha256": "336f8a7121b7f073845478a45c545c3457fc1b216d82d9bf0cce502683846300"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/backends/turboquant_attn.py",
+      "sha256": "6e8b6e90f7e87a46ddb309827c4468056c4dbee909ef8a117f2e454b59864ca9"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/backends/ultraquant_attn.py",
+      "sha256": "49631f4fb5318311f199ac2448b3a6c307675f9504994d3fe7a9d046fe8320aa"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/flydsl_kernels/ultraquant_decode_hd256.py",
+      "sha256": "0a94d7687735e9773a34384c8324d5931e27a3c83993f449b485a626854d8a2e"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/flydsl_ultraquant_decode.py",
+      "sha256": "5a1f321174c2745a5803cf7f74d6cfd7ce3e4e3e2226421e3d8b127b5129d82d"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/__init__.py",
+      "sha256": "2e547a51b4f23227f93506249d6988daabd07c2b1e614742fa578b31eae0399c"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/format.py",
+      "sha256": "3b82892628e784b21ff5acc9519d94418a0a820427223b2efe0b5a023df243c7"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/reference.py",
+      "sha256": "9bd101cdf04930ad3749ecbe3ffbdad29fff5d0ed580485943e3680e63cd7d5e"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/triton_dequant.py",
+      "sha256": "7eb4464669ba4f56f7f11099b873c92be4cd1611ffca935f673265f64f331e8f"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/triton_store.py",
+      "sha256": "4627a20c504e3a02f655c971e59b16d76e7a2d7410f1597c2076f4dd62feceba"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/attention/ops/ultraquant/triton_unified_attention.py",
+      "sha256": "06ec6552ce88be996eb4e7e79d12a343b5d3e67bc7b3e743fac5619de95f2f4f"
+    },
+    {
+      "status": "added",
+      "path": "vllm/v1/kv_cache_interface.py",
+      "sha256": "14bc6317fe759f10e8b2176ccd9de2bfe214f4d3beee2cfdb1a8f821982f0e98"
+    }
+  ],
+  "repoChangeCount": {
+    "added": 32,
+    "modified": 30
+  },
+  "imageDiff": {
+    "total": 5140,
+    "added": 18,
+    "modified": 18,
+    "deleted": 0,
+    "unchanged": 5104,
+    "note": "dist-packages/vllm, __pycache__ excluded, byte-level vs parent image"
+  },
+  "verification": {
+    "verify_compat_switches": "COMPAT-VERIFY: ALL PASS",
+    "l1_tests": {
+      "test_sm75_compat_switches.py": "8/8",
+      "test_build_contract.py": "14/14",
+      "test_sm75_gate.py": "12/12"
+    },
+    "gpuGates": "pending (G1-G7 in docs/tuning/compat-turing032-20261116.md section 3)"
+  },
+  "upstreamBaseline": "gpustack/SHA256SUMS-upstream-20261116-v6.txt",
+  "excludedMeta": [
+    "docs/releases/v0.1.7-beta2-compat1-release-manifest.json",
+    "gpustack/SHA256SUMS-upstream-20261116-v6.txt"
+  ],
+  "imageBuiltFrom": "compat tree before the 2026-11-16 review fixes; later recipe changes affect rebuild only, the image was not rebuilt"
+}

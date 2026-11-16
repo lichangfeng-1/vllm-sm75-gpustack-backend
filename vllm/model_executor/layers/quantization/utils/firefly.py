@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 def firefly_active_int4() -> bool:
-    """int4(W4A16) 是否走 firefly prefill: VLLM_FIREFLY 开(1/auto 等价)。"""
-    return envs.VLLM_FIREFLY == "1"
+    """int4(W4A16) 是否走 firefly prefill: VLLM_FIREFLY_DIRECT 开(auto/1 等价)。"""
+    return bool(envs.VLLM_FIREFLY_DIRECT)
 
 
 def firefly_active_fp8() -> bool:
@@ -164,18 +164,37 @@ def marlin_to_int4_q(
     size_n: int,
     padded_k: int | None = None,
     padded_n: int | None = None,
+    natural: bool = False,
 ) -> torch.Tensor:
     """marlin int4 [padded_k/16, padded_n*2] int32 -> 干净 int4 值 q [size_n, size_k]。
 
     反 gptq_marlin_repack(int4/fp16, 非 act-order)。padded_* 缺省取 size_*(无 padding)。
     有 tile padding 时先用 padded 维度反回再裁到 size。
+    natural=True: 权重已是自然 row-major uint8 [padded_n, padded_k/2](VLLM_FIREFLY_IDEC
+    换了 repack 目标, marlin 布局退场), 不做反 repack, 直接展开高低 nibble(低 4bit = k
+    偶、高 = k 奇, 与 firefly_idecode 的 pack 约定一致)。
     """
     pk = padded_k if padded_k is not None else size_k
     pn = padded_n if padded_n is not None else size_n
+    if natural:
+        q_pad = unpack_natural_q(marlin_w, pn, pk)
+        return q_pad[:size_n, :size_k]
     M_flat = marlin_w.reshape(-1).long()
     src_flat, shift = _reverse_repack_indices(pk, pn, marlin_w.device)
     q_pad = ((M_flat[src_flat] >> shift) & 0xF).to(torch.uint8)  # [padded_n, padded_k]
     return q_pad[:size_n, :size_k]
+
+
+def unpack_natural_q(
+    natural_w: torch.Tensor, padded_n: int, padded_k: int
+) -> torch.Tensor:
+    """自然布局 [padded_n, padded_k/2] uint8 -> 每 nibble 一字节 [padded_n, padded_k]。
+
+    优先 firefly_idecode 的 CUDA kernel(无索引 gather); JIT 不可用时 PyTorch 回退。
+    """
+    from vllm.model_executor.layers.quantization.utils import firefly_idecode
+
+    return firefly_idecode.unpack_natural(natural_w, padded_n, padded_k)
 
 
 def dequant_marlin_to_int8(
@@ -187,14 +206,37 @@ def dequant_marlin_to_int8(
     padded_k: int | None = None,
     padded_n: int | None = None,
     w_zp: torch.Tensor | None = None,  # None=对称(zp=8); AWQ qzeros [N/8, K/gs]
+    natural: bool = False,  # 权重是自然布局(VLLM_FIREFLY_IDEC), 不做反 repack
+    # natural=True 时 w_zp 的语义变为**已展开的 [padded_n, padded_k/gs] fp16 zp**
+    # (load 期 _firefly_wzpe), 与运行期 natural 反量化 / idecode kernel 同 fp16 域。
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """B1-hard: marlin int4 + 干净 scale (+zp) -> (w_int8 [N, K], c_n [N])。
 
     反量化 w_deq=(q-zp)*s; 对称 zp=8(uint4b8), 非对称(AWQ) zp=per-group qzeros。
     优先 CUDA kernel(firefly_dequant, 寄存器现算 marlin 位置, ~ms 级);
     编译失败/无 GPU 时回退 PyTorch 版(正确但 ~50ms/层)。不缓存 int8。
+    natural=True: marlin_w 实为自然布局 uint8 [pn, pk/2], 走 unpack + PyTorch 折叠
+    (本函数只在 load 期取 c_n 用一次, 无性能要求)。
     """
     N, K = size_n, size_k
+    if natural:
+        # 自然布局: 折叠反量化走分组算(fold_groupwise_dequant), 免 repeat_interleave
+        # 的两个 [N,K] fp32 大临时(T10 显存余量≈0); zp 走 load 期展开的 fp16 版
+        # (w_zp 参数在 natural 下即该张量, None = 对称 zp=8)。
+        from vllm.model_executor.layers.quantization.utils.firefly_idecode import (
+            fold_groupwise_dequant,
+            unpack_natural,
+        )
+
+        pk = padded_k if padded_k is not None else K
+        pn = padded_n if padded_n is not None else N
+        q = unpack_natural(marlin_w, pn, pk)[:N]
+        w_deq = fold_groupwise_dequant(q, weight_scale[:N], group_size, pk, w_zp)
+        c_n = w_deq.abs().amax(dim=1) / 127.0
+        w_int8 = torch.clamp(torch.round(w_deq / c_n.unsqueeze(1)), -127, 127).to(
+            torch.int8
+        )
+        return w_int8, c_n
     mod = _load_cuda_mod()
     if mod is not None and marlin_w.is_cuda:
         pk = padded_k if padded_k is not None else K
@@ -272,6 +314,40 @@ def _(_marlin_w, _weight_scale, _zp_t, _c_n, n, k, _pn, _pk, _gs, _use_recip):
     return torch.empty((n, k), dtype=torch.int8, device=_marlin_w.device)
 
 
+# natural 版单遍反量化(VLLM_FIREFLY_IDEC 开、权重是自然 row-major 布局时用):
+# 同样注册成 torch.library op(兼容 VLLM_COMPILE fullgraph + cudagraph)。
+# zp 传 **fp16**(与 idecode kernel 同约定: 非对称的展开 zp 在 load 期就转 fp16,
+# prefill/decode 共用一份; marlin 版则用 fp32, 二者仅 zp 域有极小差异)。
+@torch.library.custom_op("firefly::dequant_natural_cached", mutates_args=())
+def _ff_dequant_natural_cached_op(
+    natural_w: torch.Tensor,
+    weight_scale: torch.Tensor,
+    zp_t: torch.Tensor,
+    c_n: torch.Tensor,
+    n: int,
+    k: int,
+    gs: int,
+) -> torch.Tensor:
+    from vllm.model_executor.layers.quantization.utils.firefly_idecode import (
+        fold_groupwise_dequant,
+        unpack_natural,
+    )
+
+    q = unpack_natural(natural_w, n, k)
+    # 无 zp 时调用方传 torch.empty(0, dtype=fp16)(custom op 不收 None); 用 numel 判空
+    # (与 firefly.cu 侧 zp 的 numel() 判据一致)。
+    w_deq = fold_groupwise_dequant(
+        q, weight_scale, gs, k, (zp_t if zp_t.numel() > 0 else None)
+    )
+    r = torch.where(c_n > 0, 1.0 / c_n, 0.0)
+    return torch.clamp(torch.round(w_deq * r.unsqueeze(1)), -127, 127).to(torch.int8)
+
+
+@_ff_dequant_natural_cached_op.register_fake
+def _(_natural_w, _weight_scale, _zp_t, _c_n, n, k, _gs):
+    return torch.empty((n, k), dtype=torch.int8, device=_natural_w.device)
+
+
 def dequant_marlin_to_int8_cached(
     marlin_w: torch.Tensor,
     weight_scale: torch.Tensor,  # 干净 scale [N, K/group_size] (N 在前)
@@ -283,6 +359,8 @@ def dequant_marlin_to_int8_cached(
     padded_n: int | None = None,
     w_zp: torch.Tensor | None = None,  # None=对称(zp=8); AWQ qzeros [N/8, K/gs]
     use_recip: bool = False,
+    natural: bool = False,  # 权重是自然布局(VLLM_FIREFLY_IDEC), 走 natural op
+    wzp_fp16: torch.Tensor | None = None,  # natural 用: 已展开 [pn,pk/gs] fp16 zp
 ) -> torch.Tensor:
     """B1-hard 单遍反量化: c_n 已预计算, 只跑量化 pass(免两遍 amax)。
 
@@ -290,8 +368,22 @@ def dequant_marlin_to_int8_cached(
     use_recip=True : 乘倒数(fast), 更快但 off-by-one ≤0.06%。
     优先 CUDA kernel(firefly_dequant_cached[_recip]); 编译失败/无 GPU 回退 PyTorch 版。
     返回 w_int8 [N, K] int8。
+    natural=True: marlin_w 实为自然布局 uint8 [pn, pk/2], 走
+    _ff_dequant_natural_cached_op(unpack + PyTorch 折叠), zp 用已展开 fp16 wzp_fp16
+    (与 idecode kernel 同 fp16 域, 两条路径数值一致)。
     """
     N, K = size_n, size_k
+    if natural:
+        pk = padded_k if padded_k is not None else K
+        pn = padded_n if padded_n is not None else N
+        zp_t = (
+            torch.empty(0, dtype=torch.float16, device=marlin_w.device)
+            if wzp_fp16 is None
+            else wzp_fp16
+        )
+        return _ff_dequant_natural_cached_op(
+            marlin_w, weight_scale, zp_t, c_n, N, K, group_size
+        )
     if _load_cuda_mod() is not None and marlin_w.is_cuda:
         pk = padded_k if padded_k is not None else K
         pn = padded_n if padded_n is not None else N

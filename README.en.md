@@ -53,6 +53,7 @@ docker build -f gpustack/Dockerfile.sql-prompt-audit-v20261029 \
 
 - `final-v1`: current production image (parent opt15; console maxTokens, speedtest v3.5 quota/upload, SQL finalanswer).
 - `sqlprompt-audit`: latest SQL prompt-audit layer (parent final-v1; fiscal-period format rule + tool-result truncation).
+- `compat1` (optional experimental layer): Turing 0.32 compat thin layer (parent final-v1; all functional switches default-off; built, not registered), recipe `gpustack/Dockerfile.compat-v1-20261116`, see [tuning](docs/tuning/compat-turing032-20261116.md).
 
 ### 3 Start GPUStack, register the backend version
 
@@ -132,6 +133,7 @@ The image ships `vllm_sm75`, auto-installed through `vllm.general_plugins`; with
 - [docs/README.md](docs/README.md): docs index.
 - [run-book](gpustack/run-book-v1.md): zero-to-serving, paste blocks, troubleshooting.
 - [tuning](docs/tuning/flash-next-20261027.md): 63.30 baseline, negative results, hardware floors.
+- [compat tuning](docs/tuning/compat-turing032-20261116.md): Turing 0.32 compat layer (default-off), block400 capacity tier, MTP conclusion.
 - [backend card](gpustack/backend-version-card-v1.md): registration form, field by field (includes the 2026-10-29 internal deployment addendum).
 - [final-v1 recipe](gpustack/Dockerfile.final-v1-20261029) / [SQL prompt-audit recipe](gpustack/Dockerfile.sql-prompt-audit-v20261029): latest image layers.
 - [compat matrix](gpustack/compat-matrix-v1.md): capabilities and reading boundaries.

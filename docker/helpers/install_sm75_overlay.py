@@ -43,6 +43,34 @@ def main() -> None:
         "envs_sm75.py",
         "distributed/kv_transfer/kv_connector/v1/base.py",
         "model_executor/kernels/linear/mixed_precision/marlin.py",
+        # ---- 2026-11-16 兼容件吸收 (vllm-Turing 0.32; 全部 env 默认关) ----
+        "model_executor/kernels/linear/nvfp4/marlin.py",
+        "model_executor/layers/quantization/utils/firefly_nvfp4.py",
+        "model_executor/layers/quantization/utils/firefly_nvfp4.cu",
+        "model_executor/layers/quantization/utils/firefly_skillet.py",
+        "model_executor/layers/quantization/utils/firefly_skillet.cu",
+        "model_executor/layers/quantization/utils/firefly_idecode.py",
+        "model_executor/layers/quantization/utils/firefly_idecode.cu",
+        "model_executor/layers/quantization/utils/firefly_exl3.cu",
+        "model_executor/layers/quantization/exl3/__init__.py",
+        "model_executor/layers/quantization/exl3/exl3.py",
+        "v1/attention/backends/turboquant_attn.py",
+        "v1/attention/backends/ultraquant_attn.py",
+        "v1/attention/ops/flydsl_ultraquant_decode.py",
+        "v1/attention/ops/flydsl_kernels/ultraquant_decode_hd256.py",
+        "v1/attention/ops/ultraquant/__init__.py",
+        "v1/attention/ops/ultraquant/format.py",
+        "v1/attention/ops/ultraquant/reference.py",
+        "v1/attention/ops/ultraquant/triton_dequant.py",
+        "v1/attention/ops/ultraquant/triton_store.py",
+        "v1/attention/ops/ultraquant/triton_unified_attention.py",
+        "v1/kv_cache_interface.py",
+        "config/cache.py",
+        "utils/torch_utils.py",
+        "v1/attention/backends/registry.py",
+        "platforms/cuda.py",
+        "platforms/interface.py",
+        "model_executor/models/qwen3_5.py",
         "model_executor/model_loader/default_loader.py",
         "model_executor/model_loader/sm75_rank_shards.py",
         "model_executor/model_loader/ep_weight_filter.py",
@@ -90,6 +118,25 @@ def main() -> None:
     envs_text = envs_file.read_text()
     if "vllm.envs_sm75.apply()" not in envs_text:
         envs_file.write_text(envs_text + envs_hook)
+
+    # SM75 兼容件: EXL3 量化法注册 (gated, 默认关)。只有显式 VLLM_SM75_EXL3=1
+    # 时才在 import 期注册 Exl3Config; 关时 get_quantization_config("exl3") 仍
+    # 与 final-v1 一样抛 KeyError (fail-closed)。
+    quant_init = package_root / "model_executor/layers/quantization/__init__.py"
+    exl3_hook = (
+        "\n# sm75 compat (2026-11-16): EXL3 quant method registration, gated.\n"
+        "import os as _sm75_os\n"
+        "if _sm75_os.getenv('VLLM_SM75_EXL3', '').strip().lower() in ('1', 'on', 'true', 'yes'):\n"
+        "    try:\n"
+        "        from vllm.model_executor.layers.quantization.exl3 import Exl3Config  # noqa: F401\n"
+        "    except Exception as _sm75_exl3_exc:  # pragma: no cover\n"
+        "        raise ImportError(\n"
+        "            'SM75 EXL3 registration failed: %s' % _sm75_exl3_exc\n"
+        "        ) from _sm75_exl3_exc\n"
+    )
+    quant_text = quant_init.read_text()
+    if "EXL3 quant method registration" not in quant_text:
+        quant_init.write_text(quant_text + exl3_hook)
 
     third_party_source = source_root / "third_party/flash_qla_sm75"
     third_party_destination = package_root / "third_party/flash_qla_sm75"

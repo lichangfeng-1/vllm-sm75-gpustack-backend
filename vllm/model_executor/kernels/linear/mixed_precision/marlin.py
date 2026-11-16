@@ -2,14 +2,12 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """SM75 overlay: MarlinLinearKernel + firefly(int4→int8 prefill)混合。
 
-基于上游 v0.30.0, 新增 firefly 分支(env 门控, off=上游行为):
+以 v0.30.0 原版为基线, 仅叠加 firefly 分支(env 门控, off=上游行为):
   - process_weights_after_loading: repack 前快照干净 int4 布局 [N, K/8] + scale
   - apply_weights: 大 M(prefill)走 int8 cutlass(IMMA), 小 M(decode)走上游 int4 Marlin
 
 见 vllm/model_executor/layers/quantization/utils/firefly.py。
 """
-
-import logging
 
 import torch
 
@@ -31,11 +29,20 @@ from vllm.model_executor.layers.quantization.utils.marlin_utils import (
     query_marlin_supported_quant_types,
     unpack_cols,
 )
+from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.utils.firefly import (
     dequant_marlin_to_int8,
     dequant_marlin_to_int8_cached,
     firefly_active_int4,
     int8_prefill_linear,
+)
+from vllm.model_executor.layers.quantization.utils.firefly import _unpack_awq_zp
+from vllm.model_executor.layers.quantization.utils.firefly_idecode import (
+    idecode_gemv,
+    idecode_ready,
+    natural_c_n,
+    natural_pack_from_gptq,
+    warm_idecode,
 )
 from vllm.model_executor.parameter import BasevLLMParameter, permute_param_layout_
 from vllm.platforms import current_platform
@@ -43,22 +50,7 @@ from vllm.scalar_type import scalar_types
 
 from .MPLinearKernel import MPLinearKernel, MPLinearLayerConfig
 
-logger = logging.getLogger(__name__)
-
-_firefly_int4_fallback_logged = False
-
-
-def _ff_int4_fallback_log() -> None:
-    # act-order int4 模型 firefly 回退上游 Marlin 时打一次明显日志(不刷屏):
-    # B1-hard repack 反推仅针对 has_perm=false, act-order(g_idx 排序)不支持。
-    global _firefly_int4_fallback_logged
-    if _firefly_int4_fallback_logged:
-        return
-    _firefly_int4_fallback_logged = True
-    logger.warning(
-        "[firefly-int4] 回退上游 Marlin: 模型为 act-order(g_idx 排序), "
-        "B1-hard 反推仅支持非 act-order, firefly prefill 对该模型禁用"
-    )
+logger = init_logger(__name__)
 
 
 # ---- firefly 混合 op(dynamo/inductor 兼容) ----
@@ -90,10 +82,16 @@ def _ff_hybrid_linear(
     min_m: int,
     has_zp: bool,
     use_recip: bool,
+    w_natural: bool,
+    w_zp_exp: torch.Tensor,
+    bias_clean: torch.Tensor,
+    idec_max_m: int,
 ) -> torch.Tensor:
     m = x.numel() // x.shape[-1]
     if m > min_m:
         # prefill: transient 反量化 int4→int8 + cutlass_scaled_mm(SM75 即 IMMA)
+        # natural(VLLM_FIREFLY_IDEC)时 w_q 是自然布局 uint8、zp 用已展开的 fp16 版,
+        # 走 natural op; 否则原 marlin 反 repack 路。
         w_int8 = dequant_marlin_to_int8_cached(
             w_q,
             w_s_clean,
@@ -105,9 +103,30 @@ def _ff_hybrid_linear(
             padded_n,
             w_zp=(w_zp_clean if w_zp_clean.numel() > 0 else None),
             use_recip=use_recip,
+            natural=w_natural,
+            wzp_fp16=(w_zp_exp if w_zp_exp.numel() > 0 else None),
         )
         return int8_prefill_linear(x, w_int8, c_n)
-    # decode: 上游 int4 Marlin
+    # decode: 自然布局 + M<=idec_max_m → 自研 GEMV(marlin 布局已退场, 无回退副本);
+    # 否则上游 int4 Marlin(仅 marlin 布局模式会走到)。
+    if w_natural:
+        if m <= idec_max_m:
+            return idecode_gemv(
+                x.reshape(m, -1),
+                w_q,
+                w_s_clean,
+                gs,
+                size_k,
+                size_n,
+                wzp=(w_zp_exp if w_zp_exp.numel() > 0 else None),
+                bias=(bias_clean if bias_clean.numel() > 0 else None),
+            ).reshape(*x.shape[:-1], size_n)
+        logger.warning_once(
+            "firefly idecode: M=%d > VLLM_FIREFLY_IDEC_MAX_M=%d 且落在 marlin 区间 "
+            "(自然布局无 marlin 权重可回退), 请调大 IDEC_MAX_M 或关掉 IDEC",
+            m,
+            idec_max_m,
+        )
     wtype = scalar_types.uint4 if has_zp else scalar_types.uint4b8
     return apply_gptq_marlin_linear(
         input=x,
@@ -146,6 +165,10 @@ def _(
     _min_m,
     _has_zp,
     _use_recip,
+    _w_natural,
+    _w_zp_exp,
+    _bias_clean,
+    _idec_max_m,
 ):
     return torch.empty(x.shape[:-1] + (size_n,), dtype=x.dtype, device=x.device)
 
@@ -200,15 +223,54 @@ class MarlinLinearKernel(MPLinearKernel):
         #   uint4   = 非对称 int4(per-group qzeros, AWQ)
         # 反量化统一 w_deq=(q-zp)*s, 对称 zp=8 是其特例(不回归)。
         # 只有 hard 模式: 不常驻副本, prefill 现从 marlin 布局反。B1-hard 反推
-        # 仅针对 has_perm=false, act-order(g_idx 排序)不支持 → 禁用(回退上游)。
-        # v0.30 MPLinearLayerConfig no longer carries has_g_idx. Keep the
-        # legacy guard for external configs, without requiring the removed field.
+        # 仅针对 has_perm=false 的 marlin 布局; v0.30 gptq_marlin_repack 恒无 perm,
+        # 与我方 AWQ(非 act-order)模型一致。若将来加载 act-order checkpoint,
+        # firefly 会误对其反量化(错误结果), 故前提: 仅用于无 act-order 的模型库。
         return (
             firefly_active_int4()
             and self.config.weight_type in (scalar_types.uint4b8, scalar_types.uint4)
             and self.config.act_type in (torch.float16, torch.bfloat16)
             and not getattr(self.config, "has_g_idx", False)
         )
+
+    # ---- firefly idecode 门控(int4 decode → 自研 GEMV, 自然布局) ----
+    def _idec_shape_ok(self) -> bool:
+        # kernel 结构要求: 每 warp 一个 32*k 段(K%32)、每 block 8 行(N%8); scale 组
+        # 宽度只支持 GS∈{64,128,256}(GS=-1 表示 per-channel, 组宽=K, 未覆盖)。
+        # scale dtype = 激活 dtype(MPLinearKernel 契约), 故 act_type==fp16 同时保证
+        # scale 落在 half2 反量化域(bf16 层不参与 idecode)。
+        c = self.config
+        size_k, size_n = c.partition_weight_shape
+        shape_ok = (
+            size_k % 32 == 0
+            and size_n % 8 == 0
+            and c.group_size in (64, 128, 256)
+            and c.act_type == torch.float16
+        )
+        if not shape_ok:
+            return False
+        # smem 上界守卫: decode 激活 M 行各一份 swizzle 副本驻留 smem, 每行
+        # kRowStrideHalf2(k_half2)=k_half2+k_half2/16+1 个 half2 × **4B**(勿按 2B,
+        # 曾算小一半致 sx 越界)。M=IDEC_MAX_M 时若超 sm75 动态 smem opt-in 上限
+        # (**64KB**, 实测 cudaDevAttr...Optin=65536; 96KB 是 sm80+ 值), 大 K 层会
+        # launch 失败 → 该层回退 marlin(布局此刻未定, 安全)。生产 W4A16 层
+        # (K=2560/640) M=8 时 smem 仅 42.5KB, 远低于上限, 不触发。
+        k_half2 = size_k // 2
+        smem = envs.VLLM_FIREFLY_IDEC_MAX_M * (k_half2 + k_half2 // 16 + 1) * 4
+        return smem <= 64 * 1024
+
+    def _idecode_enabled(self) -> bool:
+        # idecode 生效条件 = firefly 生效 AND IDEC 开 AND JIT 成功 AND 形状支持 AND
+        # 权重未被 fp8 预处理(marlin_int4_fp8_preprocess 会就地改 pack 语义)。
+        # JIT 决策与 load 期布局选择、运行期分支同源: 都查 idecode_ready()。
+        if not self._firefly_enabled():
+            return False
+        if not envs.VLLM_FIREFLY_IDEC:
+            return False
+        if self.config.act_type == torch.float8_e4m3fn:
+            return False
+        warm_idecode()  # 提前触发 JIT, 使本决策即最终结论
+        return idecode_ready() and self._idec_shape_ok()
 
     def _firefly_m_large(self, x: torch.Tensor) -> bool:
         m = x.numel() // x.shape[-1]
@@ -235,15 +297,9 @@ class MarlinLinearKernel(MPLinearKernel):
 
         size_k, size_n = c.partition_weight_shape
         padded_n, padded_k = marlin_padded_nk(size_n, size_k, c.group_size)
-
-        # firefly 回退: act-order int4 模型 B1-hard 不支持, firefly 禁用 → 上游 Marlin。
-        if (
-            firefly_active_int4()
-            and c.weight_type in (scalar_types.uint4b8, scalar_types.uint4)
-            and c.act_type in (torch.float16, torch.bfloat16)
-            and getattr(c, "has_g_idx", False)
-        ):
-            _ff_int4_fallback_log()
+        # idecode 生效 → 权重改存自然 row-major int4, marlin 布局整体退场(单布局)。
+        # 该标志必须在下面所有 repack 分支之前定下, 并记到 layer 供 apply_weights 用。
+        natural = self._idecode_enabled()
 
         # hybrid: repack 前快照(此时 weight/scale 仍为干净布局, 未 permute/repack)。
         # clone 防后续 in-place 修改。scale 统一转置成 N 在前 [N, K/gs]
@@ -251,6 +307,12 @@ class MarlinLinearKernel(MPLinearKernel):
         # 只有 hard 模式: 存干净 scale(小, ~0 字节/参数) + 维度; 非对称(AWQ)另存
         # 干净 qzeros(packed, 小, dequant 时解包); 不存 int4 副本, prefill 步现从
         # marlin 布局反回(单权重, 不爆显存)。
+        # Allocate marlin workspace, reusing existing storage on reload (v0.30 API;
+        # 本树不移植 v0.31 的持久 workspace 管理器)。
+        self.workspace = marlin_make_workspace_new(
+            device, existing=getattr(self, "workspace", None)
+        )
+
         if self._firefly_enabled():
             ws = getattr(layer, self.w_s_name).data.clone()
             if ws.shape[0] != size_n:  # AWQ K 在前 → N 在前
@@ -269,19 +331,43 @@ class MarlinLinearKernel(MPLinearKernel):
             )
             # 只有 hard: 不存干净 int4 副本, prefill 步现从 marlin 布局反回。
 
-        # Allocate marlin workspace, reusing existing storage on reload.
-        self.workspace = marlin_make_workspace_new(
-            device, existing=getattr(self, "workspace", None)
-        )
-
         # Default name since marlin requires empty parameter for zp,
         # TODO: remove this requirement from marlin (allow optional tensors)
         if self.w_zp_name is None:
             self.w_zp_name = "w_zp"
 
+        # idecode: 非对称(AWQ)的 zp 在 load 期一次性展开成干净 [padded_n, padded_k/gs]
+        # fp16(decode kernel 与 prefill natural 路共用一份, 都在 fp16 域);
+        # 对称则 None(kernel 内 zp=8)。padded 区 scale=0 → 该项乘 0, zp 取什么都不影响。
+        if natural:
+            scale_cols = padded_k // c.group_size
+            if c.zero_points and layer._firefly_wzp is not None:
+                zp_clean = _unpack_awq_zp(
+                    layer._firefly_wzp, size_n, size_k // c.group_size
+                ).to(torch.float16)
+                if (padded_n, size_k // c.group_size) == (size_n, scale_cols):
+                    zp_pad = zp_clean
+                else:
+                    zp_pad = torch.zeros(
+                        (padded_n, scale_cols), dtype=torch.float16, device=device
+                    )
+                    zp_pad[:size_n, : size_k // c.group_size] = zp_clean
+                layer._firefly_wzpe = zp_pad.contiguous()
+            else:
+                layer._firefly_wzpe = None
+            # prefill 的 c_n 与 natural 反量化不再需要 packed qzeros(fp16 展开版够用)
+            layer._firefly_wzp = None
+
         def transform_w_q(x):
             assert isinstance(x, BasevLLMParameter)
             permute_param_layout_(x, input_dim=0, output_dim=1, packed_dim=0)
+            if natural:
+                # 自然布局: GPTQ packed int32 → uint8 [padded_n, padded_k/2]
+                # (低 nibble = k 偶)。marlin 布局不再产出, 省 repack 也省显存。
+                x.data = natural_pack_from_gptq(
+                    x.data.contiguous(), size_k, size_n, padded_k, padded_n
+                )
+                return x
             x.data = ops.gptq_marlin_repack(
                 marlin_pad_qweight(
                     x.data.contiguous(), size_n, size_k, padded_n, padded_k
@@ -296,20 +382,33 @@ class MarlinLinearKernel(MPLinearKernel):
         def transform_w_s(x):
             assert isinstance(x, BasevLLMParameter)
             permute_param_layout_(x, input_dim=0, output_dim=1)
-            x.data = marlin_permute_scales(
-                marlin_pad_scales(
+            if natural:
+                # scale 不做 marlin permute, 只 pad + N-first contiguous —— 于是
+                # w_s 与 _firefly_ws(prefill/decode 共用的干净 scale)同物, 无歧义。
+                x.data = marlin_pad_scales(
                     x.data.contiguous(),
                     size_n,
                     size_k,
                     padded_n,
                     padded_k,
                     c.group_size,
-                ),
-                size_k=padded_k,
-                size_n=padded_n,
-                group_size=c.group_size,
-                is_a_8bit=is_a_8bit,
-            )
+                ).contiguous()
+                layer._firefly_ws = x.data
+            else:
+                x.data = marlin_permute_scales(
+                    marlin_pad_scales(
+                        x.data.contiguous(),
+                        size_n,
+                        size_k,
+                        padded_n,
+                        padded_k,
+                        c.group_size,
+                    ),
+                    size_k=padded_k,
+                    size_n=padded_n,
+                    group_size=c.group_size,
+                    is_a_8bit=is_a_8bit,
+                )
 
             if c.group_size == -1:
                 num_groups = 1
@@ -326,7 +425,10 @@ class MarlinLinearKernel(MPLinearKernel):
                 layer.input_global_scale = None
             return x
 
-        if c.zero_points:
+        if natural:
+            # 自然布局下 marlin 的 w_zp 变换无用, 置 empty(省 padded_n*K/gs*4 字节)。
+            setattr(layer, self.w_zp_name, marlin_make_empty(device))
+        elif c.zero_points:
             grouped_k = size_k // c.group_size if c.group_size != -1 else 1
             padded_grouped_k = padded_k // c.group_size if c.group_size != -1 else 1
             self._transform_param(
@@ -358,6 +460,10 @@ class MarlinLinearKernel(MPLinearKernel):
         self._transform_param(layer, self.w_s_name, transform_w_s)
 
         if hasattr(layer, "bias") and layer.bias is not None:
+            # idecode 的 GEMV 需要"干净" bias(marlin 的 permute 会把 N 顺序打乱);
+            # marlin 路仍要 permute, 故先存干净副本再原 permute(不破坏现有语义)。
+            if natural:
+                layer._firefly_bias = layer.bias.data.clone()
             layer.bias.data = marlin_permute_bias(
                 marlin_pad_dim(layer.bias, size_n, padded_n)
             )
@@ -366,7 +472,21 @@ class MarlinLinearKernel(MPLinearKernel):
         # 运行时单遍反量化复用(免两遍 amax, 实测省反量化 ~46%)。放在 repack
         # (transform_w_q) 之后: 此时 w_q 已是 marlin 布局, 与 apply_weights 读取一致。
         # 复用现有全量反量化取 c_n(w_int8 临时算出即弃)。
-        if self._firefly_enabled():
+        if natural:
+            # 自然布局的 c_n: 直接从自然权重算(不反 repack), zp 用 load 期展开的
+            # fp16 版 → 与运行期 natural 反量化(_ff_dequant_natural_cached_op)同域。
+            layer._firefly_c_n = natural_c_n(
+                getattr(layer, self.w_q_name).data,
+                layer._firefly_ws,
+                c.group_size,
+                padded_k,
+                padded_n,
+                size_n,
+                wzp=layer._firefly_wzpe,
+            )
+            # 记标志供 apply_weights(op 参数); marlin 布局不存在, 运行期只能走 idecode。
+            layer._ff_natural_layout = True
+        elif self._firefly_enabled():
             # 只有 hard: c_n 从 marlin 布局现算(无干净 int4 副本)
             _, layer._firefly_c_n = dequant_marlin_to_int8(
                 getattr(layer, self.w_q_name).data,
@@ -385,20 +505,28 @@ class MarlinLinearKernel(MPLinearKernel):
         x: torch.Tensor,
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        c = self.config
+        # v0.30 基类 _get_weight_params 返回 3 元组(w_q, w_s, w_zp), act-order 相关
+        # 的 g_idx 权重已全线移除。
+        w_q, w_s, w_zp = self._get_weight_params(layer)
+
         # hybrid: 大 M(prefill)把 int4 现反量化成 int8 走 cutlass(IMMA), 小 M(decode)
         # 走上游 int4 Marlin。整个"门控+选择+执行"包在 _ff_hybrid_linear(op) 里,
         # 对 inductor 不透明(图里一个 leaf), 避免 m>min_m 数据依赖分支拖慢 decode。
-        # 只有 hard: 无干净 int4 副本, op 内走 marlin 布局反量化(单权重)。
         # input_global_scale/bias/w_zp_clean 用空张量表示 None(custom op 不收 None)。
         if self._firefly_enabled():
-            c = self.config
-            w_q, w_s, w_zp = self._get_weight_params(layer)
             empty = torch.empty(0, device=x.device)
             igs = getattr(layer, "input_global_scale", None)
             igs_t = igs.data if igs is not None else empty
             bias_t = bias.data if bias is not None else empty
             wzp_c = getattr(layer, "_firefly_wzp", None)
             wzp_c_t = wzp_c if wzp_c is not None else empty
+            # idecode(自然布局)专用参数: 展开的 fp16 zp / 干净 bias / M 上限。
+            natural = bool(getattr(layer, "_ff_natural_layout", False))
+            wzpe = getattr(layer, "_firefly_wzpe", None)
+            wzpe_t = wzpe if wzpe is not None else empty
+            bias_clean = getattr(layer, "_firefly_bias", None)
+            bias_clean_t = bias_clean if bias_clean is not None else empty
             return _ff_hybrid_linear(
                 x,
                 w_q,
@@ -418,10 +546,12 @@ class MarlinLinearKernel(MPLinearKernel):
                 envs.VLLM_FIREFLY_MIN_M,
                 c.zero_points,
                 envs.VLLM_FIREFLY_DEQUANT_MODEL == "fast",
+                natural,
+                wzpe_t,
+                bias_clean_t,
+                envs.VLLM_FIREFLY_IDEC_MAX_M,
             )
 
-        c = self.config
-        w_q, w_s, w_zp = self._get_weight_params(layer)
         return apply_gptq_marlin_linear(
             input=x,
             weight=w_q,

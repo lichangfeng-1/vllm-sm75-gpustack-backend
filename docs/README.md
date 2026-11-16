@@ -16,6 +16,7 @@
 ## 性能与调优
 
 - [flash-next-20261027](tuning/flash-next-20261027.md)：当前 63.30 基线、负结果、硬件地板。
+- [compat-turing032-20261116](tuning/compat-turing032-20261116.md)：Turing 0.32 兼容件层（默认关）、容量档 block400、MTP 结论。
 - [flash-next-performance](flash-next-performance.md)：2026-10-04 Ultra/面板历史读数。
 - [flash-next-tp8](flash-next-tp8.md)：TP8 使用说明与历史配置。
 - [request-timing](request-timing.md)：请求时序。
@@ -32,6 +33,7 @@
 ## 发布与验证
 
 - [v0.1.7-beta2 release note](releases/v0.1.7-beta2.md)：当前后端版本线。
+- [v0.1.7-beta2 compat1](releases/v0.1.7-beta2-compat1.md)：Turing 0.32 兼容件层（默认关，未注册）。
 - [releases/](releases/)：历史发布说明与 manifest。
 - [validation/](validation/)：按日期的验收记录。
 - [benchlocal](benchlocal.md)、[lmcache](lmcache.md)：可选能力。

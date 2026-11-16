@@ -261,23 +261,26 @@ def test_sm75_bf16_mlp_preserves_quantized_module_calls():
 
 
 @pytest.mark.parametrize("quantized_fc", [False, True])
-@pytest.mark.parametrize("tp_size", [1, 4])
+@pytest.mark.parametrize("tp_size", [1, 2, 4])
+@pytest.mark.parametrize("df2_opt", [False, True])
 def test_partial_quantization_keeps_unquantized_context_fc_sharding(
-    quantized_fc, tp_size
+    quantized_fc, tp_size, df2_opt
 ):
     scope = {
         "_use_sm75_bf16_emulation": lambda: True,
         "get_tensor_model_parallel_world_size": lambda: tp_size,
         "UnquantizedLinearMethod": _Unquantized,
+        "_df2_opt": lambda: df2_opt,
     }
-    exec(_extract("qwen3_dflash2.py", ("_use_sm75_tp4_context_fc",)), scope)
+    exec(_extract("qwen3_dflash2.py", ("_use_sm75_tp_context_fc",)), scope)
     fc = SimpleNamespace(
         input_size=25600,
         quant_method=object() if quantized_fc else _Unquantized(),
     )
-    use_sharding = scope["_use_sm75_tp4_context_fc"]
+    use_sharding = scope["_use_sm75_tp_context_fc"]
+    sharded_tp = tp_size >= 2 if df2_opt else tp_size == 4
     assert use_sharding(fc, SimpleNamespace(hidden_size=5120), True) is (
-        not quantized_fc and tp_size == 4
+        not quantized_fc and sharded_tp
     )
     assert not use_sharding(fc, SimpleNamespace(hidden_size=5120), False)
     assert not use_sharding(fc, SimpleNamespace(hidden_size=4096), True)
