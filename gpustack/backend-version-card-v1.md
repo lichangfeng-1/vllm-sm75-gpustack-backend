@@ -2,15 +2,19 @@
 
 > **2026-10-27 增补**：在由上游 vLLM 0.30.0 构建的 SM75 基座 `v0.1.7-beta2-v13` 上，另有薄层优化镜像 `v0.1.7-beta2-v13-opt9…opt15`（装门控优化包 `vllm_sm75`）；注册字段与入口不变。调优与读数见 [`../docs/tuning/flash-next-20261027.md`](../docs/tuning/flash-next-20261027.md)。
 
-> **2026-10-29 内部部署增补**：现役生产行 26 使用后端版本 `0.1.7-sm75.1-final-v1-custom`，镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`（父 opt15；console maxTokens、测速 v3.5 配额/上传、SQL finalanswer）。同日已构建 SQL 提示词审计子镜像 `…-final-v1-sqlprompt-audit`（父 final-v1；SQL 页面 sha `6f8c836f…`、manifest `9acabdbc…`；财年/财季原样返回约束 + 工具结果单元格 500/整条 4,000 字符截断），**已构建、未注册、未切行**。切换会重启 console 与 vLLM（同容器），测试运行期间禁止；配方见 `gpustack/Dockerfile.final-v1-20261029` 与 `gpustack/Dockerfile.sql-prompt-audit-v20261029`，注册仍走 `PUT /v2/inference-backends/1`，新版本名建议 `0.1.7-sm75.1-sqlprompt-audit-custom`（未注册）。0→1 公共基线仍按教程口径：上游 `vllm/vllm-openai:v0.30.0-cu129` → `vllm-sm75-gpustack:v0.1.7-beta2-v7`；最新升级可用 `gpustack/build-latest-from-zero-v1.sh`（v7 上叠 final-v1/audit）或 opt15 两条薄层命令。v7/opt15 都是基座，不是上游。
+> **2026-10-29 内部部署增补（历史；当时的现役生产行是 26）**：行 26 使用后端版本 `0.1.7-sm75.1-final-v1-custom`，镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`（父 opt15；console maxTokens、测速 v3.5 配额/上传、SQL finalanswer）。同日已构建 SQL 提示词审计子镜像 `…-final-v1-sqlprompt-audit`（父 final-v1；SQL 页面 sha `6f8c836f…`、manifest `9acabdbc…`；财年/财季原样返回约束 + 工具结果单元格 500/整条 4,000 字符截断），**已构建、未注册、未切行**。切换会重启 console 与 vLLM（同容器），测试运行期间禁止；配方见 `gpustack/Dockerfile.final-v1-20261029` 与 `gpustack/Dockerfile.sql-prompt-audit-v20261029`，注册仍走 `PUT /v2/inference-backends/1`，新版本名建议 `0.1.7-sm75.1-sqlprompt-audit-custom`（未注册）。0→1 公共基线仍按教程口径：上游 `vllm/vllm-openai:v0.30.0-cu129` → `vllm-sm75-gpustack:v0.1.7-beta2-v7`；最新升级可用 `gpustack/build-latest-from-zero-v1.sh`（v7 上叠 final-v1/audit）或 opt15 两条薄层命令。v7/opt15 都是基座，不是上游。
 
-> **2026-11-16 增补**：另有可选兼容层 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1`（父 final-v1；Turing 0.32 兼容件，全部 env 默认关；**已构建、未注册、未切行**）。注册形制与 final-v1 相同；**未过 GPU 门禁（G1–G7）不得用于生产行**，见 [`../docs/tuning/compat-turing032-20261116.md`](../docs/tuning/compat-turing032-20261116.md)。行 26 现役配置未改动。
+> **2026-11-16 现役生产增补**：生产已切 **行 48 Swift-1.5**（served name `EXP-swift15-qwen3.8-flash-next-w4a16-autoround`，实例端口 **40000**，权重 `ukisai/Swift-1.5-Qwen3.8-Flash-Next-W4A16-AutoRound`）；**镜像与后端版本名不变**——仍是 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`（`7267ff1c3db0`）与 `0.1.7-sm75.1-final-v1-custom`，换的是模型权重与行号，不是镜像。行 48 参数 **25 项**（Swift 原配置，`--block-size=16`，未夹带任何吸收优化）。行 26（Intel AutoRound）replicas=0 待命，params/env 与吸收前备份逐字全等。面板同尺三档 decode **66.61/66.48/66.94（均 66.68）**，见 [`run-book-v1.md`](run-book-v1.md) §10b 与 [`../docs/tuning/swift15-prod-20261116.md`](../docs/tuning/swift15-prod-20261116.md)。
 
-一句话：在 GPUStack 2.2.3／2.3.0 上注册一枚自定义 vLLM 后端，把 SM75 八卡档位原样带进平台，入口覆盖与执行命令都留空。
+> **2026-11-16 增补**：另有可选兼容层 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1`（父 final-v1；Turing 0.32 兼容件，全部 env 默认关；**已构建、未注册、未切行**）。注册形制与 final-v1 相同；**未过 GPU 门禁（G1–G7）不得用于生产行**，见 [`../docs/tuning/compat-turing032-20261116.md`](../docs/tuning/compat-turing032-20261116.md)。行 26 配置未改动（replicas=0 待命）；行 48 亦未夹带任何吸收优化。
 
-本文所有源码行号一律取 **GPUStack v2.2.3 正式版源码**（即上游 v2.2.3 正式版发布源码；这个仓不含这些文件）；开发态检出那套树行号不同，别混用。**v2.3.0 兼容性已实测（2026-10-23），但旧行号未逐行复核；兼容面见 run-book §0.1。**
+一句话：在 GPUStack **v2.3.1（现役，2026-11-14 实测）**／2.3.0（2026-10-23 历史实测）／2.2.3（源码行号取证基线）上注册一枚自定义 vLLM 后端，把 SM75 八卡档位原样带进平台；**入口覆盖按形态决定**（面板形态必须覆写，不用面板可留空，见 §一），**执行命令留空**。
 
-> **v2.3.0 增补**：注册字段、版本名、镜像与入口都不变；同一枚 v7 镜像可用。worker 运行时参数必须保留 `--runtime=nvidia --privileged --security-opt label=disable`，否则容器内没有 `/dev/nvidia*`、`gpu_devices=[]`，调度器会报 “does not support backend version”。
+本文所有源码行号一律取 **GPUStack v2.2.3 正式版源码**（即上游 v2.2.3 正式版发布源码；这个仓不含这些文件）；开发态检出那套树行号不同，别混用。**v2.3.0 兼容性已实测（2026-10-23）、v2.3.1 已实测（2026-11-14），但旧行号均未逐行复核；兼容面见 run-book §0.1／§0.2。**
+
+> **v2.3.1 增补（2026-11-14 实测）**：注册字段、版本名、镜像与入口同样不变；平台侧只换 server/worker 镜像为 `quay.io/gpustack/gpustack:v2.3.1`（commit `458030e`），自定义后端与模型定义留在 data_dir 里原样可用。回退须恢复升级前的 pg_dump 备份，详见 run-book §0.2。
+
+> **v2.3.0 增补（2026-10-23 历史）**：注册字段、版本名、镜像与入口都不变；同一枚 v7 镜像可用。worker 运行时参数必须保留 `--runtime=nvidia --privileged --security-opt label=disable`，否则容器内没有 `/dev/nvidia*`、`gpu_devices=[]`，调度器会报 “does not support backend version”。
 
 ## 一、注册表单逐项
 
@@ -42,7 +46,7 @@ vllm serve  <模型路径>  <GPUStack 版本门参数>  <后端参数粘贴块> 
 
 - 仅单机部署，分布式未验证
 - 部署对话框不启用投机解码
-- MTP 暂不支持，后续可以草稿模型绝对路径参数行开启
+- MTP 部署对话框不启用；后续可以草稿模型绝对路径参数行开启（**2026-11-16 已本机实测 MTP2：decode 85.33/80.35/79.91、均 81.86，接受率 45.1%、平均接受长度 1.90；但 262K 撞显存墙、实用上下文 ≤ ~195K，用户裁定不做**）
 
 第二句的机制原因：UI 的投机解码注入位排在用户参数之前（`vllm.py:531-563`、`:627`），勾选后与参数块同族参数重复。第三句的落地路径：后续在"后端参数"里另起一行写草稿模型的绝对路径，形如 `--speculative-config={"method":"mtp","num_speculative_tokens":3,"model":"<草稿模型绝对路径>"}`；注意 GPUStack 的模型目录里没有 `runtime/mtp-int4-g32`，唯一一份在宿主模型仓下的 `<你的模型仓根>/fp8ple/runtime/mtp-int4-g32`（盘点第五节＋风险清单 R6），要用得先把 GPUStack 模型来源指向该仓。
 这里的模型仓路径是占位形而不是绝对路径：原写法带的是参考机上的目录名，换一台机照抄必然指不到东西；下一位请保持 `<你的模型仓根>` 的占位形，改成你自己的路径，不要把任何一台机的真实目录写回来。
@@ -55,9 +59,11 @@ vllm serve  <模型路径>  <GPUStack 版本门参数>  <后端参数粘贴块> 
 |---|---|
 | 后端版本 | `0.1.7-sm75.1-fast-custom`（回退 `0.1.7-sm75.1-custom`） |
 | 后端参数 | 整块粘贴 `gpustack/args-paste-videooff-v1.txt`（24 行，默认 A 路线：保留图像、关闭视频）；纯文本用 `args-paste-v1.txt`（24 行）。一行一条，**行内任何位置不得含空格或制表**；值一律等号形，JSON 值必须写成 `--flag={…}` 紧贴等号，不许写 `--flag {…}` |
-| 环境变量 | 整块粘贴 `gpustack/env-paste-v1.txt`（**25 行**，一行一条 `KEY=VALUE`，键与值两侧、值内都不得含空格或制表）**第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM=120779177984` 是硬性项，不许省**：没有它，平台按启发式算出 204.5 GiB 需求（本机八卡可分配只有 117.76 GiB），模型会一直排队、界面不报错也不给原因——这一条 10-14 实撞过一次，改前它只写在《参数字典》B 表第 25 行的散文里、没烘进粘贴块，所以照"整块粘贴"走的人必踩 |
+| 环境变量 | 整块粘贴 `gpustack/env-paste-v1.txt`（**25 行**，一行一条 `KEY=VALUE`，键与值两侧、值内都不得含空格或制表）**第 25 行 `GPUSTACK_MODEL_VRAM_CLAIM=120779177984` 是硬性项，不许省**：没有它，平台按启发式算出 204.5 GiB 需求（本机八卡可分配只有 117.76 GiB（2026-10-14 当时口径；按 2026-11-16 现读的**可分配上限 15929 MiB/卡**计，八卡为 **124.45 GiB**——物理 16384 减驱动 Reserved 455，ECC=Disabled，算容量不得用 16384）），模型会一直排队、界面不报错也不给原因——这一条 10-14 实撞过一次，改前它只写在《参数字典》B 表第 25 行的散文里、没烘进粘贴块，所以照"整块粘贴"走的人必踩 |
 | 投机解码 | 不启用 |
 | 副本数／worker | 1 台 8 卡 worker，`--tensor-parallel-size=8` 已在参数块里 |
+
+> **`GPUSTACK_MODEL_VRAM_CLAIM` 在 v2.3.1 下的未复核门禁**：v2.3.1 支持 CPU-offloaded 查表资源的显存估算（明确含 PLE 与 Engram，上游 #6417/#6492），从估算 VRAM 里扣掉卸载到 CPU 的表权重并在参与 worker 上预留 RAM ⇒ **这个硬编码可能不再需要**。但**未对比新旧估算值前不得删**：删早了会回到「平台按启发式算出超额需求、模型一直排队且界面不给原因」的老坑。本格当前仍按硬性项执行。
 
 这三条写法是硬性的，原因是 GPUStack 会把表单里的每一行再用 shlex 切一遍（正式版 `gpustack/worker/backends/base.py:1138-1152` `_flatten_backend_param` → `gpustack/utils/command.py:338-351` `safe_split`），而 JSON 掩码**只在 `=` 紧跟 `{` 或 `[` 时才触发**（`gpustack/utils/command.py:226-301` `_mask_json_segments`，触发条件在 `:245`）。所以从 vLLM 官方文档或别处档位抄来的空格形 `--engram-config {"cpu_offload":true}` 会拆成两个 token、值退化成 `{cpu_offload:true}`（非法 JSON）；引擎不一定报错，只是把这一项吃掉——静默降能。抄完先跑 §五 的护栏，这类形状会被 L5 直接判红。
 
@@ -93,7 +99,7 @@ bash gpustack/lint-paste-v1.sh --args gpustack/args-paste-videooff-v1.txt
 
 ## 性能实测的适用面（10-15 补）
 
-仓根 `README.md` 性能节那三张表（基线档 **43.31**／FP8PLE **57.73**／W4A16-AutoRound **57.04**，
+仓根 `README.md` 性能节那三张表（基线档 **43.31**／FP8PLE **57.73**／W4A16-AutoRound **57.04**，均为面板形态历史读数；仓根现另挂 2026-11-16 现役行 48 一档，GPUStack 形态现役读数见 run-book §10b），
 平均总输出 tokens/s）是在**镜像自带的 Ultra／面板形态**上、用"大模型 Prefill & Decode 性能测试工具 v3
 （chao 魔改版）"跑的，同尺参数为：并发 1／请求超时 30000 ms／期望输出长度 1024／九档 512→131072／
 Temperature 1／Top P 0.95／Presence 0／Frequency 0。
@@ -106,4 +112,4 @@ Temperature 1／Top P 0.95／Presence 0／Frequency 0。
 以第一档 FP8PLE 上游基座为基线，57.04/43.31 = **+31.7%**；但这个数含权重差异，不是同权重对照
 （同权重对照是 43.31→57.73，+33.3%）。**这 33.3% 是含 P2P 在内的整组优化，不得记到 P2P 单独名下**——基线档同时缺 pcieipc、QSA 一族、`flashqla_sm75`、自建调度器等多处，这个仓未做过逐族单变量 A/B。另：维护者确认基线档那一档也正是 P2P 没用上时的速度。
 
-**档边界（2026-10-18 起）**：本后端镜像沿用基座原装 `transformers 5.17.0`；上面那三张表是在 `5.15.1` 档的面板形态上量的。要 GPUStack 形态自己的数，按 `run-book-v1.md` 第 10 节的方法另测。
+**档边界（2026-11-16 现读构建链定死）**：默认交付 `-v7` 在**运行期把 `transformers`/`tokenizers` 成对钉到 5.15.1/0.22.2**（`gpustack/build-backend-v1.sh:27-28` 默认值、`:31` `TF_PIN=1`、`:47-52` 产出 `-v7`、`:60-62` 传钉版 build-arg，target=`runtime-pin-layer`）；**基座原装 5.17.0/0.23.2 只属 `--no-tf-pin` 的回退档 `-v4-nopin`**（`:39`/`:53-55`，target=`panel-layer`）。「本后端镜像沿用 5.17.0」是 2026-10-18 的旧口径，自 `-v7` 于 2026-10-21 定版为默认交付后不再成立。**不要单独改 transformers，两项一起钉**（同尺对照见 run-book §10）。上面那三张表是在 `5.15.1` 档的面板形态上量的；要 GPUStack 形态自己的数，按 `run-book-v1.md` 第 10 节的方法另测。

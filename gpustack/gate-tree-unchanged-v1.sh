@@ -38,7 +38,11 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 # 2026-11-16：v6 纳入 Turing 0.32 兼容件层（27 件 vllm 新增/覆盖、1 件 docker 校验器、3 件 docs）＋
 #             兼容层与容量档文档（235 件）；v5 保留为历史证据，复核旧基线用：
 #             SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream-20261030-v5.txt bash gpustack/gate-tree-unchanged-v1.sh
-TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261116-v6.txt}"
+# 2026-11-17：v7 纳入「文档全量更新到现役事实」（冻结面 13 件文档改动 ＋ docs/tuning 新增 1 件，
+#             共 236 件）；默认表指针同批前移到 v7（主控批准）。v6 与更早原表保留不改写，
+#             v6 用作本轮负控对照（应 rc=7：篡改 13、缺失 0、新增 1）。复核旧基线用：
+#             SM75_GATE_TABLE=gpustack/SHA256SUMS-upstream-20261116-v6.txt bash gpustack/gate-tree-unchanged-v1.sh
+TABLE="${SM75_GATE_TABLE:-$SCRIPT_DIR/SHA256SUMS-upstream-20261117-v7.txt}"
 SCOPE="${SM75_GATE_SCOPE:-$SCRIPT_DIR/gate-scope-v1.json}"
 TABLE_REL=${TABLE#"$REPO_ROOT"/}
 SELF=${0##*/}

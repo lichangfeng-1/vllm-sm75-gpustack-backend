@@ -4,14 +4,18 @@
 
 > **2026-11-16 增补**：另有一层「Turing 0.32 兼容件」薄镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1-compat1`（父 final-v1；**已构建、未注册**）。NVFP4 firefly / Skillet / IDEC、EXL3、TurboQuant SM75、UltraQuant 4bit KV、firefly fp8 AR 与 DFlash2 改进全部 env 默认关；开关表、全关等价证据与 GPU 门禁见 [`../docs/tuning/compat-turing032-20261116.md`](../docs/tuning/compat-turing032-20261116.md)。
 
-这张表回答一个问题：上游为 SM75 做的那些能力，接到 GPUStack 上之后各自落在哪里、还剩下哪些。"怎么给"是配置位置，"结论"是在 GPUStack 形态下实测或推导的结果。源码行号取 GPUStack v2.2.3 正式版。
+这张表回答一个问题：上游为 SM75 做的那些能力，接到 GPUStack 上之后各自落在哪里、还剩下哪些。"怎么给"是配置位置，"结论"是在 GPUStack 形态下实测或推导的结果。源码行号取 GPUStack v2.2.3 正式版（历史取证基线；v2.3.0／v2.3.1 均未逐行复核）。
 
-> **v2.3.0 增补（2026-10-23 实测）**：`0.1.7-sm75.1-fast-custom`、入口 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`、41 个 env 与 TP8 参数在 v2.3.0 下原样可用；8 卡均识别为 `cuda`；实例 RUNNING、端口 40000。**worker 必须保留 `--runtime=nvidia --privileged --security-opt label=disable`**，否则 `gpu_devices=[]`，调度器报 “does not support backend version”。新特性：离线文档、Anthropic `/v1/messages`、YAML 导出/导入、revision/回滚已实测；定时伸缩仅 API 接受与持久化（真实窗口未执行）；智能 Benchmark 预拉 `gpustack/benchmark-runner:v0.0.9` 后完成 3 请求 smoke（单点，auto-tune 未跑）。PD/共享 KV/vGPU/多副本路由当前不适用。本表其余行号仍按 v2.2.3，未逐行复核 v2.3.0。
+> **v2.3.0 增补（2026-10-23 实测·历史）**：`0.1.7-sm75.1-fast-custom`、入口 `python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`、41 个 env 与 TP8 参数在 v2.3.0 下原样可用；8 卡均识别为 `cuda`；实例 RUNNING、端口 40000。**worker 必须保留 `--runtime=nvidia --privileged --security-opt label=disable`**，否则 `gpu_devices=[]`，调度器报 “does not support backend version”。新特性：离线文档、Anthropic `/v1/messages`、YAML 导出/导入、revision/回滚已实测；定时伸缩仅 API 接受与持久化（真实窗口未执行）；智能 Benchmark 预拉 `gpustack/benchmark-runner:v0.0.9` 后完成 3 请求 smoke（单点，auto-tune 未跑）。PD/共享 KV/vGPU/多副本路由当前不适用。本表其余行号仍按 v2.2.3，未逐行复核 v2.3.0。
+
+> **v2.3.1 增补（2026-11-14 实测）**：平台升 `quay.io/gpustack/gpustack:v2.3.1`（commit `458030e`），容器 `sm75-gpustack-server-v231`／`-worker-v231`，旧 v2.3.0 容器 stopped 保留可回退；server/worker 共用同一 data_dir，自定义后端版本与模型定义原样可用，worker 运行时参数整组保留。**新特性 Decision Model Serving（`/v1/systemone` ＋ Decision Playground）要求 vLLM ≥ 0.32.0，本交付 SM75 优化版是 0.30 ⇒ 用不了**。**未复核门禁**：上游 #6660「后端 4xx 转 503」是否真修（release 只写 non-streaming，我方流式复现过，须重验）；`GPUSTACK_MODEL_VRAM_CLAIM` 硬编码是否可删（v2.3.1 支持 CPU-offloaded 查表资源显存估算，含 PLE/Engram，但未对比新旧估算值）；Alembic/schema 与 digest 未现读。升级与回退见 run-book §0.2。
+
+> **2026-11-16 现役生产**：模型行 **48 Swift-1.5**（served name `EXP-swift15-qwen3.8-flash-next-w4a16-autoround`，端口 40000，镜像仍是 final-v1 `7267ff1c3db0`），面板同尺 decode 均 **66.68**；行 26（Intel AutoRound，2026-10-27 的 63.30 档）replicas=0 待命。本表下面各节的历史读数**不与 66.68 相减**（对象、镜像档与尺子都不同）。
 
 | 能力 | 落点 | 规格原判 | 本轮定稿 |
 |---|---|---|---|
 | 速度环境变量 22 条（pcieipc 卡间通信开关、QSA 量化注意力一族） | 模型 env 粘贴块 `gpustack/env-paste-v1.txt`（2.2.3 `base.py:457`：模型 env 优先于宿主 env） | 不需要改启动入口 | 能用，不用改入口 |
-| MTP 投机、量化格式、上下文长度等 | 后端参数粘贴块 `gpustack/args-paste-videooff-v1.txt`（默认 A 路线）或 `args-paste-v1.txt`（纯文本） | 不需要改启动入口 | 能用。MTP 投机解码这一版先不启用，`--speculative-config` 已从块里拿掉，以后用草稿模型的绝对路径参数行开启 |
+| MTP 投机、量化格式、上下文长度等 | 后端参数粘贴块 `gpustack/args-paste-videooff-v1.txt`（默认 A 路线）或 `args-paste-v1.txt`（纯文本） | 不需要改启动入口 | 能用。MTP 投机解码不启用，`--speculative-config` 已从块里拿掉，以后用草稿模型的绝对路径参数行开启。**2026-11-16 已实测 MTP2**：decode 85.33/80.35/79.91（均 81.86，≈×1.27–1.35）、接受率 45.1%、平均接受长度 1.90、FULL 图 3/3；但 262K 撞显存墙（KV 2.25 GiB 时 250K 预填 OOM 差 158 MiB；1.5 GiB 时容量门拒，估最大 195,200）⇒ 实用 ≤ ~195K，**用户裁定不做** |
 | 时区 | env `TZ=Asia/Shanghai` ＋镜像内 tzdata 兜底 | 不需要覆盖入口 | 成立；镜像里也写了一层时区（`Dockerfile.v1` 层 3），两层各自独立生效，模型 env 的 TZ 优先（`base.py:457-458`） |
 | 共享内存 64 GiB | env `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB=64`（2.2.3 `base.py:676`，缺省 10） | 不需要改启动入口 | 能用；实际值在容器里跑 `df -h /dev/shm` 看 |
 | 省电常驻/自动休眠（pstate 包装脚本） | 需改启动入口＋宿主 libnvidia-api | 待服务器盘点 | **用不了。** 2026-10-11 在服务器上查过：宿主的三个标准路径里都没有这个库，只有一份私有副本，靠挂载喂给正在跑的引擎。而 GPUStack 自己起的 runner 容器没有挂东西的口子，所以"用宿主自带的库进 P8"这条路走不通，GPUStack 方案不含省电。查的过程见本文第一节。 |
@@ -36,13 +40,13 @@ ABSENT /usr/lib/libnvidia-api.so.1
 3. 宿主驱动已是 580.178.04，运行时注入的库会自动跟上驱动版本，而私有副本不会，所以副本本身才是脆弱点；把它再 bind 进 GPUStack runner 只是把脆弱点搬进新链路。
 4. GPUStack 的 runner 容器配置由平台生成，2.2.3 的 worker 侧没有面向用户的自定义挂载字段（`gpustack/worker/backends/base.py` 内 `volumes`／`add_volume`／`custom_mount` 类关键字零命中），所以省电包装脚本要求的"入口包装＋宿主库"两条同时缺一条。若阶段二在平台侧找到未列出的挂载入口，按本节证据链复核后再决定是否重开省电项，本线不预设它存在。
 
-结论：GPUStack 交付方案不含省电项，注册卡的入口覆盖与执行命令两栏恒为留空，不留可选段。
+结论：GPUStack 交付方案不含省电项（平台 runner 没有面向用户的自定义挂载口，本节证据链成立）。**入口覆盖不在此结论范围内**：自 2026-10-19 起面板形态必须覆写入口（见上文与 §二），执行命令仍留空。
 
-## 二、入口覆盖恒为默认
+## 二、入口覆盖：按形态决定（面板形态必须覆写）
 
 | 注册卡字段 | 取值 | 依据 |
 |---|---|---|
-| 入口覆盖 entrypoint | 留空 | 上表七项能力没有一项需要覆盖入口即成立；覆盖后 `vllm serve` 形态失效（`vllm.py:171-177`） |
+| 入口覆盖 entrypoint | **面板形态：`python3 /opt/vllm-sm75/panel-sidecar.py vllm serve`（必须覆写）；不用面板：留空合法** | 2026-10-19 起面板随模型起就靠这一格（`vllm.py:171-177` 用后端版本的 entrypoint 整条替换镜像 ENTRYPOINT）。包装只在模型行设了 `SM75_PANEL_AUTOSTART=1` 时先拉面板，其余时候原样 exec `vllm serve`，**不设开关时行为与留空完全一致**。与 [`backend-version-card-v1.md`](backend-version-card-v1.md) §一同一口径 |
 | 执行命令 run_command | 留空 | 留空即沿用内置默认拼装与版本门参数；填了会进替换分支（`base.py:817-821`） |
 
 ## 三、实机门禁项（阶段二只读探针，本地不判）
@@ -53,7 +57,7 @@ ABSENT /usr/lib/libnvidia-api.so.1
 | shm 64 GiB | 容器内 `df -h /dev/shm` | 64 GiB；不是则 `GPUSTACK_MODEL_RUNTIME_SHM_SIZE_GIB` 未生效 |
 | 档位未被静默钳 | 引擎启动日志的 `max_model_len` | 262144；出现 8192 即参数块没进（`vllm.py:705-716`） |
 | 容器时区 | 容器内 `date +%z` | `+0800` |
-| CPU KV 卸载是否在位 | 容器内三处对照：`tr '\0' '\n' < /proc/<引擎 pid>/cmdline` 里数 `prefix-match-unit` 与 offload 相关参数；引擎启动日志里找 `SimpleCPUOffloadScheduler: Allocating`；`/metrics` 里的 `external_prefix_cache_hits_total` | 三种结果对应三种结论。**有 Allocating 行**：卸载层其实在位，上面那张表把它算成"用不了"是低估，要改。**参数进了命令行但没有 Allocating 行**：确实需要改启动入口，维持"用不了"。**命令行里根本没有这些参数**：参数块没进去，先查上面「档位未被静默钳」那一格。这笔能力收益和代价都量过：把 GPU KV 挤爆之后重放从 65.5 秒降到 1.5 秒（外部命中 +154,072），但常开着要付连接器开销，九格 decode 口径下约 −8.5%（53.01 对 57.96，关掉后回到 57.05，即 −1.57%）。这里的 57.96 是另一把尺的读数，与本文最后一节表里的 57.73（FP8PLE）同号不同物，不能合并也不能相减。 |
+| CPU KV 卸载是否在位 | 容器内三处对照：`tr '\0' '\n' < /proc/<引擎 pid>/cmdline` 里数 `prefix-match-unit` 与 offload 相关参数；引擎启动日志里找 `SimpleCPUOffloadScheduler: Allocating`；`/metrics` 里的 `external_prefix_cache_hits_total` | 三种结果对应三种结论。**有 Allocating 行**：卸载层其实在位，上面那张表把它算成"用不了"是低估，要改。**参数进了命令行但没有 Allocating 行**：确实需要改启动入口，维持"用不了"。**命令行里根本没有这些参数**：参数块没进去，先查上面「档位未被静默钳」那一格。这笔能力收益和代价都量过：把 GPU KV 挤爆之后重放从 65.5 秒降到 1.5 秒（外部命中 +154,072），但常开着要付连接器开销，九格 decode 口径下约 −8.5%（53.01 对 57.96，关掉后回到 57.05，即 −1.57%）。这里的 57.96 是另一把尺的读数，与本文最后一节表里的 57.73（FP8PLE）同号不同物，不能合并也不能相减。**后续线**：1M 上下文与持久磁盘 KV 缓存以这条能力为起点——合法 `--prefix-match-unit` 集合为 {1,2,4}（面板下拉给 2 的幂但不校验，点 8 以上必炸）；且「1M 活跃单流 decode」与「1M 会话历史＋多人持久缓存」是两个问题，前者每步要从 CPU 取回 KV 会吃 ITL，后者冷会话按需取回只付 TTFT，正是 44× 收益的形态。 |
 | 省电项 | 不测 | 上面已经判了用不了，不必再排探针 |
 
 ## 四、仓根那三张速度表怎么读
@@ -114,10 +118,10 @@ incple AutoRound 量化白名单），加上靠环境变量打开的底座能力
 **第三张是另一枚权重 W4A16-AutoRound**，PLE 为 BF16（102.4 GB），FP8PLE 档的 PLE 为 FP8，所以它精度更高。以第一张 FP8PLE 上游基座为基线，57.04/43.31 = **+31.7%**；但这个数含权重差异，不是同权重对照，也不能记到单一机制名下（同权重对照是 43.31→57.73，+33.3%）。它 512 长度那一格的
 54.87（每 token 间隔 18.24 ms）是首格冷启动，不是稳态值。
 
-**最后一条**：这三个数是面板形态的，不是 GPUStack 形态的验收线。GPUStack 形态要另测，
+**最后一条**：这三个数是面板形态的历史读数，不是 GPUStack 形态的验收线（现役 GPUStack 形态读数是 2026-11-16 行 48 的 decode 均 66.68，见 run-book §10b）。GPUStack 形态要另测，
 方法见 `gpustack/run-book-v1.md` 第 10 节。
 
-## 五、2026-10-20 `-v6` 批次与同平台 A/B（不替换上面三张表；当前默认 `-v7`）
+## 五、2026-10-20 `-v6` 批次与同平台 A/B（历史窗口；不替换上面三张表；当前默认 `-v7`）
 
 这一节只回答一个问题：**同一台机器、同一个 GPUStack、同一把尺，什么组合能把速度拉回 57+。**
 三张历史表（43.31／57.73／57.04）仍只属于面板形态，没有被本节的数替换。
