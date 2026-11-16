@@ -296,3 +296,87 @@ NOTICE —— vllm-sm75-gpustack-backend
   docs/tuning/compat-turing032-20261116.md。
   口径变更：v6 在工作区行尾归一化（LF）后录制，未改动件与 v5 逐字节一致（含 6 件历史 docs）；v5 与更早原表保留不改写。
 验证：v6 正控 rc=0（235 件）；v5 负控 rc=7（篡改 15、缺失 0、新增 31，均为本层有意改动）。
+
+  例外登记（11-17 第一批，文档全量更新到现役事实）：冻结面重录为 v7
+  2026-11-17 把交付仓文档从旧基线（GPUStack 2.3.0 ＋ 63.30 tok/s ＋ Intel opt15 生产行）更新到
+  现役事实（GPUStack v2.3.1 ＋ Swift-1.5 模型行 48 ＋ 面板三档 decode 均 66.68），并纳入
+  2026-11-16 只读参数审计的结论。上游作用域内有意改动 13 件：
+    - 仓根 2 件：README.md、README.en.md（版本追平 v2.3.1；性能节新增现役行；历史读数保留并标日期）；
+    - docs 索引 1 件：docs/README.md；
+    - docs/tuning 2 件：flash-next-20261027.md（降为历史页＋被现读推翻的定性更正）、
+      compat-turing032-20261116.md（补 0.32 整栈净负、Swift 现态 padding 0.13%、
+      EP 过滤优先级上调、MTP 用户裁定不做）；
+    - docs/design 5 件：roofline-audit-20261027.md、hardware-utilization-20261027.md、
+      next-projects-20261027.md、external-techniques-20261027.md、8bit-collective-20261027.md
+      （原 trace 读数与推导逐字保留，只更正被现读推翻的整体定性）；
+    - 附带 docs 3 件：configuration-v0.1.7.md、flash-next-performance.md、flash-next-tp8.md
+      （各只在 2026-10-27 增补段末追加历史标注，原读数一字未动）。
+  上游作用域内新增 1 件：docs/tuning/swift15-prod-20261116.md（现役生产档调优页）。
+  自研作用域（owned，不参与字节冻结）另改 5 件＋新增 1 件：gpustack/run-book-v1.md、
+  gpustack/backend-version-card-v1.md、gpustack/compat-matrix-v1.md、
+  gpustack/release-notes-v2.3.0-v1.md、vllm_sm75/README.md；
+  新增 gpustack/release-notes-v2.3.1-v1.md。
+  门脚本：gpustack/gate-tree-unchanged-v1.sh 默认基线表指针 v6→v7（主控批准），另追加 v7 沿革
+  注释 4 行；判据逻辑、退出码、作用域解析零改动（diff 仅 5 增 1 删）。
+  口径：v7 在工作区行尾归一化（LF）后录制；未改动件与 v6 逐字节一致；v6 与更早原表保留不改写
+  （SHA256SUMS-upstream.txt 551 件、v2/v3/v4/v5/v6 各版 git 状态为空，零改动）。
+  历史读数纪律：63.30／3485.13／57.04／43.31／57.73／52.81／2.3.0（63a03ba、digest 3d2734fa…、
+  Alembic a7e2c9d4f681、冒烟 58.75/58.46/65.13）／2.2.3（仍是源码行号取证基线）／
+  8.5 MiB（2026-10-27 spot 口径）／362 GB/s 与 55.7 TFLOPS（旧常数口径）全部保留，
+  标日期＋标明被什么取代，未删未改数。
+验证：v7 正控 rc=0（236 件）；v6 负控 rc=7（篡改 13、缺失 0、新增 1，均为本轮有意改动）。
+  非弱化三探针 self-test 16/16 PASS（每门≥2 负控＋1 正控，含修前对照与超集证明）：
+    - 未知件仍红：表侧少登记新件 rc=7、树侧真新增未登记件 rc=7；探针删净后复跑 rc=0（236 件）；
+    - 新件归属生效：篡改新 tuning 页摘要 rc=7（内容被改动 1 件）、表内登记件缺失 rc=7
+      ⇒ 新件已被守护、未被豁免；
+    - 歧义护栏仍红：owned 缺 gpustack／含斜杠／格式非法 各 rc=4，scope 清单缺失 rc=6，
+      表内重复路径／末行缺换行／非法行 各 rc=4；
+    - 超集证明：v6→v7 删除 0 件、新增 1 件、摘要变化 13 件（恰等本轮有意改动，覆盖面未放宽）；
+    - 既有证据表零改动：551 件旧表与 v2–v6 原表 git 状态为空。
+  夹具教训（本轮实撞，已修）：Windows 上 subprocess 调裸 bash 会落到 WSL（uname=Linux），
+  WSL 默认不转发 Windows 环境变量 ⇒ SM75_GATE_TABLE/SCOPE 被丢弃、门恒跑默认表，
+  11 条覆盖探针假绿 rc=0。修法＝显式用 Git Bash（MINGW64）＋临时件路径用正斜杠，
+  并前置一道「夹具自检」（验 uname 与 env 转发，不过即拒绝跑）；修夹具不修判据，
+  期望 rc 与期望输出一律未放宽。首轮 11/16 FAIL 由负控暴露——只跑正控会漏掉这次假绿。
+  v7 定稿重录（本轮内一次，留证不抹）：Converge 验收第 1–2 轮补标注又改了 2 件冻结面文档
+  （docs/tuning/swift15-prod-20261116.md、docs/design/external-techniques-20261027.md），
+  故 v7 于收敛后重录定稿（--record --force）。重录前的 v7 中间态已复制到本轮工作夹的仓外证据目录
+  （v7-中间态-Converge前-20261117.txt）留证；v6 与更早原表始终字节未动。
+  定稿读数：v7 正控 rc=0（236 件）；v6 负控 rc=7（篡改 13、缺失 0、新增 1）；
+  非弱化三探针 self-test 复跑 16/16 PASS；20 件文档结构自检全绿（其中 2 件自有相对链接为 0，
+  链接门在该 2 件上覆盖为 0，已如实标注不算通过证据）。
+  Converge 验收（拿变更设计逐条核对实际 diff）：第 1 轮抓出 6 条断言短语誊写错、26 条标注需人工判定、
+  1 条 CRLF 整文件计数假阳；第 2 轮修判据缺陷（只在围栏外跟踪 markdown 标题、文件级历史标记只认显式
+  「历史件/历史页/历史快照」不认日期以免现役文档被误判成历史记录、中英双语标注词、显式日期即窗口标注）
+  ＋补 10 处读数窗口标注；第 3 轮补 2 处显式历史标注后 CONVERGE_OK：逐件断言全过、历史读数 24 条全在、
+  85/85 命中带标注、C03 语义门（不得把 2.3.0／63.30 宣称为现役）0 命中、边界门全过、
+  真实增量 +364／−128 行（忽略行尾后计，无整文件重写）。
+
+  例外登记（11-17 第二批，审查 S2/S3 修复）：v7 部分摘要重录
+  2026-11-17 三轮隔离审查 verdict＝PASS_WITH_S2（BLOCKER 0／S2-1／S3-1／OBS 5）。
+  主控裁定 S2-1 修、S3-1 按推荐处置、OBS 记录不阻塞。
+  S2-1＝MTP2 实测对象与比值基线未明示（8 处 9 编辑点）：各比值处单句追加标明
+  实测对象为行 26（Intel AutoRound）参数+block400/ConfigB（实验行 53）、比值对 Intel
+  无 MTP 基线 ~63.3（63.30 九档均值；Swift 页 §6 的 ×1.29 对 63.4 试跑对照）、
+  Swift 权重+MTP2 未实测、同读数对 Swift 66.68 折算约 ×1.19–1.28（均值 ≈1.23）
+  非 Swift 实测收益。读数一字未动（85.33/80.35/79.91/81.86/45.1%/1.90/×1.27–1.35/×1.29
+  全保留；「删去追加句逐字还原旧行」机械断言 14 行对全过）。
+  落点：gpustack/compat-matrix-v1.md、gpustack/run-book-v1.md（§18）、
+  docs/tuning/flash-next-20261027.md（§3）、docs/tuning/compat-turing032-20261116.md（§5）、
+  docs/design/external-techniques-20261027.md（§1 表）、docs/design/next-projects-20261027.md、
+  docs/design/roofline-audit-20261027.md（§3 表）、docs/tuning/swift15-prod-20261116.md（§6＋§8）。
+  S3-1＝README.md／README.en.md 文档节 compat tuning 与 backend card 条目追平 docs/README
+  口径（净负 59.47／只动容量不动速度／MTP2 用户裁不做／11-16 现役生产增补）；
+  docs/README.md backend card 条目同族同步一行（该件自身亦只写 10-29，审查前提核实后补）。
+  上游作用域内改动 9 件（仓根 2＋docs 索引 1＋docs/tuning 3＋docs/design 3），均在第一批
+  13 改＋1 新集合内，无新增漂移件；owned 另改 2 件（run-book、compat-matrix）。
+  v7 重录（--record --force）：表差集恰 9 条摘要变化、0 增、0 删，236 件不变。
+  重录前 v7 中间态已复制到仓外证据目录（v7-中间态-S2S3修复前-20261117.txt，
+  sha f2de5fcd77e688f9… 与第一批定稿逐字节同）留证；v6 与更早原表字节未动
+  （v6 sha fab8c644aa508c38… 与改前快照同；551 件旧表 1f867762d6f201dc… 未动）。
+验证：v7 正控 rc=0（236 件）；v6 负控 rc=7（篡改 13、缺失 0、新增 1，集合与第一批同）；
+  非弱化三探针 self-test v2 复跑 16/16 PASS（派生自 v1 仅输出路径，判据逐字同；
+  读数落 证据-门selftest-20261117\S2S3修复轮-v2\selftest-读数-20261117-v2.md，v1 读数不覆盖）；
+  20 件文档结构自检 STRUCT_CHECK_OK＋负控夹具 STRUCT_CHECK_RED rc=1（门非恒真）。
+  OBS-1～5 记录不阻塞、本轮未改（9.368 精度源 v13／4.5 ms 应 ≈4.8／U9 出处／
+  内网 IP 预存债另轨／G 门 commit 级覆盖审查已补证）。

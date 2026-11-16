@@ -1,6 +1,6 @@
 # vllm_sm75 — SM75 (Turing) 可选优化包
 
-**状态（2026-10-27）**：已转正 2 项（`gemv_m1`、`gdn_tc`，均在 `auto`），判负留档 4 项，
+**状态（2026-10-27 立；2026-11-16 复核登记项未变）**：已转正 2 项（`gemv_m1`、`gdn_tc`，均在 `auto`），判负留档 4 项，
 另有 2 个只测量的探针。全部默认关时可与基线镜像行为一致（`VLLM_SM75_OPT=0` 一行子模块都不加载）。
 
 ## 门控顺序（严格短路）
@@ -48,4 +48,5 @@ compute capability == (7, 5)
 
 - 只新增、不覆盖镜像里已有文件；全关等价基线；每项独立开关、独立回退。
 - 不做精度换速度：量化/8-bit 集合通信/MTP 不在本包范围内。
-- 判定与读数：`../docs/tuning/flash-next-20261027.md`；外部技术对照：`../docs/design/external-techniques-20261027.md`。
+- 判定与读数：`../docs/tuning/flash-next-20261027.md`（2026-10-27 Intel 历史基线）；现役生产（2026-11-16 Swift 行 48，decode 均 66.68）：`../docs/tuning/swift15-prod-20261116.md`；外部技术对照：`../docs/design/external-techniques-20261027.md`。
+- **本包与现役生产的关系**：行 48 用的镜像仍是 `…opt15-final-v1`，含本包同一份登记；`VLLM_SM75_OPT=auto` 生效项为 `gemv_m1` 与 `gdn_tc`（后者需 `--gdn-prefill-backend=triton`）。**HC 八卡复制（占每步权重字节 51.9%）不属本包**——那是并行布局问题，需改上游代码，已另立项后暂停，不是开关能解的。

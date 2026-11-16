@@ -1,11 +1,13 @@
 # run-book v1 —— 从零到模型可推理（Linux 宿主）
 
-适用范围：8×Tesla T10（sm_75，16 GiB/卡）＋ GPUStack v2.2.3（历史取证）／v2.3.0（2026-10-23 实测兼容）＋ 我们自己构建的 vLLM 后端镜像。
+适用范围：8×Tesla T10（sm_75，16 GiB/卡）＋ GPUStack **v2.3.1（2026-11-14 实测兼容·现役）**／v2.3.0（2026-10-23 历史实测）／v2.2.3（源码行号取证基线）＋ 我们自己构建的 vLLM 后端镜像。
 本文件只给"照做能跑"的最小命令序列；每条参数为什么这么设、换硬件怎么改，见 `gpustack/backend-version-card-v1.md` 与 `gpustack/compat-matrix-v1.md`。
 
 **标注约定**：`【待实跑复核】`＝该命令由源码行号与既有实跑记录推出，尚未在本机复跑；其余步骤为实跑验证过的形制。
 
 > **2026-10-29 内部部署增补**：本文 0→1 基线仍按教程口径（上游 vLLM 0.30.0 → `vllm-sm75-gpustack:v0.1.7-beta2-v7`）；现役生产行使用 final-v1（后端版本 `0.1.7-sm75.1-final-v1-custom`）及 SQL 提示词审计子镜像，详见 [`backend-version-card-v1.md`](backend-version-card-v1.md) 的 2026-10-29 增补。注册/切换仍走 GPUStack API。
+>
+> **2026-11-16 现役生产模型**：行 **48 Swift-1.5**（served name `EXP-swift15-qwen3.8-flash-next-w4a16-autoround`，端口 40000，镜像仍是 final-v1 `7267ff1c3db0`，原配置 25 项、`--block-size=16`，未夹带任何吸收优化）；行 26（Intel AutoRound）replicas=0 待命、params/env 与备份逐字全等。面板同尺 decode 均值 **66.68**，见 §10b 与 [`../docs/tuning/swift15-prod-20261116.md`](../docs/tuning/swift15-prod-20261116.md)。
 
 ---
 
@@ -18,7 +20,7 @@
 | 网卡 | 记下宿主内网 IP，下面统一用 `HOST_IP` | worker 与浏览器都要能到达它。`export HOST_IP=192.0.2.10` 换成你的地址 |
 | 数据目录 | 下面统一用 `GS_DATA_DIR`（示例值 `/data/gpustack-data`），`export GS_DATA_DIR=/你的路径`；并且要在起容器**之前**先建好、容器要能写 | `--mount type=bind` 的源目录不存在时，失败发生在 `docker create` 而不是 `docker start`，原文 `invalid mount config for type "bind": bind source path does not exist`。另注意 GPUStack 会以 root 写这枚目录，事后普通账号删不掉 |
 
-**版本基线（2026-10-19 首读；2026-10-23 补 GPUStack v2.3.0 实测，仍当下限用、不保证上限）**
+**版本基线（2026-10-19 首读；2026-10-23 补 GPUStack v2.3.0 实测；2026-11-14 补 v2.3.1 实测，仍当下限用、不保证上限）**
 
 | 件 | 本次实测通过的版本 | 说明 |
 |---|---|---|
@@ -27,7 +29,7 @@
 | Docker | **29.8.0**（storage `overlayfs`，cgroup **v2**） | cgroup v1 未验证 |
 | containerd | **2.3.5** | |
 | NVIDIA Container Toolkit | **1.20.0**（`libnvidia-container` 1.20.0-1） | `--runtime nvidia` 依赖它 |
-| GPUStack | **quay.io/gpustack/gpustack:v2.3.0**（2026-10-23 实测；v2.2.3 为上一版） | 本文件其余 API/字段/旧行号取证仍按 2.2.3；2.3.0 兼容面见 §0.1 |
+| GPUStack | **quay.io/gpustack/gpustack:v2.3.1**（2026-11-14 实测，commit `458030e`；v2.3.0＝2026-10-23 历史实测，v2.2.3＝行号取证基线） | 本文件其余 API/字段/旧行号取证仍按 2.2.3；2.3.0 兼容面见 §0.1、2.3.1 见 §0.2 |
 
 **读法**：上表是"我们实际跑通的那一组"，**只作为下限**——低于它我们不保证、也未验证；高于它同样不保证（版本组合可能有行为差异），请使用者自行实测后再上生产。
 
@@ -35,7 +37,9 @@
 > `/proc/meminfo`，`MemTotal < 251 GiB` 直接退出码 **4** 并打印实测值，不再让你跑到加载阶段才发现。
 > 只做探活、不构建时用 `--skip-mem-gate` 跳过。128 GiB 一类的机器属于"必然 OOM"，不要试图绕过。
 
-### 0.1 从 2.2.3 升到 2.3.0（2026-10-23 本机实测）
+### 0.1 从 2.2.3 升到 2.3.0（2026-10-23 本机实测·历史节）
+
+> **历史节**：本节是 2026-10-23 的 2.2.3→2.3.0 记录，读数、digest 与 Alembic 版本逐字保留。现役平台为 **v2.3.1**，升级见 §0.2。
 
 > 下列命令使用 §1 定义的 `HOST_IP` 与 `GS_DATA_DIR`；先把 §1 的两个 `export` 设好再照抄。
 
@@ -93,7 +97,41 @@ docker run -d --name sm75-gpustack-worker --restart unless-stopped \
 
 **新特性**：离线文档、Anthropic、YAML 导出/导入、revision/回滚已实测；定时伸缩只验证 API 接受与持久化（真实窗口未执行）；智能 Benchmark 预拉 `gpustack/benchmark-runner:v0.0.9` 后跑通 3 请求 smoke（3/3、output 107.53 tok/s、TTFT 937 ms、TPOT 28.70 ms；单点，不代表负载曲线）。PD/共享 KV/vGPU/多副本路由当前不适用。
 
-**行号**：本节是 2.3.0 的兼容面复核；本文件其余章节的行号仍是 2.2.3，未逐行复核 2.3.0，不要混用。
+**行号**：本节是 2.3.0 的兼容面复核；本文件其余章节的行号仍是 2.2.3，未逐行复核 2.3.0／2.3.1，不要混用。
+
+### 0.2 从 2.3.0 升到 2.3.1（2026-11-14 本机实测）
+
+**结论**：平台侧只换 GPUStack server/worker 镜像；自定义后端版本、模型定义与凭据全在 data_dir 里，升级不动它。本机现役容器 `sm75-gpustack-server-v231` / `sm75-gpustack-worker-v231`，镜像 `quay.io/gpustack/gpustack:v2.3.1`（commit `458030e`）；旧 v2.3.0 容器 `sm75-gpustack-server-v3` / `sm75-gpustack-worker` **stopped 保留可回退**。server 与 worker **共用同一个 data_dir**（`${GS_DATA_DIR}`）。
+
+**升级前必做**：先 `pg_dump` 备库——2.3.1 可能做 schema 迁移，**迁移后 2.3.0 不一定读得回来**，备份是回退的唯一前提。本机备份为一枚 SQL 导出件（约 4.3 MB，升级前导出）。旧容器改名保留并 `docker update --restart=no`，不要删。
+
+**起容器**：形制与 §3／§5 完全相同，只把镜像 tag 换成 `v2.3.1`、容器名加 `-v231` 后缀。
+
+```bash
+docker pull quay.io/gpustack/gpustack:v2.3.1
+# server：照 §3（bridge ＋ 只映射 ${HOST_IP}:8180:80 ＋ 显式 --token），镜像换 v2.3.1
+# worker：等 server /healthz 200 后照 §5 起，镜像换 v2.3.1
+#         --worker-name 保持 sm75-gpustack-worker 不变 ⇒ worker 身份与模型行 gpu_selector 都不用改
+```
+
+worker 的 `--runtime=nvidia --privileged --security-opt label=disable` 与 host 网络**必须保留**（缺整组会 `gpu_devices=[]`）；`TZ=Asia/Shanghai` **必须显式传**，漏了容器走 UTC、日志时间戳差 8 小时。
+
+**验收**：`8180/healthz` 200；worker READY、八卡均 `cuda`；后端版本与模型行原样（data_dir 未动）；模型实例 `/health` 200、`/v1/models` 200、一次真实推理非空。本机升级后模型行 26 重调度恢复、`40000/v1/models`=200。
+
+**回退**：停 `-v231` 两容器 → **恢复升级前的 pg_dump 备份** → 起旧 v2.3.0 容器 → `docker update --restart=unless-stopped` 恢复自启。**不能把旧容器直接接到已迁移的库上。**
+
+**新特性与门槛**：Decision Model Serving（决策模型：`/v1/systemone` ＋ Decision Playground，回答 choice/score/boolean 类型化判定，用于模型路由/分类/轻量评判）**要求 vLLM 路径 ≥ 0.32.0** 才提供 System One 契约；本交付的 SM75 优化版是 **0.30 ⇒ 用不了**（后端代码 `gpustack/routes/plugins/decision_service/`）。模型须 `Category=Decision` 才进 Playground 下拉，否则显示「暂无数据」。llama.cpp 路径用决策 GGUF 自动归类，与本交付无关。
+
+**未复核门禁（不得当"已修/已支持"写）**：
+
+| 项 | 状态 |
+|---|---|
+| 上游 #6660「后端 4xx 被转成 503」 | release 只写 *non-streaming*；我方复现里**流式也受影响** ⇒ 升级后须重验一次流式 4xx。本地删 fallback target 的规避措施先保留，验完再决定是否恢复 |
+| `GPUSTACK_MODEL_VRAM_CLAIM` 硬编码 | v2.3.1 支持 CPU-offloaded 查表资源的显存估算（明确含 PLE 与 Engram，#6417/#6492），**可能不再需要**这个硬编码；但**未对比新旧估算值前不得删**（见 §12.2） |
+| Alembic/schema 版本、镜像 digest | 本轮**未现读**，不写数 |
+| worker token 授权范围收紧（GHSA-9vwx-hfm8-g59g） | 可能改变 worker token 的可用操作范围；若升级后 worker 注册异常先查这条。本机未复验 |
+| 内置后端默认版本 | 2.3.1 捆绑的内置后端版本变了，**确认模型行仍指向我们的 `-custom` 版本**，别被默认值带跑 |
+| 本文其余源码行号 | 仍按上游 v2.2.3；v2.3.0／v2.3.1 均未逐行复核 |
 
 **下文命令里"你这台机器"的值，统一由 `HOST_IP` 与 `GS_DATA_DIR` 两个变量给**（在 §1 的 export 之后照抄即可）。
 
@@ -101,7 +139,7 @@ docker run -d --name sm75-gpustack-worker --restart unless-stopped \
 
 ```bash
 docker pull vllm/vllm-openai:v0.30.0-cu129@sha256:58fdb6bb123a81aa53f46fa4652ad8cc87e817bd1077c9832c6258ef12c1c688   # 上游基座，落盘约 42 GiB（构建后 SM75 后端约 64 GB）
-docker pull quay.io/gpustack/gpustack:v2.3.0                                                                                  # 平台本体，约 1 GB
+docker pull quay.io/gpustack/gpustack:v2.3.1                                                                                  # 平台本体，约 1 GB
 ```
 
 ## 1 拉仓
@@ -174,13 +212,13 @@ docker create --name sm75-gpustack-server --hostname sm75-gpustack-server \
   --network bridge --restart unless-stopped --env TZ=Asia/Shanghai \
   -p ${HOST_IP}:8180:80 \
   --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
-  quay.io/gpustack/gpustack:v2.3.0 \
+  quay.io/gpustack/gpustack:v2.3.1 \
   --token "$GS_TOKEN"
 docker start sm75-gpustack-server
 ```
 
 **`--token` 不是可选项，是必需项**（2026-10-30 修正）。在**全新的空 `GS_DATA_DIR`** 上，
-v2.3.0 的 server 以 server-only 形态启动，此时：
+v2.3.0 的 server 以 server-only 形态启动（2026-10-30 实测；v2.3.1 未逐行复核），此时：
 
 - `_is_both_role()` 为假 → `_should_create_default_cluster()` 为假（`server.py:1308-1315`）→
   **默认集群不会被创建**；
@@ -201,7 +239,7 @@ worker 随后去读自己 data_dir 里的 `token`（`config.py:312-313`），读
 
 **两个坑，都是实跑撞过的**：
 
-先说一句指路约定：本节与后文凡指向 Python／mjs 源码并带行号的——无论写成 `gpustack/xxx.py:行号` 还是只写 `xxx.py:行号`——指的都是**上游 GPUStack v2.2.3 的源码路径与行号**，这个仓里没有这些文件。我们自己写的件集中在 `gpustack/` 目录与仓根文档：多数带版本后缀（如 `run-book-v1.md`），也有不带的（如 `layers/incple/patch_ple_inc.py`、`layers/pcieipc/install-pcieipc.sh`），所以按路径区分，别按后缀猜。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核；v2.3.0 只复核了 §0.1 的兼容面，旧行号未逐行复核，别把 2.2.3 行号当 2.3.0 用。
+先说一句指路约定：本节与后文凡指向 Python／mjs 源码并带行号的——无论写成 `gpustack/xxx.py:行号` 还是只写 `xxx.py:行号`——指的都是**上游 GPUStack v2.2.3 的源码路径与行号**，这个仓里没有这些文件。我们自己写的件集中在 `gpustack/` 目录与仓根文档：多数带版本后缀（如 `run-book-v1.md`），也有不带的（如 `layers/incple/patch_ple_inc.py`、`layers/pcieipc/install-pcieipc.sh`），所以按路径区分，别按后缀猜。行号按上游 `v2.2.3` 正式版源码计，换版本请先复核；v2.3.0 只复核了 §0.1 的兼容面（历史节）、v2.3.1 只复核了 §0.2 的兼容面，旧行号均未逐行复核，别把 2.2.3 行号当 2.3.0／2.3.1 用。
 
 - **不要加 `--system-default-container-registry`**。加了它，后端注册表里不含 registry 段的镜像名会被拼成 `quay.io/vllm-sm75-gpustack:…` 去远端拉，报 `Failed to pull image`，而本地明明有这枚镜像；表现是"参数块一行都没被执行"。拼接规则 `gpustack/utils/config.py:87-108`。已经设过就清掉：`PUT /v2/config {"system_default_container_registry":""}`（该字段在运行时白名单 `gpustack/utils/config.py:9-12`，可热改；这条 PUT 要带鉴权，无 token 直接 401）。
 
@@ -255,7 +293,7 @@ docker create --name sm75-gpustack-worker --hostname sm75-gpustack-worker \
   --runtime=nvidia --privileged --security-opt label=disable --network host \
   --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
   --mount type=bind,source=${GS_DATA_DIR},target=/var/lib/gpustack \
-  quay.io/gpustack/gpustack:v2.3.0 \
+  quay.io/gpustack/gpustack:v2.3.1 \
   --server-url http://${HOST_IP}:8180 \
   --advertise-address ${HOST_IP} \
   --worker-name sm75-gpustack-worker
@@ -277,7 +315,7 @@ curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/clusters/1/registrat
 
 返回五格 `token / server_url / image / env / args`。本机 2026-10-18 现读：`server_url` ＝ `http://172.17.100.10:8180`，`image` ＝ `quay.io/gpustack/gpustack:v2.2.3`，`env` 里一条 `GPUSTACK_TOKEN`（58 字符），`args` 是空数组。这一格的结构体注释逐字写着它是"The arguments of docker run command to register a worker"（`gpustack/schemas/clusters.py:696-706`），所以 `-e GPUSTACK_TOKEN=…` 与命令行 `--token …` 两种写法都算照用途用。
 
-> 该段 `image`/`server_url` 是 2.2.3 历史读数；v2.3.0 升级后未重取。
+> 该段 `image`/`server_url` 是 2.2.3 历史读数；v2.3.0 与 v2.3.1 升级后均未重取。
 
 两条注意：
 
@@ -300,7 +338,7 @@ curl -s -H "X-API-Key: ${GS_KEY}" http://${HOST_IP}:8180/v2/inference-backends
 
 `version_configs` 是**以版本名为键的字典**。本机现读 vLLM 那一行（`id=1`、`backend_source=built_in`、`built_in_version_configs` 30 格、`version_configs` 只有我们这一格）：
 
-> 该段是 2.2.3 历史读数；v2.3.0 实测 vLLM 行内有 5 个 `-custom` 版本（custom / fast-custom / v4tf515-custom / oldpanel-custom / oldpanel-tf517-custom）。
+> 该段是 2.2.3 历史读数；v2.3.0 实测 vLLM 行内有 5 个 `-custom` 版本（custom / fast-custom / v4tf515-custom / oldpanel-custom / oldpanel-tf517-custom）；v2.3.1 升级后未重取。
 
 ```json
 {"0.1.7-sm75.1-custom": {"image_name": "vllm-sm75-gpustack:v0.1.7-beta2-v1", "run_command": null, "entrypoint": null, "built_in_frameworks": null, "custom_framework": "cuda", "env": null}}
@@ -426,13 +464,13 @@ docker run -d --name sm75-bench-cli \
 
 ## 10 性能预期（以及仓根那三张表的适用面，务必先读）
 
-**`-v6` 批次（2026-10-20；同引擎层读数，SMT Off，AutoRound，output 1024，并发 1，面板直连）**：8192/16384/32768 = **56.79 / 57.15 / 57.17（均值 57.04）**，A 路线（image4/video0），与历史 AutoRound 57.04 一致；**v7 同引擎层复核（2026-10-21）为 56.83–57.04**。关键变量是**transformers/tokenizers 成对钉到 5.15.1/0.22.2**：v4 栈钉对＝57.04，旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36，v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers。** 同机对照：不钉版 v4 **56.26/56.97**；旧面板独立容器 59.35（text-only，不可与 A 路线相减）。**仓库从 vLLM 基座一条命令构建的就是 v7，不需要任何历史镜像。**
+**`-v6` 批次（2026-10-20 历史窗口；同引擎层读数，SMT Off，AutoRound，output 1024，并发 1，面板直连）**：8192/16384/32768 = **56.79 / 57.15 / 57.17（均值 57.04）**，A 路线（image4/video0），与历史 AutoRound 57.04 一致；**v7 同引擎层复核（2026-10-21）为 56.83–57.04**。关键变量是**transformers/tokenizers 成对钉到 5.15.1/0.22.2**：v4 栈钉对＝57.04，旧栈钉对＝57.15；旧栈换 5.17/0.23＝55.36，v4 栈只换 transformers 而不配对 tokenizers＝51.1。**不要单独改 transformers。** 同机对照：不钉版 v4 **56.26/56.97**；旧面板独立容器 59.35（text-only，不可与 A 路线相减）。**仓库从 vLLM 基座一条命令构建的就是 v7，不需要任何历史镜像。**
 
 **2026-10-26 生产行 4 补读**：FULL_AND_PIECEWISE + flashqla + AR=0，面板九档均值 **62.28**（8K/16K/32K 62.50/62.24/62.21）；FULL 相对 PIECEWISE 解码 +6.5–8%（2026-10-25 同尺 63.18/63.03/62.75 对 59.16/58.14/57.36）。预填优先档（批 8192 + triton + AR=0）是 8K/32K 2019/8643 ms、解码直测 59.6–61.6；两把尺不能相减。
 
-**2026-10-27 生产行（opt15 标准版，批 8192 + triton + AR=0）**：面板九档平均输出 **63.30**、平均预填 **3485.13**；8K/16K/32K/64K/128K TTFT 2013/4127/9200/19758/42595 ms，输出 63.52/63.15/63.00/62.48/61.50。对照 2026-10-26 行 4（62.28）：平均输出 +1.64%（噪声内）、平均预填 +10.29%、8K/32K/128K TTFT −11.35%/−13.73%/−14.00%。新调优档在预填和解码两侧都更好。
+**2026-10-27 生产行（Intel AutoRound，opt15 标准版，批 8192 + triton + AR=0）——历史基线，已被 2026-11-16 Swift 行 48 取代（见 §10b）**：面板九档平均输出 **63.30**、平均预填 **3485.13**；8K/16K/32K/64K/128K TTFT 2013/4127/9200/19758/42595 ms，输出 63.52/63.15/63.00/62.48/61.50。对照 2026-10-26 行 4（62.28）：平均输出 +1.64%（噪声内）、平均预填 +10.29%、8K/32K/128K TTFT −11.35%/−13.73%/−14.00%。新调优档在预填和解码两侧都更好。
 
-仓根 `README.md` 的性能节挂着三张测速表：基线档 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出）。其中 43.31/57.73 是同一枚 FP8PLE 权重；57.04 是另一枚 W4A16-AutoRound（PLE 为 BF16，FP8PLE 档为 FP8，精度更高）。以 43.31 上游基座为基线：同权重 +33.3%，本交付 +31.7%（含权重差异，不是同权重对照）。
+仓根 `README.md` 的性能节挂着三张测速表：基线档 **43.31**、FP8PLE **57.73**、W4A16-AutoRound **57.04** tokens/s（平均总输出），另挂 2026-11-16 现役行 48 一档（§10b）。这三张表仍只属面板形态历史读数。其中 43.31/57.73 是同一枚 FP8PLE 权重；57.04 是另一枚 W4A16-AutoRound（PLE 为 BF16，FP8PLE 档为 FP8，精度更高）。以 43.31 上游基座为基线：同权重 +33.3%，本交付 +31.7%（含权重差异，不是同权重对照）。
 
 **这三张不是本 run-book 这条路的读数。** 它们的备注逐字是 `G292Z20 8*T10 SM-75 …`，**没有出现 GPUStack 字样**，
 是在镜像自带的 Ultra／面板形态上、用"大模型 Prefill & Decode 性能测试工具 v3（chao 魔改版）"跑出来的。
@@ -493,7 +531,9 @@ docker run --rm \
 - 长度集合必须**逐格对齐**（九档就是九档，少一格直减不成立），且单格差落在 **±4.6%** 以内不得当结论。
 - **首格（512）常是冷启动离群点**，跨批比要么固定剔第一格，要么先补一档不计数的预热。
 
-### 10a GPUStack 形态的九档读数（2026-10-18 20:10 北京结案）
+### 10a GPUStack 形态的九档读数（2026-10-18 20:10 北京结案·历史窗口）
+
+> **历史窗口**：被测镜像是 `vllm-sm75-gpustack:v0.1.7-beta2-v1`，与现役行 48（final-v1 ＋ Swift-1.5 权重）不是同一对象，**本节读数不得与 §10b 的 66.68 相减**。
 
 被测对象＝GPUStack 平台拉起的实例（镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v1`），经 8180 网关；尺子＝上一节那份 pinned 核心，与仓根三张表同一份字节；参数逐格同上；九档 512→131072；两批配对。
 
@@ -521,6 +561,24 @@ docker run --rm \
 - 精度：温度 0 同一 prompt，51 token→46 token，文本仅“数组位置→存储位置”同义改写；未做大样本精度对拍。
 - 结论：7.4% 中约 4 个百分点可归因 HC；剩余约 9.5%（51.63 对 57.04）不能再记到单一参数名下。下一步需**同镜像面板形态 A/B**（停生产、按档位起面板形态引擎、同尺单档）才能判断剩余差距是形态/构建/测量窗口，还是另有一条未发现的热路径。
 - 实例重建会重分配直连口（本次 40062→40007），以 `GET /v2/model-instances/{id}` 的 `port` 为准。
+
+### 10b 2026-11-16 现役生产行（Swift-1.5，行 48）
+
+**对象**：GPUStack 模型行 **48**，served name `EXP-swift15-qwen3.8-flash-next-w4a16-autoround`，权重为 `ukisai/Swift-1.5-Qwen3.8-Flash-Next-W4A16-AutoRound`（Swift-1.5 W4A16 原权重）；镜像 `vllm-sm75-gpustack:v0.1.7-beta2-v13-opt15-final-v1`（`7267ff1c3db0`，**与行 26 同一枚，镜像未换**）；后端版本 `0.1.7-sm75.1-final-v1-custom`；实例端口 **40000**；模型行参数 **25 项**（Swift 原配置，`--block-size=16`，未夹带任何吸收优化）。
+
+**尺子**：面板网页测速（服务器端 headless），三档 **8192 / 16384 / 32768**，output **1024**、并发 **1**、temp **1**、topP **0.95**、timeout 30000。**与 §10/§10a 的九档（512→131072）不是同一把尺，不得相减。**
+
+| Prompt | TTFT ms | Prefill tok/s | Decode tok/s |
+|---|---:|---:|---:|
+| 8192 | 2030.70 | 4039.33 | **66.61** |
+| 16384 | 4333.09 | 3783.84 | **66.48** |
+| 32768 | 9368.64 | 3498.81 | **66.94** |
+
+- decode 三档均值 **66.68**，与 Swift 线历史面板读数（66.6/66.3/66.2）一致；Swift 线试跑期对 final-v1 Intel 档（63.4）的**同版对照结论为 +5.5%**（两侧区间不重叠），不是本轮三档对 63.30 的算术差。
+- **三档各一次，未做多次中位**；单档差落在噪声带内不得当结论（§15.1 的重复性提示同样适用）。
+- **面板"平均预填充"汇总字段本轮未取**，故不写该字段。三格算术均值是 3773.99，但面板字段按「(Σ各格＋末格)÷(格数＋1)」算（见 `compat-matrix-v1.md` 第四节），两者有 0.1–0.2% 系统性偏移，**不得拿算术均值冒充面板字段**。
+- 现读运行时值（权重 9.71 GiB/卡、KV 池 339,110 tokens、block 被覆写成 784、显存可分配上限 15929 MiB/卡等）与四组参数判定见 [`../docs/tuning/swift15-prod-20261116.md`](../docs/tuning/swift15-prod-20261116.md)。
+- 行 26（Intel AutoRound，2026-10-27 的 63.30 档）replicas=0 待命，params/env 与吸收前备份逐字全等。
 
 ## 11 带面板的容器：与模型同一个镜像、同一个模型行
 
@@ -647,22 +705,37 @@ docker run -d --name sm75-panel --restart unless-stopped --runtime nvidia \
 
 读法：每条先写"它管什么"，再写"想改怎么改、代价是什么"。凡是本仓没有逐条读上游实现的（QSA 一族），按变量名与实测行为描述，不假装知道内部细节。
 
+> **本节是 0→1 基线块的逐条说明**（`args-paste-videooff-v1.txt` 24 行 ＋ `env-paste-v1.txt` 25 行）。两点先说清：①§12.1 逐条覆盖的是**两块的并集**（A 路线块含 `--limit-mm-per-prompt`、纯文本块含 `--language-model-only`，各自 24 行），标题的「24 条」指单块行数；②**现役生产档不是这一块**——生产档另改四处（§16），且现役行 48 为 **25 项**，差集含 `--override-generation-config`（0→1 块不含）。凡下文写「生产档」处，均指 2026-11-16 现读的行 48 运行时值。
+
 ### 12.1 后端参数（24 条）
 
 **`--dtype=float16`**
-权重与激活的数值类型。T10（Turing）没有 bfloat16，所以这一格只能是 float16；想换精度只能换量化档，不能改成 bf16。
+权重与激活的数值类型。T10（Turing）没有 bfloat16 硬件，所以这一格只能是 float16；想换精度只能换量化档，不能改成 bf16。**硬账**：BF16 在 SM75 上走 `magma_sgemmEx_kernel<float,__nv_bfloat16>` ＝FP32 模拟，只有 **5.32 TFLOPS**（比 FP32 软件可达的 9.21 还慢）。
 
 **`--hf-overrides={"dtype":"float16"}`**
 覆盖模型 `config.json` 里声明的 dtype。权重来自 AutoRound，config 里可能写的是 bfloat16，不改会被引擎按 bf16 加载而报错。**它和上一条必须同步改**。
 
 **`--tensor-parallel-size=8`**
-把模型按 8 卡切开。本机八卡是硬约束；改小要先算显存是否够，同时卡间 allreduce 的参与卡数也跟着变。
+把模型按 8 卡切开。本机八卡是硬约束；改小要先算显存是否够，同时卡间 allreduce 的参与卡数也跟着变。**硬账（2026-11-16 现读）**：权重常驻 **9.71 GiB/卡** × 8 ＝ 77.68 GiB；TP4 ⇒ **19.42 GiB/卡 > 16 GiB，装不下** ⇒ TP8 是唯一可行度（无 16 卡故 TP16 不存在）。这一格是被物理锁死的，不是调优候选。
 
 **`--enable-expert-parallel`**
-MoE 专家并行：专家权重按卡分片，而不是每卡一份。关掉它就要求每卡放得下全部专家，本机显存不够，所以这一档不能关。
+MoE 专家并行：专家权重按卡分片，而不是每卡一份。**它是必需项不是优化项**：把 MoE 改成 TP8（即关 EP）会**起服即崩**——`moe_wna16.py:285` 的 `assert group_size >= 32`，每卡 intermediate 640/8＝**80**，80 的 2 幂因子只到 16（128→64→32→16）触发断言。可行度只有 EP 任意／TP1(gs128)／TP2(gs64)／TP4(gs32)，**TP8/TP16 必败**（2026-11-16 A/B 实测）。
 
 **`--enable-ep-weight-filter`**
-EP 下只加载本卡要用的专家权重，是省显存的关键一格。关掉会把全量专家都加载进来，显存直接不够。
+EP 下按本卡专家过滤加载。**这一格在现役生产镜像里是空转的（2026-11-16 对行 48 容器现读，四步取证）**：
+
+1. flag 确在 live argv 里；
+2. 执行者确实跑了——日志 `default_loader.py:406`：`EP weight filter: ep_size=8, ep_rank=0, loading 64/512 experts`；
+3. 但**镜像内**判据是 `ep_weight_filter.py:79`：`if not weight_name.endswith((".weight", ".weight_packed")): return False`，白名单只认这两个后缀；
+4. 而实际张量名是 `.qweight` / `.qzeros` / `.scales`（现读 `*.index.json`，expert0 共 432 个＝48 层 × 3 proj × 3），**没有一个以 `.weight` 结尾**。
+
+⇒ **全部放行、一个没滤**，每个 rank 仍读全部 **512** 个专家的 INT4 权重；日志那句 `loading 64/512` 是**假绿**（自报不算验收的活样本）。调用点已核：`weight_utils.py:962/:979/:997` 三处 `should_skip_weight(name, local_expert_ids)`，`default_loader.py:291` 传参、`:351-412` 初始化（门＝`is_moe and enable_expert_parallel and enable_ep_weight_filter`，`enable_eplb` 时整体跳过）。
+
+**它影响的是加载读量（启动 I/O），不是显存**——过滤与否都不改变常驻显存。
+
+**仓内源码已修、镜像未烘入**：本仓 `vllm/model_executor/model_loader/ep_weight_filter.py:84-85` 的白名单已含 `.qweight`/`.qzeros`（提交 `c5b685f`；**`.scales` 保持不滤**——源码注释明写有些后端要全专家的 scale，如 FlashInfer NVFP4 算激活 scale 全局 max）。但现役生产镜像 `…opt15-final-v1` 构建于该修复之前，`compat1` 薄层又从父镜像取原样快照回填、**不夹带** ⇒ **修复要在生产生效必须重建镜像并切层**，属 GPU 窗口动作，解冻须用户明示。
+
+已验性质（Intel 模型上）：无损（64-token 指纹一致）、单 rank 读量 **164.62 → 115.02 GiB（−30.1%）**。**Swift 上未实测**；按读量比例折算加载 209.46 s → ~146.4 s（省 ~63 s）属**推算**，且纯过滤耗时从未单测。
 
 **`--language-model-only`**
 只加载语言塔，跳过视觉塔。省显存、少一段 warmup。**A 路线（开图）不含这一条**；纯文本才加。开图后要按多模态的实测驻留重算 `GPUSTACK_MODEL_VRAM_CLAIM`（见第 7 节）。
@@ -674,40 +747,40 @@ EP 下只加载本卡要用的专家权重，是省显存的关键一格。关�
 最大上下文长度（256K）。调小会减少 KV 预留；调大要同时涨 `--kv-cache-memory-bytes` 或显存，否则起不来。
 
 **`--max-num-seqs=4`**
-最大并发序列数。测速尺子是并发 1，不受它影响；调大能提吞吐，但每路都要 KV，显存与单流延迟都会变差。
+最大并发序列数。测速尺子是并发 1，不受它影响；调大能提吞吐，但每路都要 KV，显存与单流延迟都会变差。**4 恰在拐点（实测）**：n=4 时显存带宽打满 **103%**、SM 被动降频 **1050 MHz**，聚合 **2.93×（187.39 tok/s）**；再加并发只到 3.1–3.3×，却把每路上下文从 **84K 砍到 42K**。与「单流长上下文」目标一致，故取 4。
 
 **`--max-num-batched-tokens=4096`**
-单批最多多少个 token（预填充分块粒度）。调大能减少分块次数、提吞吐，但需要更多激活显存；调小更省显存、更慢。
+单批最多多少个 token（预填充分块粒度）。调大能减少分块次数、提吞吐，但需要更多激活显存；调小更省显存、更慢。**0→1 基线取 4096，生产档取 8192**（16384 会 CUDA OOM）。prefill 算术强度约 512 FLOP/B，高于机器平衡点 224 ⇒ 计算受限，大块确实提高 GEMM 效率（实测 prefill 4039/3784/3499 tok/s @8K/16K/32K）。**代价可以算出来**：一个 chunk ＝ 8192 ÷ 4039.33 ＝ **2.03 s**（交叉验证：32768 ÷ 3498.81 ＝ 9.368 s，与现读 TTFT 9368.64 ms 吻合）。本档**没有** `--long-prefill-token-threshold`，所以混合负载下一条长 prompt 的每个 chunk 会把同批 decode 流卡 2.03 s。**单流长上下文没有同批 decode 可卡 ⇒ 8192 合理**；多 agent 并发长上下文时这就是 ITL 尖峰源。真要改小须同包给 TTFT 代价（参照 4096 ＋ threshold 2048 的 32K TTFT 10.9 s 对本档 9.37 s，+16%）。属场景依赖，不是错。
 
 **`--gpu-memory-utilization=0.92`**
-显存使用比例。**注意：一旦同时给了 `--kv-cache-memory-bytes`，引擎会跳过按比例的 profiling**（日志里有明说），这一格实际不再主导分配。0.92 更多是给平台准入与调度看的习惯值。
+显存使用比例。**一旦同时给了 `--kv-cache-memory-bytes`，这一格就是死声明**：日志原文（`gpu_worker.py:559`）`Initial free memory 15.26 GiB, reserved 2.25 GiB memory for KV Cache as specified by kv_cache_memory_bytes config and skipped memory profiling. This does not respect the gpu_memory_utilization config.` ⇒ 固定预算完全接管，0.92 一点作用没有，只剩给平台准入与调度看的习惯值。**后果已现读证实**：Swift 权重降到 9.71 GiB/卡，KV 池却仍是 **339,110 tokens（与 Intel 行 26 逐字相同）**——省出的权重显存全变成空闲余量，**没进 KV**。两条路代价不同：①删掉 util＝零风险、纯免误导；②改不固定预算（只给 util、删 `kv-cache-memory-bytes`）＝启动时 profile 实际空闲、余量自动变 KV，容量↑利好并发与 MTP 草稿，**但激活峰值安全余量变薄、262K 预填易 OOM**，必须重压 util 安全点（不能拍 0.92 吃满）。
 
 **`--kv-cache-dtype=fp8_e4m3`**
 KV cache 用 FP8 存。省一半 KV 显存，前提是 QSA 的 FP8 路径可用；改成 `auto` 会让 KV 翻倍、大概率起不来。
 
 **`--kv-cache-memory-bytes=2415919104`**
-手工指定每卡 KV 的大小（2.25 GiB）。给了它，引擎就不再按 `--gpu-memory-utilization` 做 profiling。**换机或换档要按实测逐卡驻留重算**，别照抄。
+手工指定每卡 KV 的大小（2.25 GiB）。给了它，引擎就不再按 `--gpu-memory-utilization` 做 profiling。**换机或换档要按实测逐卡驻留重算**，别照抄。**2026-11-16 现读（行 48）**：KV 池 **339,110 tokens**、`Maximum concurrency for 262,144 tokens per request: 1.29x`、每 token **7,124 B/卡**（2,415,919,104 ÷ 339,110，FP8）。**算容量一律用可分配上限 15929 MiB/卡**（物理 16384 − 驱动 Reserved 455，ECC=Disabled），用 16384 会高估 455 MiB/卡、八卡共 3.55 GiB；详见 Swift 调优页 §4。
 
 **`--enable-prefix-caching`**
-前缀缓存。本机历史实测命中恒 0（prefix cache hits 一直是 0），开着不亏；如果确认你的场景也无重复前缀，关掉能省一点管理开销。
+前缀缓存。**命中取决于负载里有没有重复前缀**：历史窗口（2026-10-19 前后）本机实测命中恒 0，那是当时测速用随机前缀绕缓存的结果，不是机制无效；开着不亏。多人共享系统提示／长文档时，前缀复用是 **TTFT 的主要杠杆**（2026-11-16 审计 B 组）。参照：MTP ＋ Config B 的共享前缀探针曾见 prefix hits +17,040、TTFT 1696.7 → 277 ms。若确认你的场景无重复前缀，关掉能省一点管理开销。
 
 **`--engram-config={"cpu_offload":true}`**
-把 embedding 表放 CPU、用到再查。省显存，代价是每步多一次 CPU 查表。显存宽裕时可以关掉换一点速度（需重测）。
+把 embedding 表（PLE）放 CPU、用到再查。省显存，代价是每步多一次 CPU 查表。显存宽裕时可以关掉换一点速度（需重测）。**路径辨异（2026-11-16 现读）**：容器 `/dev/shm` 64G **只用 1.4M** ⇒ 本档走的是 **CPU 常驻张量**，**不是**某些参照实现那套「PLE 表进 shm 跨 rank 共享（`VLLM_PLE_MMAP_MODE=mem`）」。0.32 那次 disk→mem 拿到 +7.8%（47.4→51.2 tok/s）是**它自己 mmap 实现内部**的对照，按仪器纪律**不可外推到本档**；两条路 per-token 成本谁低无单变量实测。已知瓶颈定位：PLE 的瓶颈是 **CPU 侧解码**不是 GPU 带宽——历史上按 rank 重排把读量减半只快 **11%**。
 
 **`--gdn-prefill-backend=flashqla_sm75`**
-GDN 的预填充走我们编的 SM75 核（`flash_qla_sm75_gdn.so`）。这一格就是"为什么必须重编我们自己那枚 `.so`"的挂载点；改成 triton 会明显变慢。
+GDN 的预填充走我们编的 SM75 核（`flash_qla_sm75_gdn.so`）。这一格就是"为什么必须重编我们自己那枚 `.so`"的挂载点。**0→1 基线用 `flashqla_sm75`；生产档改用 `triton`**，以启用门控包 `gdn_tc`（张量核 GDN chunk 预填，`mma.sync m16n8k8`），预填 **+6.5/12.0/10.1%**（8K/32K/126K）——见 §16 推荐设置与 [`../docs/tuning/flash-next-20261027.md`](../docs/tuning/flash-next-20261027.md)。`gdn_tc` 生效前提就是这一格取 triton。
 
 **`--generation-config=vllm`**
-用 vLLM 自己的 generation config，而不是模型目录里那份。避免模型自带的采样默认值（temperature 等）盖掉请求里的设置。
+用 vLLM 自己的 generation config，而不是模型目录里那份。避免模型自带的采样默认值（temperature 等）盖掉请求里的设置。**已知副作用**：`--generation-config=vllm` 会**丢掉 top_p/top_k**。现役生产行 48 另带 `--override-generation-config` 把官方思考档逐字补回（`temperature 1.0 / top_p 0.95 / top_k 20 / min_p 0 / presence_penalty 0 / repetition_penalty 1.0`）；**0→1 的 24 行参数块不含 override**，照抄块的人须自行补这一行，否则采样与官方档不一致。这是「声明≠命中」的已修实例。
 
 **`--enable-prompt-tokens-details`**
 在响应 `usage` 里返回 prompt token 明细。验收与计量要用；对速度没有影响，不需要可以关。
 
 **`--compilation-config={"mode":0,"cudagraph_mode":"PIECEWISE","cudagraph_capture_sizes":[1,2,4,8,16]}`
-`mode:0`＝不做 torch.compile（Turing 上收益低、易炸）；cudagraph 用 PIECEWISE，只对 1/2/4/8/16 这几个批大小捕获。改 `mode` 或加捕获尺寸都要重测启动时间与稳定性。
+`mode:0`＝不做 torch.compile（Turing 上收益低、易炸；开 Inductor 会引入 SM75 不支持的 pass，如 `maybe_init_gemm_rs_ar` 需 bf16 ＋ capability family 100）；0→1 基线的 cudagraph 用 PIECEWISE，只对 1/2/4/8/16 捕获。**生产档用 `FULL_AND_PIECEWISE`**：2026-11-16 现读 FULL **3/3** ＋ PIECEWISE **5/5** 全部捕获、`splitting_ops=[]`（无算子被踢出图）、图占 **0.21 GiB**。kernel 占每步时间的 98%+、gap < 1.3 ms ⇒ launch/调度开销已被图吃掉。改 `mode` 或加捕获尺寸都要重测启动时间与稳定性。
 
 **`--block-size=16`**
-KV cache 的分页大小。16 与这套模型的注意力实现匹配；改成 32 会改变 KV 粒度与命中行为，需要重测。
+KV cache 的分页大小。**声明值不等于生效值**：混合模型强制 mamba 状态页字节 == attention KV 页字节（统一 block 记账），attention 页 ＝ block × 每 token 字节 P、mamba 页 ＝ 固定状态大小 M（与 block 无关）⇒ block 必须 ≈ M/P。2026-11-16 现读：给 16 被分配器**覆写成 784**（`interface.py:933`：`Setting attention block size to 784 tokens to ensure that attention page size is >= mamba page size`），mamba page padding **0.13%**（`:957`）。`mamba_cache_mode=align`（开 prefix caching 即 align）下 `mamba_block_size` 被强制等于 `block_size`，**独立的 `--mamba-block-size` 无效**。**推论**：容量 ≈ KV 预算 ÷ 每 token 字节 P，**与 block 基本无关**；block 只影响 padding 浪费与粒度。现态 padding 0.13% ⇒ 浪费已近零，改 block 拿不到速度（这一族只动容量）。历史对照：block880+mamba fp16 ⇒ padding **120.55%**、KV 338,994 ≈ 基线（省下的全被 padding 吃掉）；block400+mamba fp16 ⇒ padding 0.25%、KV 344,137（+1.48%）、decode 不变。
 
 **`--scheduler-cls=vllm.v1.core.sched.scheduler_sm75.SM75Scheduler`**
 用上游 VLLM-SM75 的自建调度器。换回默认调度器会丢掉 SM75 定制调度行为，不建议。
@@ -725,6 +798,8 @@ KV cache 的分页大小。16 与这套模型的注意力实现匹配；改成 3
 聊天模板文件。镜像里带的那份与这一档配套；换模型/换模板要一起换。
 
 ### 12.2 环境变量（39 条 ＝ 契约 25 ＋ 面板 5 ＋ 外部校验器 3 ＋ 编译缓存 6）
+
+> 这 39 条是 **0→1 基线块**。**生产档另需 `VLLM_FIREFLY_AR=0` 与 `VLLM_SM75_OPT=auto`**（见 §16），0→1 的 25 行 env 块不含这两条。`VLLM_FIREFLY_AR=0` 是基线配置变更不是门控包开关：32K prefill 11.82 → 10.46 s（+11.5%），decode 不受影响；8-bit 集合通信属精度红线，**永不默认启用**。
 
 **`NCCL_P2P_LEVEL=SYS`**
 NCCL 的 P2P 路径层级，本机无 NVLink，走 PCIe 交换（SYS 级）。改成别的层级会让 NCCL 绕开 P2P。
@@ -832,7 +907,7 @@ GPUStack 用这一格整条覆盖镜像 ENTRYPOINT（字符串，`shlex.split` �
 
 ## 13 复制区（手动档：照着粘即可）
 
-给不想跑脚本、只想照着粘的人。**每条参数为什么这么设、怎么调，见第 12 节**；多模态四种组合见第 7 节"多模态开关速查"。
+给不想跑脚本、只想照着粘的人。**本节是 0→1 基线块**（PIECEWISE／批 4096／flashqla／`--generation-config=vllm`）：生产档另按 §16 与 tuning 文档改四处，现役行 48 为 25 项、差集含 `--override-generation-config`。块内字节受 `lint-paste-v1.sh` 的 L11/L12/L13 逐字有序门保护，**改块须与脚本常量表两处一起改**。**每条参数为什么这么设、怎么调，见第 12 节**；多模态四种组合见第 7 节"多模态开关速查"。
 
 ### 13.1 后端参数（24 行，默认 A 路线；纯文本改用 `args-paste-v1.txt`）
 
@@ -1064,11 +1139,11 @@ VLLM_SM75_OPT=auto                 # 门控包：gemv_m1 + gdn_tc
 | 预填 32K TTFT | 8643 ms | 10021.7 ms | −13.7% |
 | 解码 8K/256out | 59.6–61.6 tok/s | ≈60 | 持平（gemv_m1 +1.4%） |
 
-**2026-10-27 结果**：批 8192 + triton + AR=0 的面板九档平均输出 **63.30**、平均预填 **3485.13**；8K/16K/32K/64K/128K TTFT 2013/4127/9200/19758/42595 ms，输出 63.52/63.15/63.00/62.48/61.50。对照 2026-10-26 行 4（62.28）：输出 +1.64%（噪声内）、预填 +10.29%、8K/32K/128K TTFT −11.35%/−13.73%/−14.00%。直测尺的 2019/8643 与 59.6–61.6 只作参数对照，不与面板 63.30 相减。
+**2026-10-27 结果（Intel AutoRound 历史基线，已被 2026-11-16 Swift 行 48 取代，见 §10b）**：批 8192 + triton + AR=0 的面板九档平均输出 **63.30**、平均预填 **3485.13**；8K/16K/32K/64K/128K TTFT 2013/4127/9200/19758/42595 ms，输出 63.52/63.15/63.00/62.48/61.50。对照 2026-10-26 行 4（62.28）：输出 +1.64%（噪声内）、预填 +10.29%、8K/32K/128K TTFT −11.35%/−13.73%/−14.00%。直测尺的 2019/8643 与 59.6–61.6 只作参数对照，不与面板 63.30 相减。
 
 **判负与边界**（详见 [`../docs/tuning/flash-next-20261027.md`](../docs/tuning/flash-next-20261027.md)）：
 批 16384 OOM；ar_overlap / ar_prefill / qsa_slice / GDN_TC_WU=0 均无收益或更慢；
-HC 已在带宽地板；NCCL 调参无效；NCCL fp8 仅 sm90+；262K + MTP 需再腾 ~1.2 GiB/全卡，暂封存。
+HC 内核已在带宽地板（**但八卡复制的布局问题另有空间，见 tuning 文档与 Swift 页**）；NCCL 调参无效；NCCL fp8 仅 sm90+；262K + MTP 需再腾 ~1.2 GiB/全卡。MTP 已于 2026-11-16 实测（MTP2 decode 85.33/80.35/79.91，均 81.86，接受率 45.1%、平均接受长度 1.90），但 262K 撞显存墙、实用上下文 ≤ ~195K，**用户裁定不做**。
 
 
 ## 17 离线 / 内网构建（2026-10-30 新增）
@@ -1128,7 +1203,7 @@ bash gpustack/preflight-sources-v1.sh --skip-group build_asset
   只开 API 时用 `gh api repos/<owner>/<repo>/tarball/<ref> > src.tar.gz` 取树（本仓 2026-10-30 实走此路）。
 - **基础镜像**：`docker/Dockerfile` 的 `BASE_IMAGE` 按 digest 钉死，内网需同步同一 digest 的镜像。
 - **Python 索引**：`PYTORCH_MIRROR` / `PIP_MIRROR` 已是国内源，内网需自建等价索引并 `--build-arg` 覆盖。
-- **GPUStack 平台镜像**：`quay.io/gpustack/gpustack:v2.3.0` 也要预先导入（`docker pull` 后 `docker save/load`）。
+- **GPUStack 平台镜像**：`quay.io/gpustack/gpustack:v2.3.1` 也要预先导入（`docker pull` 后 `docker save/load`）。
 
 ### 17.4 验收
 
@@ -1198,7 +1273,8 @@ docker build -f gpustack/Dockerfile.compat-v1-20261116 \
 
 - 10 个功能开关全部默认关（`VLLM_FIREFLY_DIRECT` 是 0.32 生态别名，跟随现有 `VLLM_FIREFLY`，与 final-v1 等价）；全关与 final-v1 的镜像级对拍：新增 18、修改 18、删除 0，其余 5104/5140 件逐字节相同；构建期 `verify_compat_switches.py` 全过，L1 8/8。
 - **GPU 实机 A/B 未跑**：compat1 只可停在「已构建」，不得注册到生产行；逐件开启前先过 [`docs/tuning/compat-turing032-20261116.md`](../docs/tuning/compat-turing032-20261116.md) §3 的 G1–G7 门。
-- 行 26 现役 final-v1 配置不变；`VLLM_FIREFLY_AR` 在本层收紧为默认关（行 26 本就显式 `=0`）。
+- 行 26 现役 final-v1 配置不变；`VLLM_FIREFLY_AR` 在本层收紧为默认关（行 26 本就显式 `=0`）。现役生产为行 48（Swift-1.5，同一枚 final-v1 镜像），亦未夹带任何吸收优化。
+- **0.32 整栈对照（2026-11-16 面板正式验收）**：全配非 MTP 三档 decode 59.71/59.62/59.25、平均输出 **59.47**（P50 59.51、平均预填 3248.05）。对本栈 2026-10-27 Intel 档 63.30 为 **−6.05%**、对 2026-11-16 Swift 档 66.68 为 **−10.81%**（本轮算术复核；审计报告原文记「净负 4–10%」、上机状态档面板口径记「6–10%」，三者并列不择一）⇒ **整栈不迁，只吸收兼容件（默认关）**。
 
 **容量档（纯配置，可单独用）**：
 
@@ -1209,4 +1285,6 @@ docker build -f gpustack/Dockerfile.compat-v1-20261116 \
 
 实测 padding 0.25%、KV tokens 344,137（+1.48%）、decode 不变；日志应出现 `Padding mamba page size by 0.25%`。**不要用 block 880**（padding 120.55%，无增益）。机制与读数见 tuning 文档 §4。
 
-**MTP**：暂不吸收。MTP2 decode ≈×1.27–1.35，但 262K 与 MTP 显存互斥（实用 ≤ ~195K）；Config B（`--prefix-match-unit 80` ＋ `enable_mamba_fine_grained_prefix_cache`）无 MTP 时为 no-op。材料未随包发布。
+**这一族只动容量不动速度**（Intel 上实测 decode 63.25–63.47，与基线同档）。**在 Swift 行 48 上不值得优先排窗口**：现读 `--block-size=16` 被分配器覆写成 **784**、mamba padding 已 **0.13%**（近零浪费），那 +1.48% 是在**有浪费的基线**上拿到的；且容量 ≈ KV 预算 ÷ 每 token 字节，与 block 基本无关。
+
+**MTP**：**用户裁定不做**（2026-11-16）。MTP2 面板同尺 decode 85.33/80.35/79.91（均 81.86，≈×1.27–1.35），接受率 45.1%、平均接受长度 1.90，FULL 图 3/3 未被压到 NONE；但 262K 与 MTP 显存互斥：KV 2.25 GiB 时 250K 预填 OOM（差 158 MiB），KV 1.5 GiB 时启动容量门拒（需 1.92 GiB，估最大 195,200 tokens）⇒ **实用上下文 ≤ ~195K**。Config B（`--prefix-match-unit 80` ＋ `enable_mamba_fine_grained_prefix_cache`）无 MTP 时为 no-op，额外收益未获行为证据。材料未随包发布；草稿件已退役删除（可重下），0.32 base 镜像与源码树按用户裁定保留。实测对象为行 26（Intel AutoRound）参数+block400/ConfigB（实验行 53），比值对 Intel 无 MTP 基线 ~63.3（63.30 九档均值）；Swift 权重+MTP2 未实测，同读数对 Swift 66.68 折算约 ×1.19–1.28（均值 ≈1.23），非 Swift 实测收益。
