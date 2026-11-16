@@ -108,7 +108,7 @@ d7916c9951d169f8185d2ec25edde035c9c9602c00abae35a114027dbdc2e6fe  docs/releases/
 461bab09828c58f31deba07be54f0e62063e676bb98514d494c264987824df8a  docs/releases/v0.1.7-beta-release-manifest.json
 f455032392908e283350dc44a13095b6ed0a6757ce867d824374b2c0248603b4  docs/releases/v0.1.7-beta.md
 ef0cd3fa6613567027719889f66ba54bf14b6e45877439b21c70942217f4d112  docs/releases/v0.1.7-beta2-compat1-release-manifest.json
-4a98e2d0bcc0e018fd315cf19e200e3df6e3f10cc15bc1fc35e9b94800613d0a  docs/releases/v0.1.7-beta2-compat1.md
+35cbd8b68ad8ddc707bdb37590f9c22f594e456de8d51d7ce16a7094ea6edd65  docs/releases/v0.1.7-beta2-compat1.md
 eff254e3d8a38863d0dce7c418c7834fcc45636202b1c1bd293b704d54ede380  docs/releases/v0.1.7-beta2-release-manifest.json
 88ed8d406f4977e1813f9dd3d8df9cc8bd1cc958dccbc4cd47083017c78a33bf  docs/releases/v0.1.7-beta2.md
 a72e04ae1a286db242d533b114e4cca41a3afbaedffffab235cad1077c7bfb5f  docs/request-timing.md
