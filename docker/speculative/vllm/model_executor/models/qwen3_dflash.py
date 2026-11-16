@@ -209,6 +209,7 @@ class DFlashQwen3Attention(nn.Module):
         quant_config: QuantizationConfig | None = None,
         prefix: str = "",
         attn_type: str = AttentionType.DECODER,
+        v_scale: float | None = None,
     ) -> None:
         super().__init__()
         self.layer_name = prefix
@@ -227,6 +228,8 @@ class DFlashQwen3Attention(nn.Module):
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5
+        # 0.32 兼容: checkpoint 可声明 attention_value_scale (draft 训练侧缩放)。
+        self.v_scale = v_scale
 
         self.qkv_proj = QKVParallelLinear(
             hidden_size,
@@ -298,6 +301,9 @@ class DFlashQwen3Attention(nn.Module):
 
         q, k = self.rotary_emb(positions, q, k)
 
+        if self.v_scale is not None:
+            v = v * self.v_scale
+
         attn_output = self.attn(q, k, v)
         output_input_scale = getattr(self, "output_input_scale", 1.0)
         if output_input_scale != 1.0:
@@ -358,6 +364,7 @@ class DFlashQwen3DecoderLayer(nn.Module):
             rope_parameters=config.rope_parameters,
             prefix=f"{prefix}.self_attn",
             attn_type=attn_type,
+            v_scale=dflash_config.get("attention_value_scale"),
         )
         self.mlp = Qwen3MLP(
             hidden_size=self.hidden_size,

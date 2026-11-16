@@ -13,7 +13,7 @@ world_size 为 >=4 的 2 的幂 (TP4/8/...) 走 butterfly (SHM/P2P, 无 P2P 如 
 走 SHM, 单一 shm_base host-mapped 区 + D2H/H2D memcpy)。
 
 env:
-  VLLM_FIREFLY_AR (auto/0/fp8, auto 跟随 VLLM_FIREFLY)
+  VLLM_FIREFLY_AR (开关, 默认关; 1 单独开, 与 firefly 权重路径无关)
   VLLM_FIREFLY_AR_MIN_SIZE (小消息回退 NCCL; decode 小消息的 amax+flag 固定
     开销可能超过砍半省下的传输, 见 MIN_SIZE 注释)
 """
@@ -24,6 +24,12 @@ env:
 # 一次走完不分块; 更大 (如更长 prompt / 更大 hidden) 自动分块, 数值等价 (fp8
 # 是按 chunk 独立 amax/scale, 逐块求和与整体一致 —— allreduce 无跨块耦合)。
 _CHUNK_BYTES = 128 * 1024 * 1024
+
+# SHM 分块流水线 (VLLM_FIREFLY_AR_PIPE, 默认关) 参数。全双工 PCIe 链 (二号机
+# GPU0<->host) 上把大消息的 D2H/H2D 按 PIPE_CHUNK 字节分块跨 2 stream overlap,
+# 通信项 ~2x; 半双工 (T10/一号机) 上分块串行化 ≈ 无回退。仅 2-GPU SHM 生效。
+_PIPE_CHUNK = 4 * 1024 * 1024  # 每块 fp8 字节 (= fp16 元素数), 4MB
+_PIPE_MAX_CHUNKS = 16  # 16 * 4MB = 64MB = data_half (单块 cap), 覆盖最大 AR
 
 import ctypes
 import logging
@@ -44,16 +50,21 @@ _LIB.cudaHostUnregister.restype = ctypes.c_int
 
 
 def firefly_ar_active() -> bool:
-    """fp8 allreduce 是否启用: VLLM_FIREFLY_AR (auto 跟随 VLLM_FIREFLY)。
+    """fp8 allreduce 是否启用: VLLM_FIREFLY_AR 纯开关 (默认关, 1=开)。
 
-    fp8=强制开; 0=强制关; auto(默认)= 跟随 VLLM_FIREFLY (firefly 开→AR 开)。
+    与 firefly 权重路径 (VLLM_FIREFLY_DIRECT) 无关 —— 通信独立, 对任意 TP 都
+    赚。旧取值 'auto'/'fp8' 已被 envs_sm75 归一化器处理 ('auto' 原跟随总开关,
+    总开关已删)。
+
+    用户显式开 FlashInfer PCIe-IPC AR (VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC,
+    v0.30 底座才有, 默认 0 opt-in) 时让路: 二者都是抢 TP 组的小消息 AR, 不该并
+    存。FlashInfer 那条走 CUDA-IPC 显存句柄 (依赖 peer 映射), 在老 CC 卡会撞 205
+    自动 disabled; 用户既然显式开它, firefly 的默认开就此让位, 免得两个都 enabled
+    再靠 all_reduce 排序仲裁。getattr 兜底: 老底座 envs 无此项, 缺省视为未开。
     """
-    v = envs.VLLM_FIREFLY_AR
-    if v == "fp8":
-        return True
-    if v == "0":
+    if getattr(envs, "VLLM_ALLREDUCE_USE_FLASHINFER_PCIE_IPC", False):
         return False
-    return envs.VLLM_FIREFLY == "1"  # auto
+    return bool(envs.VLLM_FIREFLY_AR)
 
 
 def firefly_ar_world_ok(world_size: int) -> bool:
@@ -166,16 +177,36 @@ class FireflyAllReduce:
             if self._backend == "p2p" and not self._init_p2p_butterfly():
                 self._backend = "shm"
             if self._backend == "shm":
-                total = world_size * self._data_half + 28 * world_size
+                # total = N*D data slots + 28N metadata + per-chunk flag 区
+                # (2 数组 x N x _PIPE_MAX_CHUNKS x 8B, 紧跟 metadata, .cu 按
+                # 同式偏移)。flag 区无条件多分 (pipe 关也是固定布局, 与串行
+                # 版逐 bit 一致; 约 1KB, 无感)。
+                total = world_size * self._data_half + 28 * world_size \
+                    + 2 * world_size * _PIPE_MAX_CHUNKS * 8
                 if not self._init_shm_n(total, shm_name):
                     return
+                # N 卡 SHM 分块全双工流水线 (VLLM_FIREFLY_AR_PIPE 开): 持久
+                # stream/event 与 2 卡共用一套 (init 幂等, capture 外建)。
+                if envs.VLLM_FIREFLY_AR_PIPE:
+                    self._mod.firefly_ar_init_pipe()
         else:  # world_size == 2: P2P 优先 (无 host bounce), 无 P2P 回 SHM
-            total = 2 * self._data_half + 56
+            # SHM 分块流水线 (VLLM_FIREFLY_AR_PIPE 开) 需要 per-chunk flag 区
+            # (data_flag + barrier_flag, 各 [rank][chunk] = 4 个数组 x
+            #  _PIPE_MAX_CHUNKS x 8B), 紧跟 56B 元数据 (flag_off = 2D+56)。P2P
+            #  路径忽略这段 (IPC buffer 多出的字节是死区, 无害)。
+            pipe_extra = (
+                4 * _PIPE_MAX_CHUNKS * 8 if envs.VLLM_FIREFLY_AR_PIPE else 0
+            )
+            total = 2 * self._data_half + 56 + pipe_extra
             self._backend = self._select_backend(rank_in_group)
             if self._backend == "p2p" and not self._init_p2p(total):
                 self._backend = "shm"
             if self._backend == "shm" and not self._init_shm(total, shm_name):
                 return
+            # 分块流水线 (SHM 2 卡): 建 2 持久 stream + 4 event (capture 外建,
+            #   每次 allreduce 复用)。仅 pipe 开时建; 幂等 (init 内部判空)。
+            if envs.VLLM_FIREFLY_AR_PIPE:
+                self._mod.firefly_ar_init_pipe()
 
         # GPU state (16B): [+0]amax(f32) [+4]scale(f32) [+8]seq(u64); seq 初始 1
         #   (首次 flag 用 1, flag 初始 0)。by-pointer, cudagraph replay 读当前值。
@@ -322,11 +353,13 @@ class FireflyAllReduce:
                     shm_name,
                 )
                 return False
-            # 清零 metadata 区 (tmpfs 新建段本已全 0, 显式清幂等稳妥; 只清
-            #   末 28N 字节 metadata 即可, data 区无所谓——但 tmpfs 新建段
-            #   全 0, 此处全清也可; 其余 rank attach 重试已保证在 rank0 建完后)
-            n_meta = 28 * self.world_size
-            meta_off = total - n_meta
+            # 清零 metadata 区 (tmpfs 新建段本已全 0, 显式清幂等稳妥): 布局
+            #   [N*D data, N*D..N*D+28N metadata, 之后 per-chunk flag 区],
+            #   须清 N*D 之后的全部 (metadata + flag 区, 约 1KB), 非仅 28N;
+            #   垃圾 flag 值可能等于当前 seq 假满足。其余 rank attach 重试
+            #   已保证在 rank0 建完清零后。
+            meta_off = self.world_size * self._data_half
+            n_meta = total - meta_off
             self._shm.buf[meta_off:total] = b"\x00" * n_meta
         else:
             self._shm = None
@@ -451,7 +484,27 @@ class FireflyAllReduce:
                     inp, self._work, out, self._scratch, self._ptrs,
                     self._bases_dev.data_ptr(), self._data_half, self.rank, n,
                 )
-            else:  # shm: data/flag 全 host-mapped shm, D2H/H2D memcpy
+            elif (
+                envs.VLLM_FIREFLY_AR_PIPE
+                and n > _PIPE_CHUNK
+            ):
+                # N 卡 (4/8) SHM 分块全双工流水线: 每轮 D2H/H2D 按 _PIPE_CHUNK
+                # 分块跨 A/B stream overlap (数值与串行版逐 bit 一致)。小消息
+                # (<=_PIPE_CHUNK 单块, 分块无 overlap 收益) 走串行。
+                if not getattr(self, "_pipe_n_logged", False):
+                    logger.info(
+                        "firefly_ar_butterfly_shm_pipe active (n=%d "
+                        "chunk=%d K=%d world=%d rank=%d)",
+                        n, _PIPE_CHUNK, (n + _PIPE_CHUNK - 1) // _PIPE_CHUNK,
+                        self.world_size, self.rank,
+                    )
+                    self._pipe_n_logged = True
+                self._mod.firefly_ar_butterfly_shm_pipe(
+                    inp, self._work, self._xq, self._xq_peer, out,
+                    self._scratch, self._base, self._data_half, self.rank,
+                    self.world_size, n, _PIPE_CHUNK, _PIPE_MAX_CHUNKS,
+                )
+            else:  # shm 串行: data/flag 全 host-mapped shm, D2H/H2D memcpy
                 self._mod.firefly_ar_butterfly_shm(
                     inp, self._work, self._xq, self._xq_peer, out,
                     self._scratch, self._base, self._data_half, self.rank,
@@ -463,10 +516,33 @@ class FireflyAllReduce:
                 self._data_half, self.rank, n,
             )
         else:
-            self._mod.firefly_ar_exchange(
-                inp, self._xq, self._xq_peer, out, self._scratch, self._base,
-                self._data_half, self.rank, n,
-            )
+            # SHM 分块流水线 (VLLM_FIREFLY_AR_PIPE 开): 大消息按 PIPE_CHUNK 分块
+            # 跨 2 stream 全双工 overlap, 数值与串行 firefly_ar_exchange 逐 bit
+            # 一致。小消息 (单块, 分块无 overlap 收益) 仍走串行。仅 2-GPU SHM。
+            if (
+                envs.VLLM_FIREFLY_AR_PIPE
+                and n > _PIPE_CHUNK
+            ):
+                # 一次性 INFO: 确认真实 engine 走的是分块流水线 (非静默串行),
+                #   K = 分块数。capture 期 (cudagraph warmup) 也会打, 属正常。
+                if not getattr(self, "_pipe_ar_logged", False):
+                    logger.info(
+                        "firefly_ar_exchange_pipe active (n=%d chunk=%d "
+                        "K=%d) rank=%d",
+                        n, _PIPE_CHUNK,
+                        (n + _PIPE_CHUNK - 1) // _PIPE_CHUNK, self.rank,
+                    )
+                    self._pipe_ar_logged = True
+                self._mod.firefly_ar_exchange_pipe(
+                    inp, self._xq, self._xq_peer, out, self._scratch,
+                    self._base, self._data_half, self.rank, n,
+                    _PIPE_CHUNK, _PIPE_MAX_CHUNKS,
+                )
+            else:
+                self._mod.firefly_ar_exchange(
+                    inp, self._xq, self._xq_peer, out, self._scratch,
+                    self._base, self._data_half, self.rank, n,
+                )
 
     def all_reduce(self, inp: torch.Tensor) -> torch.Tensor:
         # 消息超过 chunk 容量时按块循环 (allreduce 无跨块耦合: 每块独立
@@ -522,4 +598,9 @@ class FireflyAllReduce:
                     self._shm.unlink()
                 except Exception:  # noqa: BLE001
                     pass
+            # 释放分块流水线 stream/event (init 时建; 未建则 destroy 内部判空跳过)
+            try:
+                self._mod.firefly_ar_destroy_pipe()
+            except Exception:  # noqa: BLE001
+                pass
         self.disabled = True
